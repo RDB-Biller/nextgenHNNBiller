@@ -1,0 +1,67 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Insurance Claim Authorisation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap" style="max-width:560px">
+  <div class="top"><div class="brandmark">Claim<span class="dot">.</span></div><span class="muted" id="insname"></span></div>
+  <div class="card" id="root"><p class="muted">Loading claim…</p></div>
+  <p class="muted" style="font-size:12px;margin-top:14px">This secure link is intended for the payer named on the policy.
+  Authorising moves funds from your Stanbic account directly to the provider. In production this step requires payer authentication (OTP / mandate).</p>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const token=new URLSearchParams(location.search).get('token');
+const root=document.getElementById('root');
+const toast=(m)=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=(n)=>Number(n).toFixed(2);
+
+async function load(){
+  if(!token) return root.innerHTML='<p class="bad">Missing claim token.</p>';
+  const r=await fetch(`/claim/api/${encodeURIComponent(token)}`);
+  if(!r.ok) return root.innerHTML='<p style="color:var(--bad)">Claim not found or expired.</p>';
+  render(await r.json());
+}
+function render(c){
+  document.getElementById('insname').textContent=c.payer||'';
+  const items=(c.lineItems||[]).map(i=>`<div class="line"><span>${esc(i.name)}</span><span class="num">GHS ${num(i.cost)}</span></div>`).join('');
+  if(c.status==='settled'){
+    root.innerHTML=`<p class="eyebrow">Transfer complete</p>
+      <div class="bignum">GHS ${num(c.amount)}</div>
+      <p class="muted">Paid to ${esc(c.provider)}${c.beneficiaryName?' ('+esc(c.beneficiaryName)+')':''}.</p>
+      <p>Reference: <strong>${esc(c.transferReference||'—')}</strong></p>
+      <span class="pill settled">Settled</span>`;
+    return;
+  }
+  if(c.status==='rejected'){ root.innerHTML='<span class="pill rejected">Rejected</span><p class="muted">This claim was declined.</p>'; return; }
+  root.innerHTML=`
+    <p class="eyebrow">Claim for authorisation</p>
+    <div class="bignum">GHS ${num(c.amount)}</div>
+    <p class="muted" style="margin-top:4px">Payable to ${esc(c.provider)} on behalf of the patient</p>
+    <div style="margin:16px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+      <div class="line"><span class="muted">Patient</span><span>${esc(c.patientName||'—')}</span></div>
+      <div class="line"><span class="muted">Member ID</span><span>${esc(c.memberId||'—')}</span></div>
+      ${c.employer?`<div class="line"><span class="muted">Sponsor</span><span>${esc(c.employer)}</span></div>`:''}
+    </div>
+    <div class="ledger" style="margin-bottom:16px">${items||'<p class="muted">No line detail.</p>'}</div>
+    <div class="row">
+      <button class="accent" id="auth" onclick="authorize()">Authorise transfer from ${esc(c.payer)}</button>
+      <button class="ghost" onclick="reject()">Decline</button>
+    </div>`;
+}
+async function authorize(){
+  const b=document.getElementById('auth'); b.disabled=true; b.textContent='Transferring…';
+  const r=await fetch(`/claim/api/${encodeURIComponent(token)}/authorize`,{method:'POST'});
+  if(!r.ok){toast('Transfer failed');b.disabled=false;b.textContent='Retry';return;}
+  render(await r.json()); toast('Transfer authorised');
+}
+async function reject(){
+  const reason=prompt('Reason for declining (optional):')||'';
+  const r=await fetch(`/claim/api/${encodeURIComponent(token)}/reject`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})});
+  if(r.ok){ render(await r.json()); toast('Claim declined'); }
+}
+load();
+</script>
+</body></html>

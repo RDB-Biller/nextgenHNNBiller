@@ -1,0 +1,186 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — Billing & Settlement Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --ink:#0C1A14; --forest:#0E2B22; --paper:#F5F3EC; --card:#FBFAF5;
+  --green:#167A5F; --green-soft:#D7E8E0; --coral:#E8612C; --gold:#C9A227;
+  --line:#DAD6C8; --muted:#5C6A62; --rail:#3A6F5E;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:Inter,system-ui,sans-serif;background:#E7E4DA;color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
+.sheet{max-width:860px;margin:24px auto;background:var(--paper);box-shadow:0 24px 70px -30px rgba(12,26,20,.5)}
+.mono{font-family:'Spline Sans Mono',ui-monospace,monospace}
+.eyebrow{font-family:'Spline Sans Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--green)}
+
+/* hero */
+.hero{background:var(--forest);color:#EFEee6;padding:42px 48px 36px;position:relative;overflow:hidden}
+.hero .eyebrow{color:#9FD8C5}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:30px}
+.logo .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--green),var(--gold));display:inline-block}
+.logo b{font-family:Fraunces,serif;font-weight:600;font-size:18px;letter-spacing:-.01em}
+h1{font-family:Fraunces,serif;font-weight:500;font-size:clamp(30px,5.4vw,46px);line-height:1.04;letter-spacing:-.015em;margin:14px 0 0;max-width:16ch}
+h1 .accent{color:var(--coral)}
+.lede{margin:18px 0 0;max-width:54ch;color:#CBD8D0;font-size:16px}
+
+/* rails signature */
+.rails{margin:30px 0 4px}
+.rails svg{width:100%;height:auto;display:block}
+.held{font-family:'Spline Sans Mono',monospace;font-size:11px;letter-spacing:.06em}
+
+/* body sections */
+.body{padding:38px 48px 30px}
+.kicker{font-family:Fraunces,serif;font-weight:600;font-size:21px;letter-spacing:-.01em;margin:0 0 6px}
+.section+ .section{margin-top:34px}
+.lead{color:var(--muted);max-width:60ch;margin:0 0 18px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:680px){.two,.three{grid-template-columns:1fr}}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px}
+.tile h3{font-size:15px;margin:0 0 6px;display:flex;align-items:center;gap:8px}
+.tile p{margin:0;font-size:13.5px;color:var(--muted)}
+.tag{font-family:'Spline Sans Mono',monospace;font-size:10.5px;letter-spacing:.04em;color:var(--green);background:var(--green-soft);padding:2px 8px;border-radius:999px}
+.num{font-family:Fraunces,serif;font-size:15px;color:var(--coral);font-weight:600}
+.usp{background:var(--ink);color:#EFEEE6;border-radius:16px;padding:24px 24px;margin-top:18px;display:grid;grid-template-columns:1.4fr 1fr;gap:20px;align-items:center}
+@media(max-width:680px){.usp{grid-template-columns:1fr}}
+.usp h3{font-family:Fraunces,serif;font-weight:500;font-size:22px;margin:0 0 8px;line-height:1.1}
+.usp p{margin:0;color:#C3D2CA;font-size:14px}
+.flowmini{font-family:'Spline Sans Mono',monospace;font-size:12px;color:#9FD8C5;line-height:1.9}
+.flowmini b{color:#EFEEE6}
+.connect{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:680px){.connect{grid-template-columns:1fr}}
+.connect .tile .api{font-family:'Spline Sans Mono',monospace;font-size:11px;color:var(--ink);background:#EFEDE2;border:1px solid var(--line);border-radius:6px;padding:3px 7px;display:inline-block;margin-top:8px}
+.trust{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.trust span{font-size:12.5px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 13px}
+.trust span b{color:var(--green)}
+.foot{background:var(--forest);color:#CBD8D0;padding:22px 48px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px}
+.foot b{color:#EFEEE6;font-family:Fraunces,serif;font-weight:600}
+.foot .cta{font-family:'Spline Sans Mono',monospace;font-size:12px;color:var(--forest);background:var(--gold);padding:9px 16px;border-radius:8px;letter-spacing:.04em}
+@media print{body{background:#fff}.sheet{box-shadow:none;margin:0;max-width:none}@page{margin:12mm}}
+.flowdot{animation:flow 3.2s linear infinite}
+.flowdot.d2{animation-delay:1.1s}.flowdot.d3{animation-delay:2.1s}
+@keyframes flow{0%{offset-distance:0%}100%{offset-distance:100%}}
+@media(prefers-reduced-motion:reduce){.flowdot{animation:none}}
+</style></head>
+<body>
+<div class="sheet">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="logo"><span class="mark"></span><b>HNN Biller</b></div>
+    <div class="eyebrow">Billing &amp; settlement · clinics · insurers · employers</div>
+    <h1>The platform never custodies funds — it <span class="accent">orchestrates, routes, and reconciles.</span></h1>
+    <p class="lede">Bill at the point of care. Settle straight to the clinic — paid by the patient, or by their insurer or employer, bank-to-bank over Stanbic rails. Money never stops with us.</p>
+
+    <div class="rails">
+      <svg viewBox="0 0 764 250" role="img" aria-label="Money flows from patient and payer directly to the clinic, passing over the platform which holds nothing.">
+        <defs>
+          <path id="railA" d="M150 70 H400 Q470 70 470 125 H614"/>
+          <path id="railB" d="M150 195 H400 Q470 195 470 125 H614"/>
+          <linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#167A5F"/><stop offset="1" stop-color="#C9A227"/></linearGradient>
+        </defs>
+        <!-- rails -->
+        <use href="#railA" fill="none" stroke="#2C5648" stroke-width="2.5"/>
+        <use href="#railB" fill="none" stroke="#2C5648" stroke-width="2.5"/>
+        <!-- platform spine (rails pass OVER it) -->
+        <rect x="452" y="36" width="36" height="178" rx="10" fill="#0A211A" stroke="#3A6F5E" stroke-width="1.5"/>
+        <text x="470" y="30" text-anchor="middle" fill="#9FD8C5" class="held" font-size="10">PLATFORM</text>
+        <text x="470" y="232" text-anchor="middle" fill="#C9A227" class="held" font-size="10">HOLDS GHS 0</text>
+        <!-- source nodes -->
+        <g>
+          <rect x="36" y="44" width="120" height="52" rx="12" fill="#13352A" stroke="#3A6F5E"/>
+          <text x="96" y="68" text-anchor="middle" fill="#EFEEE6" font-family="Fraunces,serif" font-size="15">Patient</text>
+          <text x="96" y="85" text-anchor="middle" fill="#9FD8C5" class="held" font-size="9">MoMo · card · cash</text>
+        </g>
+        <g>
+          <rect x="36" y="169" width="120" height="52" rx="12" fill="#13352A" stroke="#3A6F5E"/>
+          <text x="96" y="193" text-anchor="middle" fill="#EFEEE6" font-family="Fraunces,serif" font-size="15">Payer</text>
+          <text x="96" y="210" text-anchor="middle" fill="#9FD8C5" class="held" font-size="9">insurer · employer</text>
+        </g>
+        <!-- destination -->
+        <g>
+          <rect x="610" y="99" width="120" height="52" rx="12" fill="#167A5F" stroke="#9FD8C5"/>
+          <text x="670" y="123" text-anchor="middle" fill="#fff" font-family="Fraunces,serif" font-size="15">Clinic</text>
+          <text x="670" y="140" text-anchor="middle" fill="#D7E8E0" class="held" font-size="9">funds land here</text>
+        </g>
+        <!-- flowing money dots -->
+        <circle r="4.5" fill="url(#g)" class="flowdot"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#railA"/></animateMotion></circle>
+        <circle r="4.5" fill="url(#g)" class="flowdot d2"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#railB"/></animateMotion></circle>
+        <circle r="4.5" fill="url(#g)" class="flowdot d3"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#railA"/></animateMotion></circle>
+      </svg>
+    </div>
+  </header>
+
+  <main class="body">
+    <!-- TWO WAYS -->
+    <section class="section">
+      <p class="kicker">Two ways to settle a bill</p>
+      <p class="lead">However a patient is covered, the money goes directly to the clinic's account. The platform routes and records it — it is never in the flow of funds.</p>
+      <div class="two">
+        <div class="tile"><h3><span class="num">01</span> Patient self-pay</h3>
+          <p>Mobile Money, debit or credit card, or cash — captured against the itemised bill and reconciled instantly.</p></div>
+        <div class="tile"><h3><span class="num">02</span> Payer A2A <span class="tag">unique</span></h3>
+          <p>The patient names their payer; the clinic taps it. The payer authorises a transfer from its own Stanbic account straight to the clinic.</p></div>
+      </div>
+    </section>
+
+    <!-- USP -->
+    <section class="section">
+      <div class="usp">
+        <div>
+          <h3>Tap the insurer. The money moves itself.</h3>
+          <p>The bill, with the patient's member ID, is routed to the named payer for validation. A secure link (or their own system) lets them authorise an account-to-account transfer over the Stanbic SBG rail — and the clinic, patient, payer, and any sponsoring employer are all notified the moment it clears.</p>
+        </div>
+        <div class="flowmini">
+          bill + member&nbsp;ID<br>
+          &nbsp;&nbsp;↓ route<br>
+          <b>payer validates</b><br>
+          &nbsp;&nbsp;↓ authorise<br>
+          <b>A2A → clinic</b><br>
+          &nbsp;&nbsp;↓<br>
+          everyone notified
+        </div>
+      </div>
+    </section>
+
+    <!-- WHO IS A PAYER -->
+    <section class="section">
+      <p class="kicker">A payer is whoever covers the bill</p>
+      <div class="two">
+        <div class="tile"><h3>Insurers</h3><p>Acacia, GMTF (Mahama Cares), international and corporate schemes settle the covered share from their Stanbic account, per member.</p></div>
+        <div class="tile"><h3>Employers</h3><p>SMEs that can't buy a scheme but pay their staff's bills directly — the same rail, the same one-tap authorisation.</p></div>
+      </div>
+    </section>
+
+    <!-- CONNECT YOUR WAY -->
+    <section class="section">
+      <p class="kicker">Connect your way</p>
+      <p class="lead">Bigger institutions plug their own systems in by API. Smaller ones use the hosted screens. Same backend, same actions.</p>
+      <div class="connect">
+        <div class="tile"><h3>Clinics</h3><p>Bill from your EHR/EMR, or use the hosted billing terminal and dashboard.</p><span class="api">x-api-key</span></div>
+        <div class="tile"><h3>Payers</h3><p>Authorise from your insurance-RX or HR system, the payer console, or a secure link.</p><span class="api">x-payer-key</span></div>
+        <div class="tile"><h3>Patients</h3><p>Pay their share from a simple checkout link sent by the clinic.</p><span class="api">/pay</span></div>
+      </div>
+    </section>
+
+    <!-- TRUST -->
+    <section class="section">
+      <p class="kicker">Safe by construction</p>
+      <div class="trust">
+        <span><b>No fund custody</b> — money moves account-to-account</span>
+        <span><b>Account validated</b> before every transfer</span>
+        <span><b>No patient data</b> over email or WhatsApp</span>
+        <span><b>Full audit</b> &amp; daily reconciliation</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div>Built on the <b>Stanbic SBG Transfer</b> rail · Accra, Ghana</div>
+    <div class="cta">Book a walkthrough →</div>
+  </footer>
+</div>
+</body></html>

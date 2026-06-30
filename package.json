@@ -1,0 +1,19 @@
+{
+  "name": "composite-billing-api",
+  "version": "0.1.0",
+  "description": "Composite billing + payment orchestration API connecting EMR/EHR systems to hospital billing and Stanbic (SBG) disbursement rails.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.11.5"
+  }
+}

@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Payer Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap">
+  <div class="top"><div><div class="brandmark">Payer<span class="dot">.</span> Console</div><p class="muted" id="who" style="margin:4px 0 0"></p></div>
+  <nav class="nav"><a href="#" onclick="load();return false">Refresh</a></nav></div>
+  <p class="muted" style="margin:0 0 12px;font-size:13px">For payers without their own system. Insurers and employers with an RX/HR system use the <strong>Payer API</strong> (<code>x-payer-key</code>) instead — same actions.</p>
+  <div class="field" style="max-width:340px"><label>Payer key</label>
+    <select id="key" onchange="load()">
+      <optgroup label="Insurers">
+        <option value="payer_acacia_key">Acacia Health Insurance</option>
+        <option value="payer_gmtf_key">GMTF (Mahama Cares)</option>
+        <option value="payer_intl_key">International Insurance</option>
+      </optgroup>
+      <optgroup label="Employers">
+        <option value="payer_acme_key">Acme Ltd</option>
+        <option value="payer_savanna_key">Savanna Foods (SME)</option>
+      </optgroup>
+    </select></div>
+  <div class="grid cols-3" id="kpis" style="margin:14px 0 18px"></div>
+  <div class="card"><h2>Claims addressed to you</h2><div id="list"></div></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const num=(n)=>Number(n||0).toFixed(2);
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pill=(s)=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
+const key=()=>$('key').value;
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);};
+
+async function load(){
+  const s=await(await fetch('/api/payer/summary',{headers:{'x-payer-key':key()}})).json().catch(()=>null);
+  if(!s){$('who').textContent='Invalid key';return;}
+  $('who').textContent=`${s.payer} · ${s.kind}`;
+  $('kpis').innerHTML=[['Pending',s.pending],['Pending value',`GHS ${num(s.pendingValue)}`],['Settled value',`GHS ${num(s.settledValue)}`]]
+    .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
+  const d=await(await fetch('/api/payer/claims',{headers:{'x-payer-key':key()}})).json();
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>`+
+    (d.data.map(c=>`<tr><td>${esc(c.claimId.slice(0,12))}…</td><td>${esc(c.patientName||'—')}</td><td>${esc(c.memberId||'—')}</td>
+      <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td><td>${pill(c.status)}</td>
+      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=7 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+}
+async function authz(id){
+  const r=await fetch(`/api/payer/claims/${id}/authorize`,{method:'POST',headers:{'x-payer-key':key()}});
+  if(r.ok){toast('Transfer authorised');load();}else toast('Failed');
+}
+async function rej(id){
+  const reason=prompt('Reason (optional):')||'';
+  const r=await fetch(`/api/payer/claims/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json','x-payer-key':key()},body:JSON.stringify({reason})});
+  if(r.ok){toast('Declined');load();}
+}
+load();
+</script>
+</body></html>

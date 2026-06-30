@@ -1,0 +1,207 @@
+openapi: 3.0.3
+info:
+  title: Composite Billing & Settlement Platform
+  version: 0.3.0
+  description: >
+    The platform never custodies funds — it orchestrates, routes, and reconciles.
+    Bills are settled by patient self-pay (to the clinic) or by a payer (insurer OR
+    employer) moving money A2A from its Stanbic account to the clinic over the SBG rail.
+servers: [{ url: http://localhost:4000 }]
+paths:
+  /health: { get: { summary: Liveness, responses: { '200': { description: OK } } } }
+
+  /api/v1/bills:
+    post:
+      summary: Create a bill
+      security: [{ TenantKey: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateBill' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
+    get: { summary: List bills, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
+  /api/v1/bills/{id}:
+    get:
+      summary: Get a bill
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+  /api/v1/bills/{id}/route:
+    post:
+      summary: Route a bill to a payer (insurer or employer) — creates claim + secure link
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { payerId: { type: string, example: acacia } } } } } }
+      responses: { '201': { description: Claim created }, '422': { description: Unknown payer or missing member id } }
+
+  /api/v1/payments/intents:
+    post:
+      summary: Patient self-pay intent
+      security: [{ TenantKey: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [billId],
+          properties: { billId: { type: string }, method: { type: string, enum: [mtn-momo, card, cash] }, payerPhone: { type: string } } } } }
+      responses: { '201': { description: Created } }
+
+  /api/v1/claims: { get: { summary: List claims raised by the clinic, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
+  /api/v1/dashboard: { get: { summary: Clinic dashboard data, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
+  /api/v1/institutions: { get: { summary: Receiving institutions (SBG proxy), security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
+  /api/v1/account-validation:
+    get:
+      summary: Validate a beneficiary account (SBG proxy)
+      security: [{ TenantKey: [] }]
+      parameters:
+        - { name: serviceRoutingCode, in: query, required: true, schema: { type: string } }
+        - { name: beneficiaryAccount, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: OK } }
+
+  # ---- Payer API: insurer RX / employer HR systems integrate directly ----
+  /api/payer/me: { get: { summary: Payer identity, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } } }
+  /api/payer/summary: { get: { summary: Payer KPIs, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } } }
+  /api/payer/claims:
+    get:
+      summary: Claims addressed to this payer
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: status, in: query, schema: { type: string, enum: [pending, settled, rejected, authorized] } }]
+      responses: { '200': { description: OK } }
+  /api/payer/claims/{id}:
+    get:
+      summary: Claim detail
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+  /api/payer/claims/{id}/authorize:
+    post:
+      summary: Authorise the A2A transfer (payer -> clinic via SBG)
+      description: Accepts an optional `Idempotency-Key` header to dedupe retries.
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Settled or authorised } }
+  /api/payer/claims/{id}/reject:
+    post:
+      summary: Decline the claim
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { '200': { description: Rejected } }
+
+  # ---- Secure link portal (no key, token-scoped) ----
+  /claim/api/{token}:
+    get:
+      summary: View a claim by secure token
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+  /claim/api/{token}/authorize:
+    post: { summary: Authorise via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /claim/api/{token}/reject:
+    post: { summary: Decline via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+
+  # ---- Optional financing of the patient share ----
+  /api/v1/financing/questions:
+    get:
+      summary: Clinical Q&A template (micro | detailed)
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: kind, in: query, schema: { type: string, enum: [micro, detailed] } }]
+      responses: { '200': { description: OK } }
+  /api/v1/financing/reports:
+    post:
+      summary: Generate a medical report from a bill + diagnosis + Q&A
+      security: [{ TenantKey: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [billId],
+          properties: { billId: { type: string }, kind: { type: string, enum: [micro, detailed] },
+          diagnosis: { type: string }, loanType: { type: string }, amountRequested: { type: number },
+          clinicianName: { type: string }, qa: { type: array, items: { type: object, properties: { id: { type: string }, a: { type: string } } } } } } } }
+      responses: { '201': { description: Created } }
+  /api/v1/financing/reports/{id}:
+    get:
+      summary: Fetch a report
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /api/v1/financing:
+    post:
+      summary: Create financing for the patient share (loan / credit / grant)
+      description: Accepts an optional `Idempotency-Key` header to dedupe retries.
+      security: [{ TenantKey: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [billId, type],
+          properties: { billId: { type: string },
+          type: { type: string, enum: [momo_loan, bank_loan, employer_loan, grant, hospital_credit] },
+          financierId: { type: string }, employerId: { type: string }, amount: { type: number },
+          partPayment: { type: number }, reportId: { type: string } } } } }
+      responses: { '201': { description: Created }, '422': { description: Unknown financier/employer } }
+  /api/v1/financing/{id}:
+    get:
+      summary: Financing status
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /report/api/{token}:
+    get:
+      summary: Lender views the medical report by share token
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+
+  /api/v1/ledger:
+    get:
+      summary: Append-only money ledger entries
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: limit, in: query, schema: { type: integer } }]
+      responses: { '200': { description: OK } }
+  /api/v1/ledger/summary:
+    get:
+      summary: Reconciliation totals by movement type (cash vs credit)
+      security: [{ TenantKey: [] }]
+      responses: { '200': { description: OK } }
+  /api/v1/ledger/bill/{billId}:
+    get:
+      summary: Ledger entries for one bill
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: billId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /api/v1/webhooks/collection:
+    post: { summary: Collection gateway confirms a patient self-pay (gateway-signed), responses: { '200': { description: OK } } }
+
+components:
+  securitySchemes:
+    TenantKey: { type: apiKey, in: header, name: x-api-key }
+    PayerKey: { type: apiKey, in: header, name: x-payer-key }
+  schemas:
+    CreateBill:
+      type: object
+      required: [provider, items]
+      properties:
+        provider: { type: string }
+        patient: { type: object, properties: { name: { type: string }, phone: { type: string } } }
+        items:
+          type: array
+          items: { type: object, properties: { code: { type: string }, name: { type: string }, cost: { type: number } } }
+        adjustments:
+          type: object
+          properties: { copayPercent: { type: number }, cashbackPercent: { type: number }, discountCode: { type: string } }
+        insurance:
+          type: object
+          description: Coverage info; payer chosen here or at /route.
+          properties:
+            payerId: { type: string, example: acacia }
+            memberId: { type: string }
+            employer: { type: object, properties: { name: { type: string }, email: { type: string } } }
+    Bill:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [open, awaiting_payer, settled, rejected] }
+        settlementMethod: { type: string, enum: [patient_momo, patient_card, cash, payer_a2a] }
+        provider: { type: string }
+        currency: { type: string, example: GHS }
+        totals:
+          type: object
+          properties:
+            subtotal: { type: number }
+            discount: { type: number }
+            net: { type: number }
+            payerShare: { type: number }
+            cashback: { type: number }
+            patientPayable: { type: number }

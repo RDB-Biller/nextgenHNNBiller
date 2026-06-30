@@ -1,0 +1,203 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Clinic Billing Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
+    <nav class="nav"><a href="dashboard.html">Dashboard</a><a href="payers.html">Payer console</a></nav>
+  </div>
+  <div class="grid cols-2">
+    <div class="grid" style="align-content:start">
+      <div class="card"><h2>Patient</h2>
+        <div class="field"><label>Provider</label><input id="provider" value="Euracare Hospital"/></div>
+        <div class="row"><div class="field"><label>Name</label><input id="pname" placeholder="Ama Mensah"/></div>
+        <div class="field"><label>Phone</label><input id="pphone" placeholder="0241234567"/></div></div>
+        <div class="row"><div class="field"><label>Member / Policy ID</label><input id="member" placeholder="ACA-00123"/></div>
+        <div class="field"><label>Sponsor employer (if any)</label><input id="sponsor" placeholder="optional"/></div></div>
+      </div>
+      <div class="card"><h2>Items</h2>
+        <div class="row"><select id="itemSel">
+          <option value="">Select item…</option>
+          <option value="GP-CONSULT|GP Consultation|100">GP Consultation — GHS 100</option>
+          <option value="FBC|Full Blood Count|120">Full Blood Count — GHS 120</option>
+          <option value="Coartem|Coartem|200">Coartem — GHS 200</option>
+        </select><input id="override" placeholder="Override ¢" style="max-width:120px"/>
+        <button class="primary" onclick="addCat()">Add</button></div>
+        <div class="row" style="margin-top:10px"><input id="cname" placeholder="Custom item name"/>
+        <input id="ccost" placeholder="Cost" style="max-width:120px"/><button onclick="addCustom()">Add custom</button></div>
+      </div>
+      <div class="card"><h2>Adjustments</h2>
+        <div class="row"><div class="field"><label>Copay % (patient share)</label><input id="copay" placeholder="e.g. 20"/></div>
+        <div class="field"><label>Cashback %</label><input id="cashback" placeholder="0"/></div>
+        <div class="field"><label>Discount code</label><input id="discount" placeholder="WELCOME10"/></div></div>
+      </div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card"><h2>Live bill</h2><div id="ledger" class="ledger"><p class="muted">Add items to build the bill.</p></div></div>
+      <div class="card"><h2>Settle</h2>
+        <p class="muted" style="margin-top:0">Patient pays now, or tap the payer the patient named — the payer moves money A2A to your account.</p>
+        <div class="row" style="margin-bottom:12px">
+          <button class="accent" onclick="payNow('mtn-momo')">MoMo</button>
+          <button class="accent" onclick="payNow('card')">Card</button>
+          <button onclick="payNow('cash')">Cash</button>
+        </div>
+        <label>Insurers</label>
+        <div class="row" style="margin-bottom:8px">
+          <button onclick="routePayer('acacia')">Acacia</button>
+          <button onclick="routePayer('gmtf')">GMTF (Mahama Cares)</button>
+          <button onclick="routePayer('international')">International</button>
+        </div>
+        <label>Employers (pay staff bills directly)</label>
+        <div class="row">
+          <button onclick="routePayer('acme')">Acme Ltd</button>
+          <button onclick="routePayer('savanna')">Savanna Foods</button>
+        </div>
+        <div id="result" style="margin-top:14px"></div>
+      </div>
+      <div class="card"><h2>Financing &amp; credit <span class="tag" style="background:#FFF3E6;color:var(--warn)">optional</span></h2>
+        <p class="muted" style="margin-top:0">Cover the patient's share with a loan, hospital credit, or a grant. A medical report is generated from the bill for due diligence.</p>
+        <div class="row"><div class="field"><label>Type</label>
+          <select id="finType" onchange="finUI()">
+            <option value="hospital_credit">Hospital credit</option>
+            <option value="momo_loan">MoMo loan (micro)</option>
+            <option value="bank_loan">Bank medical loan</option>
+            <option value="employer_loan">Employer loan</option>
+            <option value="grant">Grant</option>
+          </select></div>
+          <div class="field" id="finPartWrap"><label>Part payment now (blank = full credit)</label><input id="finPart" placeholder="e.g. 50"/></div>
+          <div class="field" id="finEmpWrap" style="display:none"><label>Employer</label>
+            <select id="finEmp"><option value="acme">Acme Ltd</option><option value="savanna">Savanna Foods</option></select></div>
+        </div>
+        <div class="field"><label>Diagnosis</label><input id="dx" placeholder="e.g. Uncomplicated malaria"/></div>
+        <div class="row">
+          <div class="field"><label>Complaint</label><input id="qaComplaint" placeholder="Fever, 3 days"/></div>
+          <div class="field"><label>Urgency</label><input id="qaUrgency" placeholder="Urgent / routine"/></div>
+          <div class="field"><label>Plan / outcome</label><input id="qaPlan" placeholder="Recovery in 5 days"/></div>
+        </div>
+        <div class="row">
+          <button class="primary" onclick="genReport()">Generate medical report</button>
+          <button class="accent" onclick="reqFinancing()">Request financing</button>
+        </div>
+        <div id="finResult" style="margin-top:12px"></div>
+      </div>
+      <div class="card"><h2>Financial ecosystem (referrals)</h2>
+        <div class="row">
+          <a class="api" style="text-decoration:none;text-align:center" href="https://www.trimestersave.com" target="_blank">Savings</a>
+          <a class="api" style="text-decoration:none;text-align:center" href="https://confirmu.com" target="_blank">Loans</a>
+          <a class="api" style="text-decoration:none;text-align:center" href="https://payangel.com" target="_blank">Remittance</a>
+        </div>
+      </div>
+      <div class="card"><h2>Connection</h2><div class="field"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123"/></div></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+let items=[], billId=null;
+const $=(id)=>document.getElementById(id);
+const hdr=()=>({'Content-Type':'application/json','x-api-key':$('apikey').value.trim()});
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=(n)=>Number(n).toFixed(2);
+
+function addCat(){const v=$('itemSel').value;if(!v)return;const[code,name,price]=v.split('|');const o=$('override').value;items.push({code,name,cost:o?parseFloat(o):parseFloat(price)});$('override').value='';billId=null;preview();}
+function addCustom(){const n=$('cname').value.trim(),c=parseFloat($('ccost').value);if(!n||isNaN(c))return toast('Name and cost required');items.push({name:n,cost:c});$('cname').value='';$('ccost').value='';billId=null;preview();}
+function rm(i){items.splice(i,1);billId=null;preview();}
+function adj(){return{copayPercent:$('copay').value||undefined,cashbackPercent:$('cashback').value||undefined,discountCode:$('discount').value||undefined};}
+
+function preview(){
+  const sub=items.reduce((s,i)=>s+i.cost,0);
+  const disc={WELCOME10:.1,STAFF20:.2,NHIS5:.05}[($('discount').value||'').toUpperCase()]||0;
+  const net=sub*(1-disc);
+  const cr=$('copay').value;const copay=cr===''?1:(parseFloat(cr)>1?parseFloat(cr)/100:parseFloat(cr));
+  const cb=(parseFloat($('cashback').value)||0);const cbf=cb>1?cb/100:cb;
+  const pb=net*copay,payer=net-pb,cash=pb*cbf,patient=Math.max(0,pb-cash);
+  const rows=items.map((i,ix)=>`<div class="line"><span>${esc(i.name)}</span><span class="num">GHS ${num(i.cost)} <a href="#" onclick="rm(${ix});return false" style="color:var(--bad);text-decoration:none">✕</a></span></div>`).join('');
+  $('ledger').innerHTML=(rows||'<p class="muted">Add items to build the bill.</p>')+
+    `<div class="line" style="border-top:2px solid var(--ink);margin-top:6px"><span class="muted">Subtotal</span><span class="num">GHS ${num(sub)}</span></div>`+
+    (disc?`<div class="line"><span class="muted">Discount</span><span class="num">− GHS ${num(sub*disc)}</span></div>`:'')+
+    `<div class="line"><span class="muted">Payer covers</span><span class="num">GHS ${num(payer)}</span></div>`+
+    (cash?`<div class="line"><span class="muted">Cashback</span><span class="num">− GHS ${num(cash)}</span></div>`:'')+
+    `<div class="line"><strong>Patient pays</strong><span class="num"><strong>GHS ${num(patient)}</strong></span></div>`;
+}
+['copay','cashback','discount'].forEach(id=>$(id).addEventListener('input',preview));
+
+async function ensureBill(){
+  if(billId)return billId;
+  if(!items.length){toast('Add at least one item');return null;}
+  const body={provider:$('provider').value,patient:{name:$('pname').value,phone:$('pphone').value},
+    items,adjustments:adj(),
+    insurance:{memberId:$('member').value||null, employer:$('sponsor').value?{name:$('sponsor').value}:null}};
+  const r=await fetch('/api/v1/bills',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
+  if(!r.ok){toast('Bill create failed');return null;}
+  billId=(await r.json()).id;return billId;
+}
+async function payNow(method){
+  const id=await ensureBill();if(!id)return;
+  const r=await fetch('/api/v1/payments/intents',{method:'POST',headers:hdr(),body:JSON.stringify({billId:id,method})});
+  if(!r.ok){toast('Payment failed');return;}
+  const intent=await r.json();
+  if(method==='cash'){$('result').innerHTML=`<span class="pill settled">Settled</span> Cash recorded · ${intent.currency} ${num(intent.amount)}`;toast('Cash recorded');}
+  else{$('result').innerHTML=`<p>Patient checkout link:</p><div class="linkbox">${location.origin}/pay/?intent=${intent.id}</div><p style="margin:8px 0 0"><a href="/pay/?intent=${intent.id}" target="_blank">Open patient page →</a></p>`;toast('Intent created');}
+  reset();
+}
+async function routePayer(payerId){
+  if(!$('member').value){toast('Member/Policy ID required to route');return;}
+  const id=await ensureBill();if(!id)return;
+  const r=await fetch(`/api/v1/bills/${id}/route`,{method:'POST',headers:hdr(),body:JSON.stringify({payerId})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Route failed: '+(e.error||r.status));return;}
+  const {claim}=await r.json();
+  $('result').innerHTML=`<span class="pill awaiting_payer">Awaiting ${esc(payerId)}</span> Claim ${esc(claim.id.slice(0,14))}… · GHS ${num(claim.amount)}
+    <p style="margin:8px 0 0">Secure link delivered to payer:</p><div class="linkbox">${location.origin}${claim.link}</div>
+    <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`;
+  toast('Routed to '+payerId);reset();
+}
+function reset(){items=[];billId=null;preview();}
+
+let lastReportId=null;
+function finUI(){
+  const t=$('finType').value;
+  $('finPartWrap').style.display=t==='hospital_credit'?'':'none';
+  $('finEmpWrap').style.display=t==='employer_loan'?'':'none';
+}
+function qa(){return [
+  {id:'complaint',a:$('qaComplaint').value||null},
+  {id:'urgency',a:$('qaUrgency').value||null},
+  {id:'plan',a:$('qaPlan').value||null},
+  {id:'outcome',a:$('qaPlan').value||null},
+];}
+async function genReport(){
+  const id=await ensureBill();if(!id)return;
+  const loanType=$('finType').value==='hospital_credit'?'hospital_credit':$('finType').value;
+  const r=await fetch('/api/v1/financing/reports',{method:'POST',headers:hdr(),body:JSON.stringify({
+    billId:id, diagnosis:$('dx').value, qa:qa(), loanType})});
+  if(!r.ok){toast('Report failed');return;}
+  const rep=await r.json(); lastReportId=rep.id;
+  $('finResult').innerHTML=`<span class="pill settled">${esc(rep.kind)} report</span> ${esc(rep.id.slice(0,14))}…
+    <p style="margin:8px 0 0"><a href="/report/?token=${esc(rep.shareToken)}" target="_blank">Open printable report →</a></p>
+    <div class="linkbox" style="margin-top:6px">${esc((rep.narrative||'').slice(0,160))}…</div>`;
+  toast(rep.kind+' report generated');
+}
+async function reqFinancing(){
+  const id=await ensureBill();if(!id)return;
+  const type=$('finType').value;
+  const body={billId:id,type,reportId:lastReportId};
+  if(type==='hospital_credit'&&$('finPart').value)body.partPayment=parseFloat($('finPart').value);
+  if(type==='employer_loan')body.employerId=$('finEmp').value;
+  const r=await fetch('/api/v1/financing',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Financing failed: '+(e.error||r.status));return;}
+  const f=await r.json();
+  let extra='';
+  if(f.status==='credit_extended')extra=` · part ${num(f.partPayment||0)} · owed ${num(f.outstanding||0)}`;
+  if(f.transferReference)extra=` · ref ${esc(f.transferReference)}`;
+  if(f.referralUrl)extra=` · <a href="${esc(f.referralUrl)}" target="_blank">continue at partner →</a>`;
+  $('finResult').innerHTML+=`<p style="margin:10px 0 0"><span class="pill ${esc(f.status)}">${esc(f.status.replace('_',' '))}</span> ${esc(type.replace('_',' '))} ${num(f.amount)}${extra}</p>`;
+  toast('Financing: '+f.status);
+}
+finUI();
+preview();
+</script>
+</body></html>

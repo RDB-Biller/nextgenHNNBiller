@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Clinic Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> Dashboard</div><p class="muted" id="who" style="margin:4px 0 0"></p></div>
+    <nav class="nav"><a href="biller.html">New bill</a><a href="payers.html">Payer console</a><a href="#" onclick="refresh();return false">Refresh</a></nav>
+  </div>
+  <div class="field" style="max-width:280px"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123" onchange="refresh()"/></div>
+  <div class="grid cols-3" id="kpis" style="margin:8px 0 18px"></div>
+  <div class="grid cols-2">
+    <div class="card"><h2>Recent bills</h2><div id="bills"></div></div>
+    <div class="card"><h2>Notifications sent</h2><div id="notes"></div></div>
+  </div>
+</div>
+<script>
+const $=(id)=>document.getElementById(id);
+const num=(n)=>Number(n||0).toFixed(2);
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pill=(s)=>`<span class="pill ${esc(s)}">${esc(String(s).replace('_',' '))}</span>`;
+
+async function refresh(){
+  const r=await fetch('/api/v1/dashboard',{headers:{'x-api-key':$('apikey').value.trim()}});
+  if(!r.ok){$('who').textContent='Invalid API key';return;}
+  const d=await r.json(); $('who').textContent=d.tenant;
+  const t=d.totals;
+  $('kpis').innerHTML=[
+    ['Settled value',`GHS ${num(t.settledValue)}`],['Awaiting payer',t.awaitingPayer],
+    ['Settled',t.settled],['Open',t.open],['Rejected',t.rejected],['Total bills',t.bills]
+  ].slice(0,3).map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
+  $('bills').innerHTML=`<table><thead><tr><th>Bill</th><th>Patient</th><th>Route</th><th class="num">Net</th><th>Status</th></tr></thead><tbody>`+
+    (d.recentBills.map(b=>`<tr><td>${esc(b.id.slice(0,12))}…</td><td>${esc(b.patient?.name||'—')}</td>
+      <td>${esc(b.coverage?.payerId||b.settlementMethod||'—')}</td><td class="num">${num(b.totals?.net)}</td><td>${pill(b.status)}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">No bills yet.</td></tr>')+`</tbody></table>`;
+  $('notes').innerHTML=d.notifications.map(n=>`<div class="line"><span><strong>${esc(n.party)}</strong> · ${esc(n.subject)}<br><span class="muted" style="font-size:12px">${esc(n.body)}</span></span></div>`).join('')||'<p class="muted">No notifications yet.</p>';
+}
+refresh();
+</script>
+</body></html>
