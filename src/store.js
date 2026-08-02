@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS tenants (id text PRIMARY KEY, api_key text UNIQUE, da
 CREATE TABLE IF NOT EXISTS payers (id text PRIMARY KEY, api_key text UNIQUE, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS financiers (id text PRIMARY KEY, api_key text, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS bills (id text PRIMARY KEY, tenant_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
-CREATE TABLE IF NOT EXISTS claims (id text PRIMARY KEY, tenant_id text, payer_id text, status text, token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS claims (id text PRIMARY KEY, tenant_id text, payer_id text, bill_id text, status text, token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS payments (id text PRIMARY KEY, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS financings (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS reports (id text PRIMARY KEY, tenant_id text, bill_id text, share_token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (scope text, key text, request_hash 
 CREATE INDEX IF NOT EXISTS idx_bills_tenant ON bills(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_tenant ON claims(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_payer ON claims(payer_id);
+ALTER TABLE IF EXISTS claims ADD COLUMN IF NOT EXISTS bill_id text;
+CREATE INDEX IF NOT EXISTS idx_claims_bill ON claims(bill_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_bill ON notifications(bill_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
@@ -102,10 +104,11 @@ function pgRepo(exec) {
     claims: {
       get: (id, o = {}) => one(`SELECT data FROM claims WHERE id=$1${o.forUpdate ? ' FOR UPDATE' : ''}`, [id]),
       byToken: (t) => one('SELECT data FROM claims WHERE token=$1', [t]),
-      insert: (c) => exec(upsert('claims', ['tenant_id', 'payer_id', 'status', 'token']), [c.id, c.tenantId, c.payerId, c.status, c.token, c]),
-      update: (c) => exec(upsert('claims', ['tenant_id', 'payer_id', 'status', 'token']), [c.id, c.tenantId, c.payerId, c.status, c.token, c]),
+      insert: (c) => exec(upsert('claims', ['tenant_id', 'payer_id', 'bill_id', 'status', 'token']), [c.id, c.tenantId, c.payerId, c.billId, c.status, c.token, c]),
+      update: (c) => exec(upsert('claims', ['tenant_id', 'payer_id', 'bill_id', 'status', 'token']), [c.id, c.tenantId, c.payerId, c.billId, c.status, c.token, c]),
       listByTenant: (t) => many('SELECT data FROM claims WHERE tenant_id=$1 ORDER BY created_at', [t]),
       listByPayer: (p) => many('SELECT data FROM claims WHERE payer_id=$1 ORDER BY created_at', [p]),
+      listByBill: (b) => many('SELECT data FROM claims WHERE bill_id=$1 ORDER BY created_at', [b]),
       all: (limit = 500) => many('SELECT data FROM claims ORDER BY created_at DESC LIMIT $1', [limit]),
       byStatus: (st, limit = 500) => many('SELECT data FROM claims WHERE status=$1 ORDER BY created_at DESC LIMIT $2', [st, limit]),
     },
@@ -274,6 +277,7 @@ function memRepo(M) {
       update: async (c) => M.claims.set(c.id, c),
       listByTenant: async (t) => list(M.claims, (c) => c.tenantId === t),
       listByPayer: async (p) => list(M.claims, (c) => c.payerId === p),
+      listByBill: async (b) => list(M.claims, (c) => c.billId === b),
       all: async (limit = 500) => [...M.claims.values()].reverse().slice(0, limit),
       byStatus: async (st, limit = 500) => [...M.claims.values()].reverse().filter((c) => c.status === st).slice(0, limit),
     },
