@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — API Downloads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/>
+<style>
+ .api{border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:#fff;margin-bottom:12px}
+ .api h3{margin:0 0 4px;font-family:Fraunces,serif;font-size:16px}
+ .api p{margin:0 0 10px;color:var(--muted);font-size:13.5px}
+ .dl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+ .dl a{display:inline-block;padding:7px 12px;border-radius:9px;border:1px solid var(--line);text-decoration:none;font-size:13px;font-weight:600;color:var(--ink)}
+ .dl a:hover{border-color:var(--brand);color:var(--brand)}
+ .tag{font-family:'Spline Sans Mono',monospace;font-size:11px;padding:3px 8px;border-radius:999px;background:#EEF2F0;color:var(--muted)}
+ .tag.comm{background:var(--brand-soft);color:var(--brand)}
+ .auth{font-family:'Spline Sans Mono',monospace;font-size:11px;color:var(--muted)}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> APIs</div>
+      <p class="muted" style="margin:4px 0 0">Composite OpenAPI 3.0 specifications — one per feature group. Import into Postman, Insomnia, Swagger UI, or generate a client.</p></div>
+    <nav class="nav"><a href="biller.html">Billing</a><a href="admin.html">IT console</a><a href="platform.html">Master control</a></nav>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>How to use these</h2>
+    <p class="muted" style="font-size:13.5px;margin-top:0">Pick only the groups you need — each spec stands alone. Every client runs on an
+    <b>edition</b>: <span class="tag">non_commercial</span> covers billing, payer routing and patient payments;
+    <span class="tag comm">commercial</span> adds the revenue engine, financing, the NHIS ClaimIt tracker, agnostic payer tabs and the audit ledger.
+    Commercial-only endpoints return <code>402 upgrade_required</code> otherwise. Check your own entitlement with
+    <code>GET /api/v1/bills/edition</code>; move a client between editions with the Master Control API.</p>
+    <div class="dl"><a href="apis/hnn-00-complete.yaml" download><b>⬇ Complete API</b> (YAML)</a>
+      <a href="apis/hnn-00-complete.json" download>Complete API (JSON)</a></div>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="card" style="margin-top:6px">
+    <h2>Authentication at a glance</h2>
+    <table><thead><tr><th>Header</th><th>Who</th><th>Scope</th></tr></thead><tbody>
+      <tr><td class="auth">x-api-key</td><td>Clinic / hospital (EMR)</td><td>Their own bills, payments, claims</td></tr>
+      <tr><td class="auth">x-payer-key</td><td>Insurer / corporate payer</td><td>Claims addressed to them</td></tr>
+      <tr><td class="auth">x-console-key</td><td>IT lead</td><td>Their own organisation only</td></tr>
+      <tr><td class="auth">x-platform-key</td><td>SaaS owner</td><td>Whole deployment</td></tr>
+    </tbody></table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Send <code>Idempotency-Key</code> on authorise and financing calls so a retry never double-executes.</p>
+  </div>
+</div>
+<script>
+const APIS=[
+ {f:'hnn-01-core-billing',t:'Core Billing',ed:'all',auth:'x-api-key',
+  d:'Itemised bills, patient payment (MoMo/card/cash), payer routing, dashboard, and the edition self-check. The baseline any EMR/EHR integrates against first.'},
+ {f:'hnn-02-payer-claims',t:'Payer & Claims',ed:'all',auth:'x-payer-key',
+  d:'For insurers and corporate payers: receive claims, validate the member, authorise an A2A transfer from your account straight to the provider. Secure per-claim links included.'},
+ {f:'hnn-03-nhis-claimit',t:'NHIS ClaimIt Tracker',ed:'commercial',auth:'x-api-key',
+  d:'Track NHIS claims and the insurer refund that becomes member cashback. Routed mode (bill raised here) and external mode (settled in your EMR — you just send the data), plus bulk ingest.'},
+ {f:'hnn-04-financing-reports',t:'Financing & Medical Reports',ed:'commercial',auth:'x-api-key',
+  d:'MoMo/bank medical loans, employer loans, grants, and hospital credit — with auto-generated mini or standard medical reports for lender due diligence.'},
+ {f:'hnn-05-ledger-reconciliation',t:'Ledger & Reconciliation',ed:'commercial',auth:'x-api-key',
+  d:'The append-only money ledger: every settlement, cash vs receivable, with bank references for reconciliation.'},
+ {f:'hnn-06-it-lead-configuration',t:'IT-Lead Configuration',ed:'all',auth:'x-console-key',
+  d:'Everything the configuration screen does, as an API — revenue rules, other charges (report fees), agnostic payer tabs, and licence redemption. Rebuild it inside your own EMR, or use our hosted page.'},
+ {f:'hnn-07-master-control',t:'Master Control (SaaS owner)',ed:'all',auth:'x-platform-key',
+  d:'Clients, payers, EMR partners, IT leads and licensing. Includes the edition transition endpoint — move any client between commercial and non-commercial, both directions, no data loss.'},
+];
+document.getElementById('list').innerHTML=APIS.map(a=>`
+ <div class="api">
+   <h3>${a.t} <span class="tag ${a.ed==='commercial'?'comm':''}">${a.ed==='commercial'?'commercial':'all editions'}</span></h3>
+   <p>${a.d}</p>
+   <div class="dl">
+     <a href="apis/${a.f}.yaml" download>⬇ YAML</a>
+     <a href="apis/${a.f}.json" download>⬇ JSON</a>
+     <span class="auth">auth: ${a.auth}</span>
+   </div>
+ </div>`).join('');
+</script>
+</body></html>

@@ -53,6 +53,41 @@ async function rej(id){
   const r=await fetch(`/api/payer/claims/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json','x-payer-key':key()},body:JSON.stringify({reason})});
   if(r.ok){toast('Declined');load();}
 }
-load();
+async function loadNetwork(){
+  const r=await fetch('/api/payer/network',{headers:H()});
+  if(!r.ok) return;
+  const d=await r.json();
+  $('n_mode').value=d.networkMode; $('n_policy').value=d.outOfNetworkPolicy;
+  $('n_list').innerHTML=`<table><thead><tr><th>Provider</th><th>Settlement</th><th class="num">Fee</th><th>Charged to</th><th class="num">Prompt-pay</th><th class="num">Max claim</th><th>Status</th><th></th></tr></thead><tbody>`+
+   ((d.providers||[]).map(p=>`<tr><td>${esc(p.providerName||p.tenantId)}</td>
+     <td>${esc(p.settlement)}</td><td class="num">${(p.feeRate*100).toFixed(1)}%</td>
+     <td>${esc(p.chargeTo)}</td><td class="num">${(p.promptPaymentDiscountPercent*100).toFixed(1)}%</td>
+     <td class="num">${p.maxClaimAmount??'—'}</td>
+     <td><span class="pill ${p.active?'settled':'rejected'}">${p.active?'active':p.status}</span></td>
+     <td>${p.active?`<button class="ghost" style="padding:6px 10px" onclick="suspendTerms('${esc(p.tenantId)}')">Suspend</button>`:''}</td></tr>`).join('')
+    ||'<tr><td colspan=8 class="muted">No providers in your narrow network yet.</td></tr>')+`</tbody></table>`;
+}
+async function savePosture(){
+  const r=await fetch('/api/payer/network/posture',{method:'PUT',headers:H(),
+    body:JSON.stringify({networkMode:$('n_mode').value,outOfNetworkPolicy:$('n_policy').value})});
+  toast(r.ok?'Network posture saved':'Failed'); loadNetwork();
+}
+async function saveTerms(){
+  const tid=$('n_tenant').value.trim(); if(!tid) return toast('Provider tenant id required');
+  const body={settlement:$('n_settle').value,feeRate:parseFloat($('n_fee').value)||0,chargeTo:$('n_to').value,
+    promptPaymentDiscountPercent:parseFloat($('n_disc').value)||0,
+    maxClaimAmount:$('n_cap').value===''?null:parseFloat($('n_cap').value),
+    effectiveTo:$('n_to_date').value||null};
+  const r=await fetch('/api/payer/network/providers/'+encodeURIComponent(tid),{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));return toast('Failed: '+(e.message||r.status));}
+  const t=await r.json();
+  toast(`Terms set${t.feeRateCapped?' (fee at 15% cap)':''}`); loadNetwork();
+}
+async function suspendTerms(tid){
+  if(!confirm('Suspend expedited settlement for this provider?'))return;
+  const r=await fetch('/api/payer/network/providers/'+encodeURIComponent(tid),{method:'DELETE',headers:H()});
+  toast(r.ok?'Suspended':'Failed'); loadNetwork();
+}
+load(); loadNetwork();
 </script>
 </body></html>

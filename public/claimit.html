@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NHIS ClaimIt Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">NHIS ClaimIt<span class="dot">.</span> Tracker</div>
+      <p class="muted" style="margin:4px 0 0">Track NHIS claims &mdash; raised here, or settled in your EMR/ClaimIt portal &mdash; and the refunds that become member cashback.</p></div>
+    <nav class="nav"><a href="biller.html">Billing</a><a href="dashboard.html">Dashboard</a><a href="admin.html">Revenue</a>
+      <a href="#" onclick="load();return false">Refresh</a></nav>
+  </div>
+  <div class="field" style="max-width:280px"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123" onchange="load()"/></div>
+  <div class="grid cols-3" id="kpis" style="margin:14px 0 18px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <h2>Record a claim settled elsewhere <span class="pill awaiting_payer">external</span></h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Your EMR or the ClaimIt portal handles the NHIS claim &mdash; enter what is being claimed and we track the refund and cashback. Duplicate claim numbers are ignored.</p>
+    <div class="row">
+      <div class="field"><label>NHIS claim no.</label><input id="f_num" placeholder="CLM-2026-001"/></div>
+      <div class="field"><label>Amount claimed (GHS)</label><input id="f_amt" type="number" step="0.01" placeholder="220"/></div>
+      <div class="field"><label>Patient</label><input id="f_pat" placeholder="Ama Mensah"/></div>
+      <div class="field"><label>Member ID</label><input id="f_mem" placeholder="NHIS-77"/></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Refund %</label><input id="f_pct" type="number" step="1" value="100"/></div>
+      <div class="field"><label>Refunded by</label>
+        <select id="f_by"><option value="acacia">Acacia</option><option value="gmtf">GMTF (Mahama Cares)</option><option value="gab">GAB</option></select></div>
+      <div class="field"><label>Refund goes to</label>
+        <select id="f_dest"><option value="provider">Provider (we pass cashback on)</option><option value="member">Member directly</option></select></div>
+      <div class="field"><label>Your EMR ref (optional)</label><input id="f_ext" placeholder="EMR-98211"/></div>
+      <div class="field" style="display:flex;align-items:flex-end"><button class="primary" onclick="addExternal()" style="width:100%">Track claim</button></div>
+    </div>
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer;font-size:13px">Bulk import from EMR (paste JSON)</summary>
+      <textarea id="f_bulk" rows="4" style="width:100%;margin-top:8px;font-family:ui-monospace,monospace;font-size:12px;padding:10px;border:1px solid var(--line);border-radius:10px" placeholder='[{"nhisClaimNumber":"CLM-1","nhisAmount":180,"patientName":"Kofi"},{"nhisClaimNumber":"CLM-2","nhisAmount":240}]'></textarea>
+      <button onclick="bulk()" style="margin-top:8px">Import</button>
+      <p class="muted" style="font-size:12px;margin:8px 0 0">API: <code>POST /api/v1/claimit/ingest</code> with <code>{ "claims": [ ... ] }</code> &mdash; your EMR can push these automatically.</p>
+    </details>
+  </div>
+
+  <div class="card"><h2>Tracked claims</h2><div id="list"></div></div>
+  <p class="muted" style="font-size:12px;margin-top:12px">Cashback is the refund received from the sponsoring insurer (up to 100% of the NHIS amount).
+  If the refund lands with the provider, a member-charged margin is netted from the cashback and the balance is owed on to the member. If the insurer pays the member directly, nothing is owed on and the margin is invoiced instead. Set the margin in the Revenue Console.</p>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const H=()=>({'Content-Type':'application/json','x-api-key':$('apikey').value.trim()});
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toFixed(2);
+const pill=(s)=>`<span class="pill ${esc(s==='refunded'?'settled':s==='rejected'?'rejected':'awaiting_payer')}">${esc(s)}</span>`;
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);};
+
+async function load(){
+  const s=await (await fetch('/api/v1/claimit/summary',{headers:H()})).json().catch(()=>null);
+  if(!s||s.error){$('list').innerHTML='<p class="muted">Check the API key.</p>';return;}
+  $('kpis').innerHTML=[['Expected refunds','GHS '+n2(s.expectedRefunds)],['Cashback paid','GHS '+n2(s.cashbackPaid)],['Margin revenue','GHS '+n2(s.marginRevenue)],['Owed to members','GHS '+n2(s.cashbackOwedToMembers)],['Tracked',`${s.tracked} (${s.external} external / ${s.routed} routed)`]]
+    .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
+  const d=await (await fetch('/api/v1/claimit',{headers:H()})).json();
+  $('list').innerHTML=`<table><thead><tr><th>Ref</th><th>Mode</th><th>Patient</th><th>Claim no.</th><th class="num">NHIS amt</th><th class="num">Expected</th><th>Refund to</th><th class="num">Cashback</th><th class="num">Margin</th><th class="num">Owed to member</th><th>Status</th><th></th></tr></thead><tbody>`+
+    (d.data.map(c=>`<tr>
+      <td>${esc(c.id.slice(0,10))}…</td>
+      <td><span class="pill ${c.mode==='external'?'awaiting_payer':'settled'}">${esc(c.mode||'routed')}</span></td>
+      <td>${esc(c.patientName||'—')}</td><td>${esc(c.nhisClaimNumber||'—')}</td>
+      <td class="num">${n2(c.nhisAmount)}</td><td class="num">${n2(c.expectedRefund)}</td>
+      <td>${esc(c.refundDestination||'provider')}</td>
+      <td class="num">${c.cashbackAmount?n2(c.cashbackAmount):'—'}</td>
+      <td class="num">${c.marginFee?n2(c.marginFee)+(c.marginCollection==='netted_from_cashback'?' (netted)':' (billed)'):'—'}</td>
+      <td class="num">${c.cashbackOwedToMember?n2(c.cashbackOwedToMember):'—'}</td>
+      <td>${pill(c.status)}</td>
+      <td>${c.status!=='refunded'?`<button class="accent" style="padding:6px 10px" onclick="refund('${c.id}',${c.expectedRefund})">Record refund</button>`:''}</td>
+    </tr>`).join('')||'<tr><td colspan=13 class="muted">Nothing tracked yet. Either route a bill to “NHIS ClaimIt Tracker” in Billing, or record a claim settled elsewhere above.</td></tr>')+`</tbody></table>`;
+}
+async function refund(id,expected){
+  const amt=prompt('Refund amount received (GHS):', expected);
+  if(amt===null) return;
+  const r=await fetch(`/api/v1/claimit/${id}/refund`,{method:'POST',headers:H(),body:JSON.stringify({amount:parseFloat(amt)})});
+  if(r.ok){ const rec=await r.json();
+    toast(`Cashback ${n2(rec.cashbackAmount)} · margin ${n2(rec.marginFee)}`); load(); }
+  else toast('Failed');
+}
+async function addExternal(){
+  const amt=parseFloat($('f_amt').value);
+  if(!amt){toast('Amount claimed is required');return;}
+  const body={nhisClaimNumber:$('f_num').value||null, nhisAmount:amt,
+    patientName:$('f_pat').value||null, memberId:$('f_mem').value||null,
+    refundPercent:parseFloat($('f_pct').value)||100, refundedBy:$('f_by').value,
+    externalRef:$('f_ext').value||null, refundDestination:$('f_dest').value};
+  const r=await fetch('/api/v1/claimit',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Failed: '+(e.message||r.status));return;}
+  ['f_num','f_amt','f_pat','f_mem','f_ext'].forEach(id=>$(id).value='');
+  toast('Claim tracked'); load();
+}
+async function bulk(){
+  let rows; try{ rows=JSON.parse($('f_bulk').value); }catch(e){ toast('Invalid JSON'); return; }
+  const r=await fetch('/api/v1/claimit/ingest',{method:'POST',headers:H(),body:JSON.stringify({claims:rows})});
+  if(!r.ok){toast('Import failed');return;}
+  const out=await r.json();
+  toast(`Imported ${out.created} · ${out.duplicates} duplicate(s)`); $('f_bulk').value=''; load();
+}
+load();
+</script>
+</body></html>

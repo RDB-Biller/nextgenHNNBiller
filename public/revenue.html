@@ -1,0 +1,65 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — Revenue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/>
+<style>
+ .bar{height:10px;border-radius:999px;background:var(--brand);display:inline-block;vertical-align:middle}
+ .barwrap{background:#EEF2F0;border-radius:999px;overflow:hidden;height:10px;flex:1}
+ .rev-row{display:flex;align-items:center;gap:12px;margin:8px 0}
+ .rev-row .lbl{width:170px;font-size:13px}
+ .rev-row .amt{width:120px;text-align:right;font-family:'Spline Sans Mono',monospace;font-size:13px}
+ .big{font-family:Fraunces,serif;font-size:34px;font-weight:600}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> Revenue</div>
+      <p class="muted" style="margin:4px 0 0">Accrued platform fees across every client. These are receivables — the platform never holds funds.</p></div>
+    <nav class="nav"><a href="platform.html">Master control</a><a href="submissions.html">Submissions</a><a href="#" onclick="load();return false">Refresh</a></nav>
+  </div>
+  <div class="field" style="max-width:300px"><label>Platform key</label><input id="pkey" value="platform_demo_key_123" onchange="load()"/></div>
+  <div class="grid cols-3" id="kpis" style="margin:14px 0 18px"></div>
+  <div class="grid cols-2">
+    <div class="card"><h2>Revenue by type</h2><div id="byType"></div></div>
+    <div class="card"><h2>Revenue by client</h2><div id="byClient"></div></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h2>Recent fee activity</h2><div id="recent"></div></div>
+  <p class="muted" id="note" style="font-size:12px;margin-top:10px"></p>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const H=()=>({'x-platform-key':$('pkey').value.trim()});
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+
+async function load(){
+  const s=await (await fetch('/api/platform/revenue',{headers:H()})).json().catch(()=>null);
+  if(!s||s.error){$('kpis').innerHTML='<p class="muted">Invalid platform key.</p>';return;}
+  $('kpis').innerHTML=[
+    ['Total accrued',`<span class="big">GHS ${n2(s.totalAccrued)}</span>`],
+    ['Clients earning',s.clients],['Fee entries',s.entries]
+  ].map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:20px">${k[1]}</div></div>`).join('');
+  const max=Math.max(1,...s.byType.map(t=>t.total));
+  $('byType').innerHTML=s.byType.length?s.byType.map(t=>`
+    <div class="rev-row"><span class="lbl">${esc(t.label)}</span>
+      <div class="barwrap"><span class="bar" style="width:${Math.round(t.total/max*100)}%"></span></div>
+      <span class="amt">GHS ${n2(t.total)}</span></div>`).join(''):'<p class="muted">No revenue yet.</p>';
+  const maxC=Math.max(1,...s.byClient.map(c=>c.total));
+  $('byClient').innerHTML=s.byClient.length?s.byClient.map(c=>`
+    <div class="rev-row"><span class="lbl">${esc(c.name)}</span>
+      <div class="barwrap"><span class="bar" style="width:${Math.round(c.total/maxC*100)}%;background:var(--coral)"></span></div>
+      <span class="amt">GHS ${n2(c.total)}</span></div>`).join(''):'<p class="muted">No revenue yet.</p>';
+  $('note').textContent=s.note;
+
+  const r=await (await fetch('/api/platform/revenue/recent?limit=40',{headers:H()})).json();
+  $('recent').innerHTML=`<table><thead><tr><th>Client</th><th>Fee</th><th>Charged to</th><th>Billing</th><th class="num">Amount</th></tr></thead><tbody>`+
+    ((r.data||[]).map(x=>`<tr><td>${esc(x.client)}</td><td>${esc(x.type)}</td><td>${esc(x.chargeTo||'—')}</td>
+      <td><span class="muted" style="font-size:12px">${esc((x.billing||'').replace('_',' '))}</span></td>
+      <td class="num">${esc(x.currency)} ${n2(x.amount)}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">No fee activity yet.</td></tr>')+`</tbody></table>`;
+}
+load();
+</script>
+</body></html>

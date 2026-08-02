@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — Submissions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> Submissions</div>
+      <p class="muted" style="margin:4px 0 0">Every submission across all connected developers. Approve to trigger the Stanbic A2A transfer to the provider.</p></div>
+    <nav class="nav"><a href="platform.html">Master control</a><a href="#" onclick="load();return false">Refresh</a></nav>
+  </div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="field" style="max-width:300px"><label>Platform key</label><input id="pkey" value="platform_demo_key_123" onchange="load()"/></div>
+    <div class="field" style="max-width:200px"><label>Filter</label>
+      <select id="filter" onchange="load()"><option value="">All</option><option value="pending">Pending</option><option value="settled">Settled</option><option value="rejected">Declined</option></select></div>
+  </div>
+  <div class="grid cols-3" id="kpis" style="margin-bottom:16px"></div>
+  <div class="card"><h2>Submissions</h2><div id="list"></div></div>
+  <p class="muted" style="font-size:12px;margin-top:10px">Approving runs the account-to-account transfer from the payer to the provider over Stanbic. The platform never holds funds; every movement is written to the append-only ledger.</p>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const H=()=>({'Content-Type':'application/json','x-platform-key':$('pkey').value.trim()});
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toFixed(2);
+const pill=(s)=>`<span class="pill ${esc(s)}">${esc(String(s).replace('_',' '))}</span>`;
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+
+async function load(){
+  const s=await (await fetch('/api/platform/submissions/summary',{headers:H()})).json().catch(()=>null);
+  if(!s||s.error){$('list').innerHTML='<p class="muted">Invalid platform key.</p>';return;}
+  $('kpis').innerHTML=[['Pending',`${s.pending} · GHS ${n2(s.pendingValue)}`],['Settled',`${s.settled} · GHS ${n2(s.settledValue)}`],['Declined',s.rejected]]
+    .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
+  const q=$('filter').value?`?status=${$('filter').value}`:'';
+  const d=await (await fetch('/api/platform/submissions'+q,{headers:H()})).json();
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Provider</th><th>Payer</th><th>Member</th><th class="num">Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>`+
+    ((d.data||[]).map(c=>`<tr>
+      <td>${esc(c.claimId.slice(0,12))}…<br><span class="muted" style="font-size:11px">${esc(c.patientName||'')}</span></td>
+      <td>${esc(c.provider||c.tenantId)}</td><td>${esc(c.payerName||c.payerId)}</td>
+      <td>${esc(c.memberId||'—')}</td>
+      <td class="num">${esc(c.currency)} ${n2(c.settlementAmount)}${c.nnest&&c.nnest.promptPaymentDiscount?`<br><span class="muted" style="font-size:11px">gross ${n2(c.nnest.grossAmount)}</span>`:''}</td>
+      <td>${pill(c.status)}</td>
+      <td>${c.status==='pending'
+        ? `<button class="primary" style="padding:6px 10px" onclick="approve('${esc(c.claimId)}')">Approve</button>
+           <button class="ghost" style="padding:6px 10px" onclick="decline('${esc(c.claimId)}')">Decline</button>`
+        : (c.transferReference?`<span class="muted" style="font-size:11px">ref ${esc(c.transferReference)}</span>`:'—')}</td>
+    </tr>`).join('')||'<tr><td colspan=7 class="muted">No submissions.</td></tr>')+`</tbody></table>`;
+}
+async function approve(id){
+  if(!confirm('Approve and transfer to the provider now?'))return;
+  const r=await fetch(`/api/platform/submissions/${id}/approve`,{method:'POST',headers:H()});
+  if(r.ok){const c=await r.json();toast(`Approved · ${c.status}${c.transferReference?' · ref '+c.transferReference:''}`);load();}
+  else{const e=await r.json().catch(()=>({}));toast('Failed: '+(e.message||e.error||r.status));}
+}
+async function decline(id){
+  const reason=prompt('Reason for declining:'); if(reason===null)return;
+  const r=await fetch(`/api/platform/submissions/${id}/decline`,{method:'POST',headers:H(),body:JSON.stringify({reason})});
+  if(r.ok){toast('Declined');load();}else toast('Failed');
+}
+load();
+</script>
+</body></html>

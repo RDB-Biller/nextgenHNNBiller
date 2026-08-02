@@ -1,0 +1,275 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — Revenue Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/>
+<style>
+  .rule{border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:#fff;margin-bottom:14px}
+  .rule header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .rule h3{margin:0;font-size:16px;font-family:Fraunces,serif;font-weight:600}
+  .rule .why{color:var(--muted);font-size:13px;margin:0 0 12px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media(max-width:720px){.grid4{grid-template-columns:1fr 1fr}}
+  .switch{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .cap{font-family:'Spline Sans Mono',monospace;font-size:11px;color:var(--warn);background:#FFF3E6;border-radius:999px;padding:3px 9px}
+  .calc{margin-top:12px;padding:10px 12px;background:#F4F6F4;border-radius:10px;font-size:13px}
+  .calc b{font-variant-numeric:tabular-nums}
+  .save{display:flex;gap:10px;align-items:center;margin-top:12px}
+  .ok{color:var(--brand);font-size:13px}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> Revenue Console</div>
+      <p class="muted" style="margin:4px 0 0">Program the SaaS revenue model per partner. Caps are enforced server-side.</p></div>
+    <nav class="nav"><a href="apis.html">APIs</a><a href="biller.html">Billing</a><a href="dashboard.html">Dashboard</a><a href="payers.html">Payers</a></nav>
+  </div>
+
+  <div class="row" style="margin-bottom:16px">
+    <div class="field" style="max-width:300px"><label>Console key</label><input id="adminkey" value="admin_demo_key_123" onchange="boot()"/>
+      <p class="muted" style="font-size:11px;margin:4px 0 0">Your personal IT-lead key, or the legacy admin key.</p></div>
+    <div class="field" style="max-width:320px"><label>Partner (tenant)</label><select id="tenant" onchange="loadRules()"></select></div>
+  </div>
+
+  <div class="card" id="edcard" style="margin-bottom:16px"></div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Revenue accrued</h2>
+    <div class="grid cols-3" id="rev"></div>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">Fees are accrued to the append-only ledger as receivables owed by the charged party — the platform never custodies funds.</p>
+  </div>
+
+  <div id="rules"></div>
+
+  <div class="card" style="margin-top:8px;margin-bottom:16px">
+    <h2>Other charges</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Flat fees for producing medical reports used in financing due diligence.</p>
+    <div id="othercharges"></div>
+  </div>
+
+  <div class="card" style="margin-top:8px">
+    <h2>Agnostic payer tabs <span class="pill awaiting_payer">self-service</span></h2>
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Reserved slots this facility can program itself &mdash; stand up a new insurer or corporate payor
+      without waiting on a backend change. Slots are private to this facility, get their own payer API key,
+      and can be time-boxed for a pilot. Released slots can be reused.</p>
+    <div id="slots"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=(id)=>document.getElementById(id);
+const H=()=>{const k=$('adminkey').value.trim();
+  const h={'Content-Type':'application/json'};
+  // Personal console keys start with lead_/plat_; anything else is the legacy shared key.
+  if(/^(lead_|plat_)/.test(k)) h['x-console-key']=k; else h['x-admin-key']=k;
+  return h;};
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toFixed(2);
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);};
+let SCHEMA=null;
+
+const META={
+  expedited_settlement:{title:'Expedited settlement fee',
+    why:'Charged when a payer claim settles instantly. Basis = the amount the payer covers.'},
+  discount_fee:{title:'Discount fee',
+    why:'Charged on the value of a discount granted to a patient (standard, referral, or a paying patient linked to an insured one).'},
+  claimit_margin:{title:'NHIS ClaimIt cashback margin',
+    why:'Margin on a cashback refunded to a member after an NHIS claim is reimbursed (e.g. by Acacia).'}
+};
+const TARGET_LABEL={insurer:'Insurer (reverse-bill)',provider:'Hospital / provider (invoice)',
+  beneficiary:'Beneficiary entity e.g. pharmacy (invoice)',member:'Member (netted from cashback)',
+  patient:'Patient (invoice)',financier:'Lender / grant fund (invoice)'};
+const FLAT_META={
+  report_fee_mini:{title:'Mini Medical Report fee',why:'Flat charge each time a mini (micro) medical report is produced — typically for a small MoMo loan.'},
+  report_fee_standard:{title:'Standard Medical Report fee',why:'Flat charge each time a standard (detailed) medical report is produced — for larger loans or grants.'}
+};
+
+function flatCard(r){
+  const m=FLAT_META[r.type]||{title:r.type,why:''};
+  const targets=(SCHEMA.chargeTargets[r.type]||[]).map(t=>
+    `<option value="${t}" ${r.chargeTo===t?'selected':''}>${esc(TARGET_LABEL[t]||t)}</option>`).join('');
+  return `<div class="rule" id="rule-${r.type}">
+    <header><h3>${esc(m.title)}</h3><span class="cap">flat fee</span></header>
+    <p class="why">${esc(m.why)}</p>
+    <div class="grid4">
+      <div class="field"><label>Amount (GHS)</label><input type="number" step="1" min="0" id="amt-${r.type}" value="${r.amount??0}"/></div>
+      <div class="field"><label>Charge to</label><select id="to-${r.type}">${targets}</select></div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <label class="switch"><input type="checkbox" id="on-${r.type}" ${r.enabled?'checked':''} style="width:auto"/> Enabled</label></div>
+      <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="saveFlat('${r.type}')">Save</button></div>
+    </div>
+    <span class="ok" id="ok-${r.type}"></span>
+  </div>`;
+}
+async function saveFlat(type){
+  const tid=$('tenant').value;
+  const body={enabled:$('on-'+type).checked, amount:parseFloat($('amt-'+type).value)||0, chargeTo:$('to-'+type).value};
+  const r=await fetch(`/api/admin/pricing/${encodeURIComponent(tid)}/${type}`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast(e.error==='upgrade_required'?'Commercial edition required':'Save failed');return;}
+  const saved=await r.json();
+  $('ok-'+type).textContent=`Saved · GHS ${Number(saved.amount).toFixed(2)} to ${saved.chargeTo}`;
+  toast('Charge saved'); loadRevenue();
+}
+
+function renderEdition(r){
+  const commercial=r.edition==='commercial';
+  $('edcard').innerHTML=`
+    <h2>Edition</h2>
+    <div class="row" style="align-items:center">
+      <div><span class="pill ${commercial?'settled':'open'}" style="font-size:12px">${esc(String(r.edition).replace('_',' '))}</span>
+        <p class="muted" style="margin:6px 0 0;font-size:13px">${commercial
+          ? 'All commercial features are active: revenue rules, other charges, financing, ClaimIt tracker, payer tabs and the audit ledger.'
+          : 'Non-commercial edition — billing, payer routing and patient payments. Redeem an upgrade key to unlock the revenue engine, financing, ClaimIt and payer tabs.'}</p></div>
+      ${commercial?'':`<div class="field" style="max-width:280px"><label>Upgrade key</label><input id="lickey" placeholder="HNN-COMM-XXXX-XXXX-XXXX"/></div>
+        <div class="field" style="max-width:150px;display:flex;align-items:flex-end"><button class="accent" style="width:100%" onclick="redeem()">Redeem</button></div>`}
+    </div>`;
+}
+async function redeem(){
+  const tid=$('tenant').value, key=$('lickey').value.trim();
+  if(!key)return toast('Enter your upgrade key');
+  const r=await fetch(`/api/admin/edition/${encodeURIComponent(tid)}/redeem`,{method:'POST',headers:H(),body:JSON.stringify({key})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));return toast('Upgrade failed: '+(e.message||e.error||r.status));}
+  const o=await r.json(); toast(`Upgraded ${o.from} → ${o.to}`); loadRules();
+}
+
+async function boot(){
+  try{
+    SCHEMA=await (await fetch('/api/admin/pricing/schema',{headers:H()})).json();
+    if(SCHEMA.error){toast('Invalid admin key');return;}
+    const t=await (await fetch('/api/admin/tenants',{headers:H()})).json();
+    $('tenant').innerHTML=t.data.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+    loadRules();
+  }catch(e){toast('Could not load console');}
+}
+
+async function loadRules(){
+  const tid=$('tenant').value; if(!tid) return;
+  const r=await (await fetch(`/api/admin/pricing/${encodeURIComponent(tid)}`,{headers:H()})).json();
+  const flat=r.rules.filter(x=>SCHEMA.ruleModes[x.type]==='flat');
+  const pct=r.rules.filter(x=>SCHEMA.ruleModes[x.type]!=='flat');
+  $('rules').innerHTML=pct.map(card).join('');
+  $('othercharges').innerHTML=flat.map(flatCard).join('');
+  pct.forEach(rule=>recalc(rule.type));
+  renderEdition(r);
+  loadRevenue(); loadSlots();
+}
+
+function card(r){
+  const m=META[r.type]||{title:r.type,why:''};
+  const targets=(SCHEMA.chargeTargets[r.type]||[]).map(t=>
+    `<option value="${t}" ${r.chargeTo===t?'selected':''}>${esc(TARGET_LABEL[t]||t)}</option>`).join('');
+  const pct=(Number(r.rate)*100).toFixed(2).replace(/\.00$/,'');
+  return `<div class="rule" id="rule-${r.type}">
+    <header>
+      <h3>${esc(m.title)}</h3>
+      <span class="cap">max ${(SCHEMA.caps[r.type]*100)}%</span>
+    </header>
+    <p class="why">${esc(m.why)}</p>
+    <div class="grid4">
+      <div class="field"><label>Rate (%)</label>
+        <input type="number" step="0.1" min="0" max="${SCHEMA.caps[r.type]*100}" id="rate-${r.type}" value="${pct}" oninput="recalc('${r.type}')"/></div>
+      <div class="field"><label>Charge to</label><select id="to-${r.type}">${targets}</select></div>
+      <div class="field"><label>Min fee (GHS)</label><input type="number" step="1" min="0" id="min-${r.type}" value="${r.minFee||0}" oninput="recalc('${r.type}')"/></div>
+      <div class="field"><label>Max fee (GHS, blank = none)</label><input type="number" step="1" min="0" id="max-${r.type}" value="${r.maxFee??''}" oninput="recalc('${r.type}')"/></div>
+    </div>
+    <label class="switch"><input type="checkbox" id="on-${r.type}" ${r.enabled?'checked':''} style="width:auto"/> Enabled</label>
+    <div class="calc">Preview on a basis of GHS
+      <input type="number" id="basis-${r.type}" value="1000" style="width:110px;display:inline-block;padding:4px 8px" oninput="recalc('${r.type}')"/>
+      → fee <b id="out-${r.type}">—</b></div>
+    <div class="save">
+      <button class="primary" onclick="save('${r.type}')">Save rule</button>
+      <span class="ok" id="ok-${r.type}"></span>
+    </div>
+  </div>`;
+}
+
+function recalc(type){
+  const cap=SCHEMA.caps[type];
+  let rate=parseFloat($('rate-'+type).value)||0;
+  if(rate/100>cap){ rate=cap*100; $('rate-'+type).value=rate; toast('Capped at '+(cap*100)+'%'); }
+  const basis=parseFloat($('basis-'+type).value)||0;
+  let fee=basis*(rate/100);
+  const mn=parseFloat($('min-'+type).value)||0; const mxRaw=$('max-'+type).value;
+  if(mn) fee=Math.max(fee,mn);
+  if(mxRaw!=='') fee=Math.min(fee,parseFloat(mxRaw)||0);
+  $('out-'+type).textContent='GHS '+n2(Math.max(0,fee));
+}
+
+async function save(type){
+  const tid=$('tenant').value;
+  const body={enabled:$('on-'+type).checked, rate:parseFloat($('rate-'+type).value)||0,
+    chargeTo:$('to-'+type).value, minFee:parseFloat($('min-'+type).value)||0,
+    maxFee:$('max-'+type).value===''?null:parseFloat($('max-'+type).value)};
+  const r=await fetch(`/api/admin/pricing/${encodeURIComponent(tid)}/${type}`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Save failed: '+(e.message||r.status));return;}
+  const saved=await r.json();
+  $('ok-'+type).textContent=`Saved · ${(saved.rate*100).toFixed(2).replace(/\.00$/,'')}% to ${saved.chargeTo}${saved.capApplied?' (at cap)':''}`;
+  toast('Rule saved'); loadRevenue();
+}
+
+async function loadRevenue(){
+  const tid=$('tenant').value;
+  const r=await (await fetch(`/api/admin/revenue/${encodeURIComponent(tid)}`,{headers:H()})).json();
+  const label={platform_fee_expedited_settlement:'Expedited',platform_fee_discount_fee:'Discount',platform_fee_claimit_margin:'ClaimIt margin'};
+  const cards=[['Total revenue','GHS '+n2(r.totalRevenue)]]
+    .concat((r.byType||[]).map(x=>[label[x.type]||x.type,'GHS '+n2(x.total)]));
+  $('rev').innerHTML=cards.slice(0,3).map(c=>`<div class="kpi"><div class="l">${esc(c[0])}</div><div class="bignum">${esc(c[1])}</div></div>`).join('')
+    || '<p class="muted">No revenue accrued yet.</p>';
+}
+const KIND_LABEL={insurer:'Insurer',corporate:'Corporate payor'};
+async function loadSlots(){
+  const tid=$('tenant').value; if(!tid) return;
+  const r=await (await fetch(`/api/admin/payer-slots/${encodeURIComponent(tid)}`,{headers:H()})).json();
+  const groups={};
+  (r.slots||[]).forEach(s=>{(groups[s.kind]=groups[s.kind]||[]).push(s);});
+  $('slots').innerHTML=Object.keys(groups).map(k=>`
+    <h3 style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">${esc(KIND_LABEL[k]||k)} slots</h3>
+    ${groups[k].map(slotRow).join('')}`).join('');
+}
+function slotRow(s){
+  const status = !s.programmed ? '<span class="pill open">empty</span>'
+    : s.expired ? '<span class="pill rejected">expired</span>'
+    : !s.enabled ? '<span class="pill rejected">released</span>'
+    : '<span class="pill settled">active</span>';
+  return `<div class="rule" style="padding:12px 14px">
+    <header style="margin-bottom:8px">
+      <h3 style="font-size:14px">${esc(KIND_LABEL[s.kind])} slot ${s.index} ${status}</h3>
+      ${s.programmed?`<span class="muted" style="font-size:12px">key: <code>${esc(s.apiKey||'')}</code></span>`:''}
+    </header>
+    <div class="grid4">
+      <div class="field"><label>Display name</label><input id="sn-${s.kind}-${s.index}" value="${esc(s.name||'')}" placeholder="e.g. Nationwide Health"/></div>
+      <div class="field"><label>Stanbic source account</label><input id="sa-${s.kind}-${s.index}" value="${esc(s.sourceAccount||'')}" placeholder="1300100xxx"/></div>
+      <div class="field"><label>Contact email</label><input id="se-${s.kind}-${s.index}" value="${esc(s.contactEmail||'')}" placeholder="claims@payer.example"/></div>
+      <div class="field"><label>Expires (optional)</label><input type="date" id="sx-${s.kind}-${s.index}" value="${esc((s.expiresAt||'').slice(0,10))}"/></div>
+    </div>
+    <div class="save">
+      <button class="primary" onclick="saveSlot('${s.kind}',${s.index})">${s.programmed?'Update':'Program'} slot</button>
+      ${s.programmed?`<button class="ghost" onclick="releaseSlot('${s.kind}',${s.index})">Release</button>`:''}
+      <span class="ok" id="sok-${s.kind}-${s.index}"></span>
+    </div>
+  </div>`;
+}
+async function saveSlot(kind,index){
+  const tid=$('tenant').value;
+  const body={name:$(`sn-${kind}-${index}`).value.trim(),
+    sourceAccount:$(`sa-${kind}-${index}`).value.trim()||null,
+    contactEmail:$(`se-${kind}-${index}`).value.trim()||null,
+    expiresAt:$(`sx-${kind}-${index}`).value||null, enabled:true};
+  if(!body.name){toast('Display name is required');return;}
+  const r=await fetch(`/api/admin/payer-slots/${encodeURIComponent(tid)}/${kind}/${index}`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Failed: '+(e.message||r.status));return;}
+  const p=await r.json();
+  $(`sok-${kind}-${index}`).textContent=`Live · tab "${p.name}" now shows in Billing`;
+  toast('Payer tab programmed'); loadSlots();
+}
+async function releaseSlot(kind,index){
+  if(!confirm('Release this slot? The tab disappears from Billing; past claims are unaffected.')) return;
+  const tid=$('tenant').value;
+  const r=await fetch(`/api/admin/payer-slots/${encodeURIComponent(tid)}/${kind}/${index}`,{method:'DELETE',headers:H()});
+  if(r.ok){toast('Slot released'); loadSlots();} else toast('Failed');
+}
+boot();
+</script>
+</body></html>
