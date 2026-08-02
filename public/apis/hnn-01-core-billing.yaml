@@ -1,0 +1,373 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — Core Billing API
+  version: 1.0.0
+  description: 'Create itemised bills, take patient payment (Mobile Money, card, cash), and read the clinic
+    dashboard. Available on **every** edition — this is the baseline any EMR/EHR can integrate against.
+
+
+    ### Editions
+
+    Every client runs on one of two editions in the **same deployment**:
+
+
+    | Edition | Includes |
+
+    |---|---|
+
+    | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports
+    |
+
+    | `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt
+    tracker, agnostic payer tabs, audit ledger |
+
+
+    Switching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on
+    downgrade**.
+
+    Commercial-only endpoints return **402 `upgrade_required`** when the caller''s client is non-commercial.
+
+    Check your own entitlement any time with `GET /api/v1/bills/edition`.
+
+
+    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+
+
+    _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
+    to the ledger as receivables._'
+servers:
+- url: https://nextgenhnnbiller-production.up.railway.app
+  description: Production
+- url: http://localhost:3000
+  description: Local
+tags:
+- name: Bills
+- name: Payments
+- name: Dashboard
+- name: Editions
+components:
+  securitySchemes:
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clinic/hospital (EMR) key
+paths:
+  /api/v1/bills:
+    post:
+      tags:
+      - Bills
+      summary: Create an itemised bill
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                patient:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+                    email:
+                      type: string
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      name:
+                        type: string
+                      cost:
+                        type: number
+                      qty:
+                        type: integer
+                adjustments:
+                  type: object
+                  properties:
+                    discountPercent:
+                      type: number
+                    copayPercent:
+                      type: number
+                    cashbackPercent:
+                      type: number
+                    discountCode:
+                      type: string
+                    discountKind:
+                      type: string
+                      enum:
+                      - standard
+                      - referral
+                      - linked_payer
+                      description: Attributes the discount so referral programmes can be priced separately
+                    referredBy:
+                      type: string
+                    linkedMemberId:
+                      type: string
+                insurance:
+                  type: object
+                  properties:
+                    payerId:
+                      type: string
+                    memberId:
+                      type: string
+                    employer:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        email:
+                          type: string
+      responses:
+        '201':
+          description: Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable)
+    get:
+      tags:
+      - Bills
+      summary: List this clinic’s bills
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/{id}:
+    get:
+      tags:
+      - Bills
+      summary: Get a bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: bill_not_found
+  /api/v1/bills/{id}/route:
+    post:
+      tags:
+      - Bills
+      summary: Route a bill to a payer (creates a claim + secure link)
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payerId:
+                  type: string
+      responses:
+        '201':
+          description: claim + payerLink
+        '403':
+          description: payer_not_available (another facility’s slot)
+        '422':
+          description: unknown_payer / payer_slot_expired / missing_member_id
+  /api/v1/bills/payers:
+    get:
+      tags:
+      - Bills
+      summary: Payers this facility can route to (global + its own active tabs)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/edition:
+    get:
+      tags:
+      - Editions
+      summary: What this client is licensed for
+      description: Returns the edition and a feature map. API-only partners use this to show/hide features
+        in their own UI.
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: '{ client, name, edition, features{}, licence{ active, expiresAt, daysLeft } }'
+  /api/v1/payments/intents:
+    post:
+      tags:
+      - Payments
+      summary: Create a patient payment intent
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                method:
+                  type: string
+                  enum:
+                  - mtn-momo
+                  - card
+                  - cash
+                payerPhone:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /api/v1/payments/intents/{id}:
+    get:
+      tags:
+      - Payments
+      summary: Get a payment intent
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/dashboard:
+    get:
+      tags:
+      - Dashboard
+      summary: Totals, recent bills, claims, notifications
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/claims:
+    get:
+      tags:
+      - Bills
+      summary: Claims raised by this clinic
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/claims/{id}:
+    get:
+      tags:
+      - Bills
+      summary: Claim + its bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/webhooks/collection:
+    post:
+      tags:
+      - Payments
+      summary: Payment gateway callback (x-webhook-secret)
+      responses:
+        '200':
+          description: OK
+  /pay/api/session/{intentId}:
+    get:
+      tags:
+      - Payments
+      summary: Public patient checkout session (sanitised, no key)
+      description: Backs the hosted patient payment page; the phone number is masked and no clinical detail
+        is exposed.
+      parameters:
+      - name: intentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: session_not_found
+  /pay/api/session/{intentId}/confirm:
+    post:
+      tags:
+      - Payments
+      summary: Confirm a patient checkout session
+      parameters:
+      - name: intentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: '{ status: paid }'
+  /api/v1/institutions:
+    get:
+      tags:
+      - Bills
+      summary: Banks / institutions available on the settlement rail
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/account-validation:
+    get:
+      tags:
+      - Bills
+      summary: Validate a beneficiary account before settlement
+      security:
+      - TenantKey: []
+      parameters:
+      - name: accountNumber
+        in: query
+        schema:
+          type: string
+      - name: serviceRoutingCode
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/network-terms:
+    get:
+      tags:
+      - Bills
+      summary: This facility’s expedited settlement (NNEST) terms, as set by each payer
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK

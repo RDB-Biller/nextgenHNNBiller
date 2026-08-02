@@ -1,0 +1,220 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — NHIS ClaimIt Tracker API
+  version: 1.0.0
+  description: 'Track NHIS claims and the refund a sponsoring insurer pays back — the refund becomes the
+    member’s **cashback**. Two modes: **routed** (bill raised here) and **external** (the claim is settled
+    in your EMR or the ClaimIt portal and you simply send us the data). Intake is idempotent on `nhisClaimNumber`.
+
+
+    ### Editions
+
+    Every client runs on one of two editions in the **same deployment**:
+
+
+    | Edition | Includes |
+
+    |---|---|
+
+    | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports
+    |
+
+    | `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt
+    tracker, agnostic payer tabs, audit ledger |
+
+
+    Switching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on
+    downgrade**.
+
+    Commercial-only endpoints return **402 `upgrade_required`** when the caller''s client is non-commercial.
+
+    Check your own entitlement any time with `GET /api/v1/bills/edition`.
+
+
+    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+
+
+    _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
+    to the ledger as receivables._'
+servers:
+- url: https://nextgenhnnbiller-production.up.railway.app
+  description: Production
+- url: http://localhost:3000
+  description: Local
+tags:
+- name: ClaimIt
+components:
+  securitySchemes:
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clinic/hospital (EMR) key
+paths:
+  /api/v1/claimit:
+    get:
+      tags:
+      - ClaimIt
+      summary: Tracked claims
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+    post:
+      tags:
+      - ClaimIt
+      summary: Track a claim (routed via billId, or external claim data)
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billId:
+                  type: string
+                  description: routed mode
+                nhisClaimNumber:
+                  type: string
+                nhisAmount:
+                  type: number
+                  description: amount being claimed (required for external mode)
+                provider:
+                  type: string
+                patientName:
+                  type: string
+                memberId:
+                  type: string
+                refundPercent:
+                  type: number
+                  default: 100
+                refundedBy:
+                  type: string
+                  default: acacia
+                refundDestination:
+                  type: string
+                  enum:
+                  - provider
+                  - member
+                  default: provider
+                  description: provider = refund lands with the clinic, so a member-charged margin is
+                    netted from the cashback and the balance is owed on. member = the insurer pays the
+                    member directly, so the margin is invoiced instead.
+                externalRef:
+                  type: string
+                claimedAt:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+        '422':
+          description: nhisAmount_required / provider_required
+  /api/v1/claimit/ingest:
+    post:
+      tags:
+      - ClaimIt
+      summary: Bulk intake from an EMR / ClaimIt export
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                claims:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '201':
+          description: '{ received, created, duplicates, errors[] }'
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/summary:
+    get:
+      tags:
+      - ClaimIt
+      summary: Totals incl. cashback paid, margin revenue, cashbackOwedToMembers
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}:
+    get:
+      tags:
+      - ClaimIt
+      summary: One tracked claim
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}/refund:
+    post:
+      tags:
+      - ClaimIt
+      summary: Record the refund received → cashback + margin
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                reference:
+                  type: string
+      responses:
+        '200':
+          description: Idempotent — replaying returns the same record
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}/status:
+    post:
+      tags:
+      - ClaimIt
+      summary: Update status
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition

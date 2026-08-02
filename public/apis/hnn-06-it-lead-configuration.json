@@ -1,0 +1,580 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HNN Biller — IT-Lead Configuration API",
+    "version": "1.0.0",
+    "description": "Everything the facility configuration screen does, exposed as an API — so a partner can rebuild that screen inside their own EMR, or use our hosted page, or mix the two. Keys are **org-scoped**: an IT lead can only ever configure their own organisation (403 `out_of_scope` otherwise).\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production.up.railway.app`\n\n_The platform never custodies funds: money moves account-to-account to the provider; fees are accrued to the ledger as receivables._"
+  },
+  "servers": [
+    {
+      "url": "https://nextgenhnnbiller-production.up.railway.app",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Identity"
+    },
+    {
+      "name": "Revenue rules"
+    },
+    {
+      "name": "Other charges"
+    },
+    {
+      "name": "Payer tabs"
+    },
+    {
+      "name": "Edition"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ConsoleKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-console-key",
+        "description": "IT-lead console key (personal, org-scoped)"
+      },
+      "AdminKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-key",
+        "description": "Legacy shared admin key"
+      }
+    }
+  },
+  "paths": {
+    "/api/admin/me": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "summary": "Signed-in identity and scope",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/tenants": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "summary": "Facilities in scope (with edition)",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/pricing/schema": {
+      "get": {
+        "tags": [
+          "Revenue rules"
+        ],
+        "summary": "Rule types, modes, caps, allowed charge targets",
+        "description": "Drive your own configuration UI from this — caps and targets are authoritative and enforced server-side.",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/pricing/{tenantId}": {
+      "get": {
+        "tags": [
+          "Revenue rules"
+        ],
+        "summary": "Effective rules for a facility",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ edition, features, commercial, rules[] }"
+          },
+          "403": {
+            "description": "out_of_scope"
+          }
+        }
+      }
+    },
+    "/api/admin/pricing/{tenantId}/{type}": {
+      "put": {
+        "tags": [
+          "Revenue rules"
+        ],
+        "summary": "Program a rule",
+        "description": "Percentage rules: `expedited_settlement` (cap 15%), `discount_fee` (cap 15%), `claimit_margin` (cap 100% of cashback) — send `rate` (0–1 or 0–100; clamped to the cap).\n\nFlat \"other charges\": `report_fee_mini`, `report_fee_standard` — send `amount` in GHS.",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "expedited_settlement",
+                "discount_fee",
+                "claimit_margin",
+                "report_fee_mini",
+                "report_fee_standard"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "rate": {
+                    "type": "number",
+                    "description": "percentage rules"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "flat rules (GHS)"
+                  },
+                  "chargeTo": {
+                    "type": "string",
+                    "description": "insurer | provider | beneficiary | member | patient | financier"
+                  },
+                  "minFee": {
+                    "type": "number"
+                  },
+                  "maxFee": {
+                    "type": "number",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "402": {
+            "description": "upgrade_required"
+          },
+          "403": {
+            "description": "out_of_scope"
+          },
+          "422": {
+            "description": "invalid_chargeTo / unknown_rule_type"
+          }
+        }
+      }
+    },
+    "/api/admin/pricing/{tenantId}/{type}/preview": {
+      "post": {
+        "tags": [
+          "Revenue rules"
+        ],
+        "summary": "Preview a fee — writes nothing",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/revenue/{tenantId}": {
+      "get": {
+        "tags": [
+          "Revenue rules"
+        ],
+        "summary": "Accrued revenue by type from the ledger",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/payer-slots/{tenantId}": {
+      "get": {
+        "tags": [
+          "Payer tabs"
+        ],
+        "summary": "The 6 agnostic slots (3 insurer + 3 corporate)",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/payer-slots/{tenantId}/{kind}/{index}": {
+      "put": {
+        "tags": [
+          "Payer tabs"
+        ],
+        "summary": "Program a payer tab (facility self-service)",
+        "description": "Stand up a new insurer or corporate payer without a backend change. Slots are private to the facility, get their own payer API key, and can be time-boxed with `expiresAt`.",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "insurer",
+                "corporate"
+              ]
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "sourceAccount": {
+                    "type": "string"
+                  },
+                  "contactEmail": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns the new payer API key"
+          },
+          "402": {
+            "description": "upgrade_required"
+          },
+          "403": {
+            "description": "out_of_scope"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Payer tabs"
+        ],
+        "summary": "Release a slot for reuse (past claims unaffected)",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/edition/{tenantId}": {
+      "get": {
+        "tags": [
+          "Edition"
+        ],
+        "summary": "Current edition and feature map",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/admin/edition/{tenantId}/redeem": {
+      "post": {
+        "tags": [
+          "Edition"
+        ],
+        "summary": "Redeem an upgrade key (non-commercial → commercial)",
+        "security": [
+          {
+            "ConsoleKey": []
+          },
+          {
+            "AdminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "example": "HNN-COMM-XXXXXX-XXXXXX-XXXXXX"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ client, from, to }"
+          },
+          "403": {
+            "description": "license_not_for_this_client"
+          },
+          "404": {
+            "description": "invalid_license_key"
+          },
+          "409": {
+            "description": "license_already_redeemed / revoked / expired"
+          }
+        }
+      }
+    }
+  }
+}

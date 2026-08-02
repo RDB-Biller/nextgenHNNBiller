@@ -1,0 +1,1902 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — Complete API
+  version: 1.0.0
+  description: 'Every endpoint across all feature groups.
+
+
+    ### Editions
+
+    Every client runs on one of two editions in the **same deployment**:
+
+
+    | Edition | Includes |
+
+    |---|---|
+
+    | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports
+    |
+
+    | `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt
+    tracker, agnostic payer tabs, audit ledger |
+
+
+    Switching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on
+    downgrade**.
+
+    Commercial-only endpoints return **402 `upgrade_required`** when the caller''s client is non-commercial.
+
+    Check your own entitlement any time with `GET /api/v1/bills/edition`.
+
+
+    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`'
+servers:
+- url: https://nextgenhnnbiller-production.up.railway.app
+- url: http://localhost:3000
+components:
+  securitySchemes:
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clinic/hospital (EMR) key
+    PayerKey:
+      type: apiKey
+      in: header
+      name: x-payer-key
+      description: Insurer / corporate payer key
+    ConsoleKey:
+      type: apiKey
+      in: header
+      name: x-console-key
+      description: IT-lead console key (personal, org-scoped)
+    AdminKey:
+      type: apiKey
+      in: header
+      name: x-admin-key
+      description: Legacy shared admin key
+    PlatformKey:
+      type: apiKey
+      in: header
+      name: x-platform-key
+      description: SaaS owner master key
+tags:
+- name: Bills
+- name: Payments
+- name: Dashboard
+- name: Editions
+- name: Payer
+- name: Claim link
+- name: ClaimIt
+- name: Financing
+- name: Reports
+- name: Ledger
+- name: Identity
+- name: Revenue rules
+- name: Other charges
+- name: Payer tabs
+- name: Edition
+- name: Overview
+- name: Clients
+- name: Payers
+- name: EMR partners
+- name: IT leads
+- name: Licences
+- name: Submissions
+- name: Revenue
+- name: Licensing
+paths:
+  /api/v1/bills:
+    post:
+      tags:
+      - Bills
+      summary: Create an itemised bill
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                patient:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+                    email:
+                      type: string
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      name:
+                        type: string
+                      cost:
+                        type: number
+                      qty:
+                        type: integer
+                adjustments:
+                  type: object
+                  properties:
+                    discountPercent:
+                      type: number
+                    copayPercent:
+                      type: number
+                    cashbackPercent:
+                      type: number
+                    discountCode:
+                      type: string
+                    discountKind:
+                      type: string
+                      enum:
+                      - standard
+                      - referral
+                      - linked_payer
+                      description: Attributes the discount so referral programmes can be priced separately
+                    referredBy:
+                      type: string
+                    linkedMemberId:
+                      type: string
+                insurance:
+                  type: object
+                  properties:
+                    payerId:
+                      type: string
+                    memberId:
+                      type: string
+                    employer:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        email:
+                          type: string
+      responses:
+        '201':
+          description: Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable)
+    get:
+      tags:
+      - Bills
+      summary: List this clinic’s bills
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/{id}:
+    get:
+      tags:
+      - Bills
+      summary: Get a bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: bill_not_found
+  /api/v1/bills/{id}/route:
+    post:
+      tags:
+      - Bills
+      summary: Route a bill to a payer (creates a claim + secure link)
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payerId:
+                  type: string
+      responses:
+        '201':
+          description: claim + payerLink
+        '403':
+          description: payer_not_available (another facility’s slot)
+        '422':
+          description: unknown_payer / payer_slot_expired / missing_member_id
+  /api/v1/bills/payers:
+    get:
+      tags:
+      - Bills
+      summary: Payers this facility can route to (global + its own active tabs)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/edition:
+    get:
+      tags:
+      - Editions
+      summary: What this client is licensed for
+      description: Returns the edition and a feature map. API-only partners use this to show/hide features
+        in their own UI.
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: '{ client, name, edition, features{}, licence{ active, expiresAt, daysLeft } }'
+  /api/v1/payments/intents:
+    post:
+      tags:
+      - Payments
+      summary: Create a patient payment intent
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                method:
+                  type: string
+                  enum:
+                  - mtn-momo
+                  - card
+                  - cash
+                payerPhone:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /api/v1/payments/intents/{id}:
+    get:
+      tags:
+      - Payments
+      summary: Get a payment intent
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/dashboard:
+    get:
+      tags:
+      - Dashboard
+      summary: Totals, recent bills, claims, notifications
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/claims:
+    get:
+      tags:
+      - Bills
+      summary: Claims raised by this clinic
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/claims/{id}:
+    get:
+      tags:
+      - Bills
+      summary: Claim + its bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/webhooks/collection:
+    post:
+      tags:
+      - Payments
+      summary: Payment gateway callback (x-webhook-secret)
+      responses:
+        '200':
+          description: OK
+  /api/payer/me:
+    get:
+      tags:
+      - Payer
+      summary: Who am I
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: OK
+  /api/payer/summary:
+    get:
+      tags:
+      - Payer
+      summary: Pending / settled / rejected counts and values
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: OK
+  /api/payer/claims:
+    get:
+      tags:
+      - Payer
+      summary: Claims addressed to you
+      security:
+      - PayerKey: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - pending
+          - authorized
+          - settled
+          - rejected
+      responses:
+        '200':
+          description: OK
+  /api/payer/claims/{id}:
+    get:
+      tags:
+      - Payer
+      summary: Claim detail (member ID, line items, amount)
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/payer/claims/{id}/authorize:
+    post:
+      tags:
+      - Payer
+      summary: Authorise the A2A transfer to the provider
+      description: Row-locked so it cannot double-execute, and idempotent when you send an Idempotency-Key.
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Retries with the same key replay the original response instead of executing again.
+      responses:
+        '200':
+          description: Claim now authorized or settled
+        '409':
+          description: claim_not_pending / request_in_progress
+        '422':
+          description: idempotency_key_reused
+  /api/payer/claims/{id}/reject:
+    post:
+      tags:
+      - Payer
+      summary: Decline a claim with a reason
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /claim/api/{token}:
+    get:
+      tags:
+      - Claim link
+      summary: Open a claim by secure link (no key needed)
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /claim/api/{token}/authorize:
+    post:
+      tags:
+      - Claim link
+      summary: Authorise via secure link
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Retries with the same key replay the original response instead of executing again.
+      responses:
+        '200':
+          description: OK
+  /claim/api/{token}/reject:
+    post:
+      tags:
+      - Claim link
+      summary: Reject via secure link
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/claimit:
+    get:
+      tags:
+      - ClaimIt
+      summary: Tracked claims
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+    post:
+      tags:
+      - ClaimIt
+      summary: Track a claim (routed via billId, or external claim data)
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billId:
+                  type: string
+                  description: routed mode
+                nhisClaimNumber:
+                  type: string
+                nhisAmount:
+                  type: number
+                  description: amount being claimed (required for external mode)
+                provider:
+                  type: string
+                patientName:
+                  type: string
+                memberId:
+                  type: string
+                refundPercent:
+                  type: number
+                  default: 100
+                refundedBy:
+                  type: string
+                  default: acacia
+                refundDestination:
+                  type: string
+                  enum:
+                  - provider
+                  - member
+                  default: provider
+                  description: provider = refund lands with the clinic, so a member-charged margin is
+                    netted from the cashback and the balance is owed on. member = the insurer pays the
+                    member directly, so the margin is invoiced instead.
+                externalRef:
+                  type: string
+                claimedAt:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+        '422':
+          description: nhisAmount_required / provider_required
+  /api/v1/claimit/ingest:
+    post:
+      tags:
+      - ClaimIt
+      summary: Bulk intake from an EMR / ClaimIt export
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                claims:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '201':
+          description: '{ received, created, duplicates, errors[] }'
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/summary:
+    get:
+      tags:
+      - ClaimIt
+      summary: Totals incl. cashback paid, margin revenue, cashbackOwedToMembers
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}:
+    get:
+      tags:
+      - ClaimIt
+      summary: One tracked claim
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}/refund:
+    post:
+      tags:
+      - ClaimIt
+      summary: Record the refund received → cashback + margin
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                reference:
+                  type: string
+      responses:
+        '200':
+          description: Idempotent — replaying returns the same record
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/claimit/{id}/status:
+    post:
+      tags:
+      - ClaimIt
+      summary: Update status
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/financing/questions:
+    get:
+      tags:
+      - Reports
+      summary: Question set for a report
+      security:
+      - TenantKey: []
+      parameters:
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - micro
+          - detailed
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/financing/reports:
+    post:
+      tags:
+      - Reports
+      summary: Generate a medical report (accrues the configured flat report fee)
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                kind:
+                  type: string
+                  enum:
+                  - micro
+                  - detailed
+                diagnosis:
+                  type: string
+                qa:
+                  type: array
+                  items:
+                    type: object
+                amountRequested:
+                  type: number
+                loanType:
+                  type: string
+                clinicianName:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/financing/reports/{id}:
+    get:
+      tags:
+      - Reports
+      summary: Get a report
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /report/api/{token}:
+    get:
+      tags:
+      - Reports
+      summary: Open a report by share link (sanitised)
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/financing:
+    post:
+      tags:
+      - Financing
+      summary: Create financing for the patient share
+      security:
+      - TenantKey: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Retries with the same key replay the original response instead of executing again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              - type
+              properties:
+                billId:
+                  type: string
+                type:
+                  type: string
+                  enum:
+                  - momo_loan
+                  - bank_loan
+                  - employer_loan
+                  - grant
+                  - hospital_credit
+                financierId:
+                  type: string
+                employerId:
+                  type: string
+                amount:
+                  type: number
+                partPayment:
+                  type: number
+                  description: hospital_credit only — paid now, remainder on credit
+                reportId:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+        '409':
+          description: request_in_progress
+  /api/v1/financing/{id}:
+    get:
+      tags:
+      - Financing
+      summary: Get a financing record
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/ledger:
+    get:
+      tags:
+      - Ledger
+      summary: Recent entries
+      security:
+      - TenantKey: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 100
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/ledger/summary:
+    get:
+      tags:
+      - Ledger
+      summary: Totals by movement type (cash vs credit)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/ledger/bill/{billId}:
+    get:
+      tags:
+      - Ledger
+      summary: Entries for one bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: billId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/admin/me:
+    get:
+      tags:
+      - Identity
+      summary: Signed-in identity and scope
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      responses:
+        '200':
+          description: OK
+  /api/admin/tenants:
+    get:
+      tags:
+      - Identity
+      summary: Facilities in scope (with edition)
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      responses:
+        '200':
+          description: OK
+  /api/admin/pricing/schema:
+    get:
+      tags:
+      - Revenue rules
+      summary: Rule types, modes, caps, allowed charge targets
+      description: Drive your own configuration UI from this — caps and targets are authoritative and
+        enforced server-side.
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      responses:
+        '200':
+          description: OK
+  /api/admin/pricing/{tenantId}:
+    get:
+      tags:
+      - Revenue rules
+      summary: Effective rules for a facility
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: '{ edition, features, commercial, rules[] }'
+        '403':
+          description: out_of_scope
+  /api/admin/pricing/{tenantId}/{type}:
+    put:
+      tags:
+      - Revenue rules
+      summary: Program a rule
+      description: 'Percentage rules: `expedited_settlement` (cap 15%), `discount_fee` (cap 15%), `claimit_margin`
+        (cap 100% of cashback) — send `rate` (0–1 or 0–100; clamped to the cap).
+
+
+        Flat "other charges": `report_fee_mini`, `report_fee_standard` — send `amount` in GHS.'
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - expedited_settlement
+          - discount_fee
+          - claimit_margin
+          - report_fee_mini
+          - report_fee_standard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                rate:
+                  type: number
+                  description: percentage rules
+                amount:
+                  type: number
+                  description: flat rules (GHS)
+                chargeTo:
+                  type: string
+                  description: insurer | provider | beneficiary | member | patient | financier
+                minFee:
+                  type: number
+                maxFee:
+                  type: number
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required
+        '403':
+          description: out_of_scope
+        '422':
+          description: invalid_chargeTo / unknown_rule_type
+  /api/admin/pricing/{tenantId}/{type}/preview:
+    post:
+      tags:
+      - Revenue rules
+      summary: Preview a fee — writes nothing
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/admin/revenue/{tenantId}:
+    get:
+      tags:
+      - Revenue rules
+      summary: Accrued revenue by type from the ledger
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/admin/payer-slots/{tenantId}:
+    get:
+      tags:
+      - Payer tabs
+      summary: The 6 agnostic slots (3 insurer + 3 corporate)
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/admin/payer-slots/{tenantId}/{kind}/{index}:
+    put:
+      tags:
+      - Payer tabs
+      summary: Program a payer tab (facility self-service)
+      description: Stand up a new insurer or corporate payer without a backend change. Slots are private
+        to the facility, get their own payer API key, and can be time-boxed with `expiresAt`.
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - insurer
+          - corporate
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                sourceAccount:
+                  type: string
+                contactEmail:
+                  type: string
+                expiresAt:
+                  type: string
+                enabled:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Returns the new payer API key
+        '402':
+          description: upgrade_required
+        '403':
+          description: out_of_scope
+    delete:
+      tags:
+      - Payer tabs
+      summary: Release a slot for reuse (past claims unaffected)
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/admin/edition/{tenantId}:
+    get:
+      tags:
+      - Edition
+      summary: Current edition and feature map
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/admin/edition/{tenantId}/redeem:
+    post:
+      tags:
+      - Edition
+      summary: Redeem an upgrade key (non-commercial → commercial)
+      security:
+      - ConsoleKey: []
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - key
+              properties:
+                key:
+                  type: string
+                  example: HNN-COMM-XXXXXX-XXXXXX-XXXXXX
+      responses:
+        '200':
+          description: '{ client, from, to }'
+        '403':
+          description: license_not_for_this_client
+        '404':
+          description: invalid_license_key
+        '409':
+          description: license_already_redeemed / revoked / expired
+  /api/platform/me:
+    get:
+      tags:
+      - Overview
+      summary: Principal, editions and roles
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/overview:
+    get:
+      tags:
+      - Overview
+      summary: Counts across the deployment
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/clients:
+    get:
+      tags:
+      - Clients
+      summary: All clients with edition + feature map
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Clients
+      summary: Create a client (returns its tenant API key)
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                edition:
+                  type: string
+                  enum:
+                  - non_commercial
+                  - commercial
+                  default: non_commercial
+                serviceRoutingCode:
+                  type: string
+                beneficiaryAccount:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /api/platform/clients/{id}/edition:
+    put:
+      tags:
+      - Editions
+      summary: Transition a client between editions (both directions)
+      description: Instant, reversible, non-destructive. Downgrading stops serving commercial features
+        but retains all data; upgrading again restores full access to it.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - edition
+              properties:
+                edition:
+                  type: string
+                  enum:
+                  - non_commercial
+                  - commercial
+      responses:
+        '200':
+          description: '{ client, name, from, to }'
+        '404':
+          description: client_not_found
+        '422':
+          description: unknown_edition
+  /api/platform/payers:
+    get:
+      tags:
+      - Payers
+      summary: Global payers
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Payers
+      summary: Create an insurer or corporate payer (returns its payer key)
+      security:
+      - PlatformKey: []
+      responses:
+        '201':
+          description: Created
+  /api/platform/emr-partners:
+    get:
+      tags:
+      - EMR partners
+      summary: EMR/EHR vendor partners
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - EMR partners
+      summary: Add an EMR/EHR vendor (returns a partner key)
+      security:
+      - PlatformKey: []
+      responses:
+        '201':
+          description: Created
+  /api/platform/users:
+    get:
+      tags:
+      - IT leads
+      summary: All IT leads and platform admins
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - IT leads
+      summary: Assign an IT lead (returns their console key)
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - role
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                role:
+                  type: string
+                  enum:
+                  - platform_admin
+                  - it_lead_facility
+                  - it_lead_payer
+                  - it_lead_emr
+                orgId:
+                  type: string
+                  description: required for all roles except platform_admin
+      responses:
+        '201':
+          description: Created
+        '422':
+          description: unknown_role / orgId_required_for_role
+  /api/platform/users/{id}/status:
+    put:
+      tags:
+      - IT leads
+      summary: Suspend or restore a lead
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/platform/users/{id}/rotate-key:
+    post:
+      tags:
+      - IT leads
+      summary: Rotate a console key
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/platform/licenses:
+    get:
+      tags:
+      - Licences
+      summary: All licence keys
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Licences
+      summary: Issue an upgrade key
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                edition:
+                  type: string
+                  enum:
+                  - commercial
+                  - non_commercial
+                  default: non_commercial
+                orgId:
+                  type: string
+                  description: bind to one client so the key cannot be shared
+                expiresAt:
+                  type: string
+                note:
+                  type: string
+                termMonths:
+                  type: integer
+                  default: 6
+                  description: licence validity window
+                feeAmount:
+                  type: number
+                  default: 0
+                  description: licensing fee for the term (0 = free)
+      responses:
+        '201':
+          description: Created
+  /api/platform/licenses/{key}/revoke:
+    post:
+      tags:
+      - Licences
+      summary: Revoke a key
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /pay/api/session/{intentId}:
+    get:
+      tags:
+      - Payments
+      summary: Public patient checkout session (sanitised, no key)
+      description: Backs the hosted patient payment page; the phone number is masked and no clinical detail
+        is exposed.
+      parameters:
+      - name: intentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: session_not_found
+  /pay/api/session/{intentId}/confirm:
+    post:
+      tags:
+      - Payments
+      summary: Confirm a patient checkout session
+      parameters:
+      - name: intentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: '{ status: paid }'
+  /api/v1/institutions:
+    get:
+      tags:
+      - Bills
+      summary: Banks / institutions available on the settlement rail
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/account-validation:
+    get:
+      tags:
+      - Bills
+      summary: Validate a beneficiary account before settlement
+      security:
+      - TenantKey: []
+      parameters:
+      - name: accountNumber
+        in: query
+        schema:
+          type: string
+      - name: serviceRoutingCode
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /api/payer/network:
+    get:
+      tags:
+      - NNEST
+      summary: Your network posture and provider terms
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: '{ networkMode, outOfNetworkPolicy, caps, providers[] }'
+  /api/payer/network/posture:
+    put:
+      tags:
+      - NNEST
+      summary: Set open vs narrow network, and out-of-network policy
+      security:
+      - PayerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                networkMode:
+                  type: string
+                  enum:
+                  - open
+                  - narrow
+                  default: open
+                outOfNetworkPolicy:
+                  type: string
+                  enum:
+                  - standard
+                  - block
+                  default: standard
+      responses:
+        '200':
+          description: OK
+  /api/payer/network/providers/{tenantId}:
+    put:
+      tags:
+      - NNEST
+      summary: Set a provider’s expedited settlement terms
+      security:
+      - PayerKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settlement:
+                  type: string
+                  enum:
+                  - instant
+                  - standard
+                  default: instant
+                feeRate:
+                  type: number
+                  description: 0-1 or 0-100; clamped to the 15% cap
+                chargeTo:
+                  type: string
+                  enum:
+                  - insurer
+                  - provider
+                  - beneficiary
+                promptPaymentDiscountPercent:
+                  type: number
+                  description: discount the provider grants for instant cash; reduces the transferred
+                    amount (max 15%)
+                maxClaimAmount:
+                  type: number
+                  nullable: true
+                  description: claims above this are settled, but not expedited
+                effectiveFrom:
+                  type: string
+                effectiveTo:
+                  type: string
+                status:
+                  type: string
+                  enum:
+                  - active
+                  - suspended
+                note:
+                  type: string
+      responses:
+        '200':
+          description: Terms (feeRateCapped flags a clamped rate)
+        '404':
+          description: unknown_provider
+        '422':
+          description: invalid_chargeTo
+    delete:
+      tags:
+      - NNEST
+      summary: Suspend a provider’s terms
+      security:
+      - PayerKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /api/payer/network/preview:
+    post:
+      tags:
+      - NNEST
+      summary: 'Dry-run: how would a claim settle today? (writes nothing)'
+      security:
+      - PayerKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tenantId:
+                  type: string
+                amount:
+                  type: number
+      responses:
+        '200':
+          description: '{ inNetwork, expedited, settlementAmount, promptPaymentDiscount, reason }'
+  /api/v1/bills/network-terms:
+    get:
+      tags:
+      - Bills
+      summary: This facility’s expedited settlement (NNEST) terms, as set by each payer
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/submissions:
+    get:
+      tags:
+      - Submissions
+      summary: Every claim submission across all developers/tenants
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - pending
+          - settled
+          - authorized
+          - rejected
+      - name: tenantId
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 200
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+  /api/platform/submissions/summary:
+    get:
+      tags:
+      - Submissions
+      summary: Counts and value by status across everyone
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/submissions/{id}:
+    get:
+      tags:
+      - Submissions
+      summary: One submission (enriched)
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: claim_not_found
+  /api/platform/submissions/{id}/approve:
+    post:
+      tags:
+      - Submissions
+      summary: Approve a submission — triggers the Stanbic A2A transfer to the provider and settles
+      description: Runs the same guarded, idempotent authorisation path the payer uses. The provider is
+        paid account-to-account; the platform never holds funds; a ledger entry is written.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Settled (with transferReference)
+        '404':
+          description: claim_not_found
+        '409':
+          description: claim_not_pending
+  /api/platform/submissions/{id}/decline:
+    post:
+      tags:
+      - Submissions
+      summary: Decline a submission with a reason
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/platform/revenue:
+    get:
+      tags:
+      - Revenue
+      summary: SaaS-wide accrued revenue (all clients), by type and by client
+      description: Aggregates platform_fee_* ledger entries across every tenant. All figures are accrued
+        receivables, not cash held.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ totalAccrued, byType[], byClient[] }'
+  /api/platform/revenue/recent:
+    get:
+      tags:
+      - Revenue
+      summary: Recent fee activity across all clients
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 100
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+  /api/platform/licensing:
+    get:
+      tags:
+      - Licensing
+      summary: Current licensing policy
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ mode, requireLicense, termMonths, licenseFee, currency }'
+    put:
+      tags:
+      - Licensing
+      summary: Set licensing policy (free vs licensed, term, fee)
+      description: mode free_non_commercial = fee-free (default). mode licensed = require a live licence;
+        set licenseFee per term. Switching to free forces the fee to zero. Switching to licensed starts
+        a one-off grace window (default 30 days) during which clients without a licence keep working.
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum:
+                  - free_non_commercial
+                  - licensed
+                termMonths:
+                  type: integer
+                  default: 6
+                licenseFee:
+                  type: number
+                currency:
+                  type: string
+                graceDays:
+                  type: integer
+                  default: 30
+                  description: grace window for unlicensed clients after switching to licensed
+      responses:
+        '200':
+          description: OK
+  /api/platform/licenses/state:
+    get:
+      tags:
+      - Licensing
+      summary: Licence state for every client (edition, expiry, days left, due-soon)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/clients/{id}/renew:
+    post:
+      tags:
+      - Licensing
+      summary: Renew a client’s licence for another term (default 6 months)
+      description: Extends from the later of now or current expiry. feeAmount records what was charged
+        (0 while free).
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                termMonths:
+                  type: integer
+                  default: 6
+                feeAmount:
+                  type: number
+                  default: 0
+      responses:
+        '200':
+          description: '{ client, edition, expiresAt, feeAmount }'

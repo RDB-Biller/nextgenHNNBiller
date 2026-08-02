@@ -1,0 +1,885 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HNN Biller \u2014 Master Control API (SaaS owner)",
+    "version": "1.0.0",
+    "description": "Manage every organisation on the deployment \u2014 clients, payers, EMR/EHR partners \u2014 the IT leads assigned to them, and each client\u2019s edition. **This is the transition API: move any client between commercial and non-commercial instantly, in both directions, with no data loss.**\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip \u2014 no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production.up.railway.app`\n\n_The platform never custodies funds: money moves account-to-account to the provider; fees are accrued to the ledger as receivables._"
+  },
+  "servers": [
+    {
+      "url": "https://nextgenhnnbiller-production.up.railway.app",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Overview"
+    },
+    {
+      "name": "Clients"
+    },
+    {
+      "name": "Editions"
+    },
+    {
+      "name": "Payers"
+    },
+    {
+      "name": "EMR partners"
+    },
+    {
+      "name": "IT leads"
+    },
+    {
+      "name": "Licences"
+    },
+    {
+      "name": "Submissions"
+    },
+    {
+      "name": "Revenue"
+    },
+    {
+      "name": "Licensing"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "PlatformKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-platform-key",
+        "description": "SaaS owner master key"
+      }
+    }
+  },
+  "paths": {
+    "/api/platform/me": {
+      "get": {
+        "tags": [
+          "Overview"
+        ],
+        "summary": "Principal, editions and roles",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/overview": {
+      "get": {
+        "tags": [
+          "Overview"
+        ],
+        "summary": "Counts across the deployment",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/clients": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "All clients with edition + feature map",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Create a client (returns its tenant API key)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "edition": {
+                    "type": "string",
+                    "enum": [
+                      "non_commercial",
+                      "commercial"
+                    ],
+                    "default": "non_commercial"
+                  },
+                  "serviceRoutingCode": {
+                    "type": "string"
+                  },
+                  "beneficiaryAccount": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/platform/clients/{id}/edition": {
+      "put": {
+        "tags": [
+          "Editions"
+        ],
+        "summary": "Transition a client between editions (both directions)",
+        "description": "Instant, reversible, non-destructive. Downgrading stops serving commercial features but retains all data; upgrading again restores full access to it.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "edition"
+                ],
+                "properties": {
+                  "edition": {
+                    "type": "string",
+                    "enum": [
+                      "non_commercial",
+                      "commercial"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ client, name, from, to }"
+          },
+          "404": {
+            "description": "client_not_found"
+          },
+          "422": {
+            "description": "unknown_edition"
+          }
+        }
+      }
+    },
+    "/api/platform/payers": {
+      "get": {
+        "tags": [
+          "Payers"
+        ],
+        "summary": "Global payers",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Payers"
+        ],
+        "summary": "Create an insurer or corporate payer (returns its payer key)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/platform/emr-partners": {
+      "get": {
+        "tags": [
+          "EMR partners"
+        ],
+        "summary": "EMR/EHR vendor partners",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "EMR partners"
+        ],
+        "summary": "Add an EMR/EHR vendor (returns a partner key)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/platform/users": {
+      "get": {
+        "tags": [
+          "IT leads"
+        ],
+        "summary": "All IT leads and platform admins",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "IT leads"
+        ],
+        "summary": "Assign an IT lead (returns their console key)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "role"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "platform_admin",
+                      "it_lead_facility",
+                      "it_lead_payer",
+                      "it_lead_emr"
+                    ]
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "required for all roles except platform_admin"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "422": {
+            "description": "unknown_role / orgId_required_for_role"
+          }
+        }
+      }
+    },
+    "/api/platform/users/{id}/status": {
+      "put": {
+        "tags": [
+          "IT leads"
+        ],
+        "summary": "Suspend or restore a lead",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/users/{id}/rotate-key": {
+      "post": {
+        "tags": [
+          "IT leads"
+        ],
+        "summary": "Rotate a console key",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/licenses": {
+      "get": {
+        "tags": [
+          "Licences"
+        ],
+        "summary": "All licence keys",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Licences"
+        ],
+        "summary": "Issue an upgrade key",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edition": {
+                    "type": "string",
+                    "enum": [
+                      "commercial",
+                      "non_commercial"
+                    ],
+                    "default": "non_commercial"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "description": "bind to one client so the key cannot be shared"
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "termMonths": {
+                    "type": "integer",
+                    "default": 6,
+                    "description": "licence validity window"
+                  },
+                  "feeAmount": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "licensing fee for the term (0 = free)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/platform/licenses/{key}/revoke": {
+      "post": {
+        "tags": [
+          "Licences"
+        ],
+        "summary": "Revoke a key",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/submissions": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "Every claim submission across all developers/tenants",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "settled",
+                "authorized",
+                "rejected"
+              ]
+            }
+          },
+          {
+            "name": "tenantId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/submissions/summary": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "Counts and value by status across everyone",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/submissions/{id}": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "One submission (enriched)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "claim_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/submissions/{id}/approve": {
+      "post": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "Approve a submission \u2014 triggers the Stanbic A2A transfer to the provider and settles",
+        "description": "Runs the same guarded, idempotent authorisation path the payer uses. The provider is paid account-to-account; the platform never holds funds; a ledger entry is written.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settled (with transferReference)"
+          },
+          "404": {
+            "description": "claim_not_found"
+          },
+          "409": {
+            "description": "claim_not_pending"
+          }
+        }
+      }
+    },
+    "/api/platform/submissions/{id}/decline": {
+      "post": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "Decline a submission with a reason",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/revenue": {
+      "get": {
+        "tags": [
+          "Revenue"
+        ],
+        "summary": "SaaS-wide accrued revenue (all clients), by type and by client",
+        "description": "Aggregates platform_fee_* ledger entries across every tenant. All figures are accrued receivables, not cash held.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ totalAccrued, byType[], byClient[] }"
+          }
+        }
+      }
+    },
+    "/api/platform/revenue/recent": {
+      "get": {
+        "tags": [
+          "Revenue"
+        ],
+        "summary": "Recent fee activity across all clients",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/licensing": {
+      "get": {
+        "tags": [
+          "Licensing"
+        ],
+        "summary": "Current licensing policy",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ mode, requireLicense, termMonths, licenseFee, currency }"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Licensing"
+        ],
+        "summary": "Set licensing policy (free vs licensed, term, fee)",
+        "description": "mode free_non_commercial = fee-free (default). mode licensed = require a live licence; set licenseFee per term. Switching to free forces the fee to zero. Switching to licensed starts a one-off grace window (default 30 days) during which clients without a licence keep working.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "free_non_commercial",
+                      "licensed"
+                    ]
+                  },
+                  "termMonths": {
+                    "type": "integer",
+                    "default": 6
+                  },
+                  "licenseFee": {
+                    "type": "number"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "graceDays": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "grace window for unlicensed clients after switching to licensed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/licenses/state": {
+      "get": {
+        "tags": [
+          "Licensing"
+        ],
+        "summary": "Licence state for every client (edition, expiry, days left, due-soon)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/clients/{id}/renew": {
+      "post": {
+        "tags": [
+          "Licensing"
+        ],
+        "summary": "Renew a client\u2019s licence for another term (default 6 months)",
+        "description": "Extends from the later of now or current expiry. feeAmount records what was charged (0 while free).",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "termMonths": {
+                    "type": "integer",
+                    "default": 6
+                  },
+                  "feeAmount": {
+                    "type": "number",
+                    "default": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ client, edition, expiresAt, feeAmount }"
+          }
+        }
+      }
+    }
+  }
+}

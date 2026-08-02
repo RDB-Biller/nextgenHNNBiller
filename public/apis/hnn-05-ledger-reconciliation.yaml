@@ -1,0 +1,103 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — Ledger & Reconciliation API
+  version: 1.0.0
+  description: 'The append-only money ledger. Every settlement writes an immutable entry in the same transaction
+    as the bill update. `cashMovement` distinguishes real transfers from receivables (credit, accrued
+    platform fees).
+
+
+    ### Editions
+
+    Every client runs on one of two editions in the **same deployment**:
+
+
+    | Edition | Includes |
+
+    |---|---|
+
+    | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports
+    |
+
+    | `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt
+    tracker, agnostic payer tabs, audit ledger |
+
+
+    Switching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on
+    downgrade**.
+
+    Commercial-only endpoints return **402 `upgrade_required`** when the caller''s client is non-commercial.
+
+    Check your own entitlement any time with `GET /api/v1/bills/edition`.
+
+
+    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+
+
+    _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
+    to the ledger as receivables._'
+servers:
+- url: https://nextgenhnnbiller-production.up.railway.app
+  description: Production
+- url: http://localhost:3000
+  description: Local
+tags:
+- name: Ledger
+components:
+  securitySchemes:
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clinic/hospital (EMR) key
+paths:
+  /api/v1/ledger:
+    get:
+      tags:
+      - Ledger
+      summary: Recent entries
+      security:
+      - TenantKey: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 100
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/ledger/summary:
+    get:
+      tags:
+      - Ledger
+      summary: Totals by movement type (cash vs credit)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/ledger/bill/{billId}:
+    get:
+      tags:
+      - Ledger
+      summary: Entries for one bill
+      security:
+      - TenantKey: []
+      parameters:
+      - name: billId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
