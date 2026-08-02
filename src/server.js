@@ -4,7 +4,7 @@ const path = require('path');
 const express = require('express');
 const config = require('./config');
 const store = require('./store');
-const { authTenant, errorHandler } = require('./middleware/auth');
+const { authTenant, requireLicense, errorHandler } = require('./middleware/auth');
 
 const billsRoutes = require('./routes/bills');
 const { router: paymentsRoutes } = require('./routes/payments');
@@ -17,6 +17,10 @@ const claimPortalRoutes = require('./routes/claimPortal');
 const payerApiRoutes = require('./routes/payerApi');
 const financingRoutes = require('./routes/financing');
 const ledgerRoutes = require('./routes/ledger');
+const adminRoutes = require('./routes/admin');
+const platformRoutes = require('./routes/platform');
+const { authPlatform, requireFeature } = require('./middleware/access');
+const claimitRoutes = require('./routes/claimit');
 const reportPortalRoutes = require('./routes/reportPortal');
 
 const app = express();
@@ -36,16 +40,22 @@ app.use('/app', express.static(PUBLIC));
 
 // Payer API (insurer RX / employer HR systems) — payer key
 app.use('/api/payer', payerApiRoutes);
+// Admin console API (IT leads) — x-admin-key
+app.use('/api/admin', adminRoutes);
+// Master control board (SaaS owners) — x-platform-key
+app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);
 
 // Clinic / EHR / EMR API — tenant key
 app.use('/api/v1', authTenant);
+app.use('/api/v1', requireLicense);  // no-op unless HNN requires a licence
 app.use('/api/v1/bills', billsRoutes);
 app.use('/api/v1/payments', paymentsRoutes);
 app.use('/api/v1/claims', claimsRoutes);
-app.use('/api/v1/financing', financingRoutes);
-app.use('/api/v1/ledger', ledgerRoutes);
+app.use('/api/v1/financing', requireFeature('financing'), financingRoutes);
+app.use('/api/v1/ledger', requireFeature('ledger'), ledgerRoutes);
+app.use('/api/v1/claimit', requireFeature('claimit'), claimitRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1', institutionsRoutes);
 
@@ -57,6 +67,8 @@ if (require.main === module) {
     console.log(`  Clinic terminal : http://localhost:${config.port}/app/biller.html`);
     console.log(`  Clinic dashboard: http://localhost:${config.port}/app/dashboard.html`);
     console.log(`  Payer inbox     : http://localhost:${config.port}/app/payers.html`);
+    console.log(`  IT-lead console : http://localhost:${config.port}/app/admin.html`);
+    console.log(`  Master control  : http://localhost:${config.port}/app/platform.html`);
   })).catch((e) => { console.error('Startup failed:', e); process.exit(1); });
 }
 module.exports = app;

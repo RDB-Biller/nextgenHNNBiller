@@ -14,6 +14,8 @@ const config = {
 
   sbg: {
     baseUrl: process.env.SBG_BASE_URL || 'https://api.marketplaceuat.stanbic.com.gh',
+    // Marketplace gateway: '/api/sbg-transfer'. Direct smartapp host: '' (endpoints at /v1/...).
+    pathPrefix: process.env.SBG_PATH_PREFIX != null ? process.env.SBG_PATH_PREFIX : '/api/sbg-transfer',
     username: process.env.SBG_USERNAME || '',
     password: process.env.SBG_PASSWORD || '',
     // Disbursements settle FROM this funding/wallet account on the platform side.

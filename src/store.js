@@ -37,6 +37,19 @@ CREATE TABLE IF NOT EXISTS financings (id text PRIMARY KEY, tenant_id text, bill
 CREATE TABLE IF NOT EXISTS reports (id text PRIMARY KEY, tenant_id text, bill_id text, share_token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications (id text PRIMARY KEY, bill_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS ledger (id text PRIMARY KEY, tenant_id text, bill_id text, type text, amount numeric, currency text, cash_movement boolean, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+ALTER TABLE IF EXISTS payers ADD COLUMN IF NOT EXISTS tenant_id text;
+CREATE INDEX IF NOT EXISTS idx_payers_tenant ON payers(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_type, org_id);
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS edition text;
+CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, api_key text UNIQUE, role text, org_type text, org_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS licenses (key text PRIMARY KEY, edition text, status text, org_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS emr_partners (id text PRIMARY KEY, api_key text UNIQUE, data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS settings (key text PRIMARY KEY, data jsonb NOT NULL, updated_at timestamptz DEFAULT now());
+CREATE TABLE IF NOT EXISTS networks (id text PRIMARY KEY, payer_id text, tenant_id text, status text, updated_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_networks_payer ON networks(payer_id);
+CREATE INDEX IF NOT EXISTS idx_networks_tenant ON networks(tenant_id);
+CREATE TABLE IF NOT EXISTS pricing_rules (id text PRIMARY KEY, tenant_id text, type text, data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS claimit (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS idempotency_keys (scope text, key text, request_hash text, status text, response_status int, response_body jsonb, created_at timestamptz DEFAULT now(), PRIMARY KEY (scope, key));
 CREATE INDEX IF NOT EXISTS idx_bills_tenant ON bills(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_tenant ON claims(tenant_id);
@@ -44,6 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_claims_payer ON claims(payer_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_bill ON notifications(bill_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
+CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_claimit_tenant ON claimit(tenant_id);
 `;
 
 // Build a repo whose queries run through `exec` (the pool, or a tx client).
@@ -62,13 +77,16 @@ function pgRepo(exec) {
       byApiKey: (k) => one('SELECT data FROM tenants WHERE api_key=$1', [k]),
       get: (id) => one('SELECT data FROM tenants WHERE id=$1', [id]),
       all: () => many('SELECT data FROM tenants', []),
-      save: (o) => exec(upsert('tenants', ['api_key']), [o.id, o.apiKey, o]),
+      save: (o) => exec(upsert('tenants', ['api_key', 'edition']), [o.id, o.apiKey, o.edition || null, o]),
     },
     payers: {
       byApiKey: (k) => one('SELECT data FROM payers WHERE api_key=$1', [k]),
       get: (id) => one('SELECT data FROM payers WHERE id=$1', [id]),
       all: () => many('SELECT data FROM payers', []),
-      save: (o) => exec(upsert('payers', ['api_key']), [o.id, o.apiKey, o]),
+      // Global payers (tenant_id NULL) plus this facility's own programmed slots.
+      listForTenant: (t) => many('SELECT data FROM payers WHERE tenant_id IS NULL OR tenant_id=$1', [t]),
+      listSlots: (t) => many('SELECT data FROM payers WHERE tenant_id=$1', [t]),
+      save: (o) => exec(upsert('payers', ['api_key', 'tenant_id']), [o.id, o.apiKey, o.tenantId || null, o]),
     },
     financiers: {
       byApiKey: (k) => one('SELECT data FROM financiers WHERE api_key=$1', [k]),
@@ -88,6 +106,8 @@ function pgRepo(exec) {
       update: (c) => exec(upsert('claims', ['tenant_id', 'payer_id', 'status', 'token']), [c.id, c.tenantId, c.payerId, c.status, c.token, c]),
       listByTenant: (t) => many('SELECT data FROM claims WHERE tenant_id=$1 ORDER BY created_at', [t]),
       listByPayer: (p) => many('SELECT data FROM claims WHERE payer_id=$1 ORDER BY created_at', [p]),
+      all: (limit = 500) => many('SELECT data FROM claims ORDER BY created_at DESC LIMIT $1', [limit]),
+      byStatus: (st, limit = 500) => many('SELECT data FROM claims WHERE status=$1 ORDER BY created_at DESC LIMIT $2', [st, limit]),
     },
     payments: {
       get: (id) => one('SELECT data FROM payments WHERE id=$1', [id]),
@@ -109,6 +129,69 @@ function pgRepo(exec) {
       listByTenant: (t) => many(
         'SELECT n.data FROM notifications n JOIN bills b ON b.id = n.bill_id WHERE b.tenant_id=$1 ORDER BY n.created_at', [t]),
     },
+    settings: {
+      get: (k) => one('SELECT data FROM settings WHERE key=$1', [k]),
+      set: (k, v) => exec('INSERT INTO settings (key,data) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=now()', [k, v]),
+    },
+    networks: {
+      get: (payerId, tenantId) => one('SELECT data FROM networks WHERE id=$1', [`${payerId}:${tenantId}`]),
+      listByPayer: (p) => many('SELECT data FROM networks WHERE payer_id=$1 ORDER BY updated_at DESC', [p]),
+      listByTenant: (t) => many('SELECT data FROM networks WHERE tenant_id=$1', [t]),
+      save: (n) => exec(
+        `INSERT INTO networks (id,payer_id,tenant_id,status,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, data=EXCLUDED.data, updated_at=now()`,
+        [`${n.payerId}:${n.tenantId}`, n.payerId, n.tenantId, n.status, n]),
+    },
+    users: {
+      byApiKey: (k) => one('SELECT data FROM users WHERE api_key=$1', [k]),
+      get: (id) => one('SELECT data FROM users WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM users ORDER BY created_at DESC', []),
+      listByOrg: (t, o) => many('SELECT data FROM users WHERE org_type=$1 AND org_id=$2', [t, o]),
+      save: (u) => exec(
+        `INSERT INTO users (id,api_key,role,org_type,org_id,status,data) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET api_key=EXCLUDED.api_key, role=EXCLUDED.role,
+           org_type=EXCLUDED.org_type, org_id=EXCLUDED.org_id, status=EXCLUDED.status, data=EXCLUDED.data`,
+        [u.id, u.apiKey, u.role, u.orgType, u.orgId, u.status, u]),
+    },
+    licenses: {
+      get: (k) => one('SELECT data FROM licenses WHERE key=$1', [k]),
+      all: () => many('SELECT data FROM licenses ORDER BY created_at DESC', []),
+      save: (l) => exec(
+        `INSERT INTO licenses (key,edition,status,org_id,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (key) DO UPDATE SET edition=EXCLUDED.edition, status=EXCLUDED.status,
+           org_id=EXCLUDED.org_id, data=EXCLUDED.data`,
+        [l.key, l.edition, l.status, l.orgId || null, l]),
+    },
+    emrPartners: {
+      byApiKey: (k) => one('SELECT data FROM emr_partners WHERE api_key=$1', [k]),
+      get: (id) => one('SELECT data FROM emr_partners WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM emr_partners', []),
+      save: (p) => exec(
+        `INSERT INTO emr_partners (id,api_key,data) VALUES ($1,$2,$3)
+         ON CONFLICT (id) DO UPDATE SET api_key=EXCLUDED.api_key, data=EXCLUDED.data`,
+        [p.id, p.apiKey, p]),
+    },
+    pricing: {
+      get: (tenantId, type) => one('SELECT data FROM pricing_rules WHERE id=$1', [`${tenantId}:${type}`]),
+      listByTenant: (t) => many('SELECT data FROM pricing_rules WHERE tenant_id=$1 ORDER BY type', [t]),
+      save: (r) => exec(
+        `INSERT INTO pricing_rules (id,tenant_id,type,data) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, type=EXCLUDED.type, data=EXCLUDED.data`,
+        [`${r.tenantId}:${r.type}`, r.tenantId, r.type, r]),
+    },
+    claimit: {
+      get: (id) => one('SELECT data FROM claimit WHERE id=$1', [id]),
+      insert: (c) => exec(
+        `INSERT INTO claimit (id,tenant_id,bill_id,status,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, data=EXCLUDED.data`,
+        [c.id, c.tenantId, c.billId, c.status, c]),
+      update: (c) => exec(
+        `INSERT INTO claimit (id,tenant_id,bill_id,status,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, data=EXCLUDED.data`,
+        [c.id, c.tenantId, c.billId, c.status, c]),
+      listByTenant: (t) => many('SELECT data FROM claimit WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+      byClaimNumber: (t, num) => one("SELECT data FROM claimit WHERE tenant_id=$1 AND data->>'nhisClaimNumber'=$2", [t, num]),
+    },
     // Append-only money ledger (no UPDATE/DELETE — corrections are new entries).
     ledger: {
       insert: (e) => exec(
@@ -116,6 +199,10 @@ function pgRepo(exec) {
         [e.id, e.tenantId, e.billId, e.type, e.amount, e.currency, e.cashMovement, e]),
       listByTenant: (t, limit = 100) => many('SELECT data FROM ledger WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2', [t, limit]),
       listByBill: (b) => many('SELECT data FROM ledger WHERE bill_id=$1 ORDER BY created_at', [b]),
+      all: (limit = 5000) => many('SELECT data FROM ledger ORDER BY created_at DESC LIMIT $1', [limit]),
+      revenueAll: async () => (await exec(
+        `SELECT tenant_id, type, count(*)::int AS n, COALESCE(SUM(amount),0) AS total
+         FROM ledger WHERE type LIKE 'platform_fee_%' GROUP BY tenant_id, type`, [])).rows,
       summary: async (t) => (await exec(
         'SELECT type, count(*)::int AS n, COALESCE(SUM(amount) FILTER (WHERE cash_movement),0) AS cash, COALESCE(SUM(amount),0) AS total FROM ledger WHERE tenant_id=$1 GROUP BY type', [t])).rows,
     },
@@ -165,6 +252,8 @@ function memRepo(M) {
       byApiKey: async (k) => list(M.payers, (p) => p.apiKey === k)[0] || null,
       get: async (id) => M.payers.get(id) || null,
       all: async () => [...M.payers.values()],
+      listForTenant: async (t) => list(M.payers, (p) => !p.tenantId || p.tenantId === t),
+      listSlots: async (t) => list(M.payers, (p) => p.tenantId === t),
       save: async (o) => M.payers.set(o.id, o),
     },
     financiers: {
@@ -185,6 +274,8 @@ function memRepo(M) {
       update: async (c) => M.claims.set(c.id, c),
       listByTenant: async (t) => list(M.claims, (c) => c.tenantId === t),
       listByPayer: async (p) => list(M.claims, (c) => c.payerId === p),
+      all: async (limit = 500) => [...M.claims.values()].reverse().slice(0, limit),
+      byStatus: async (st, limit = 500) => [...M.claims.values()].reverse().filter((c) => c.status === st).slice(0, limit),
     },
     payments: {
       get: async (id) => M.payments.get(id) || null,
@@ -208,10 +299,62 @@ function memRepo(M) {
         return M.notifications.filter((n) => ids.has(n.billId));
       },
     },
+    settings: {
+      get: async (k) => M.settings.get(k) || null,
+      set: async (k, v) => M.settings.set(k, v),
+    },
+    networks: {
+      get: async (payerId, tenantId) => M.networks.get(`${payerId}:${tenantId}`) || null,
+      listByPayer: async (p) => [...M.networks.values()].filter((n) => n.payerId === p),
+      listByTenant: async (t) => [...M.networks.values()].filter((n) => n.tenantId === t),
+      save: async (n) => M.networks.set(`${n.payerId}:${n.tenantId}`, n),
+    },
+    users: {
+      byApiKey: async (k) => list(M.users, (u) => u.apiKey === k)[0] || null,
+      get: async (id) => M.users.get(id) || null,
+      all: async () => [...M.users.values()].reverse(),
+      listByOrg: async (t, o) => list(M.users, (u) => u.orgType === t && u.orgId === o),
+      save: async (u) => M.users.set(u.id, u),
+    },
+    licenses: {
+      get: async (k) => M.licenses.get(k) || null,
+      all: async () => [...M.licenses.values()].reverse(),
+      save: async (l) => M.licenses.set(l.key, l),
+    },
+    emrPartners: {
+      byApiKey: async (k) => list(M.emrPartners, (p) => p.apiKey === k)[0] || null,
+      get: async (id) => M.emrPartners.get(id) || null,
+      all: async () => [...M.emrPartners.values()],
+      save: async (p) => M.emrPartners.set(p.id, p),
+    },
+    pricing: {
+      get: async (tenantId, type) => M.pricing.get(`${tenantId}:${type}`) || null,
+      listByTenant: async (t) => [...M.pricing.values()].filter((r) => r.tenantId === t),
+      save: async (r) => M.pricing.set(`${r.tenantId}:${r.type}`, r),
+    },
+    claimit: {
+      get: async (id) => M.claimit.get(id) || null,
+      insert: async (c) => M.claimit.set(c.id, c),
+      update: async (c) => M.claimit.set(c.id, c),
+      listByTenant: async (t) => [...M.claimit.values()].filter((c) => c.tenantId === t).reverse(),
+      byClaimNumber: async (t, num) =>
+        [...M.claimit.values()].find((c) => c.tenantId === t && c.nhisClaimNumber && c.nhisClaimNumber === num) || null,
+    },
     ledger: {
       insert: async (e) => { M.ledger.push(e); },
       listByTenant: async (t, limit = 100) => M.ledger.filter((e) => e.tenantId === t).slice(-limit).reverse(),
       listByBill: async (b) => M.ledger.filter((e) => e.billId === b),
+      all: async (limit = 5000) => [...M.ledger].reverse().slice(0, limit),
+      revenueAll: async () => {
+        const out = {};
+        for (const e of M.ledger) {
+          if (!String(e.type).startsWith('platform_fee_')) continue;
+          const k = `${e.tenantId}|${e.type}`;
+          (out[k] = out[k] || { tenant_id: e.tenantId, type: e.type, n: 0, total: 0 });
+          out[k].n++; out[k].total += Number(e.amount);
+        }
+        return Object.values(out);
+      },
       summary: async (t) => {
         const by = {};
         for (const e of M.ledger.filter((x) => x.tenantId === t)) {
@@ -268,7 +411,8 @@ if (usePg) {
     bills: new Map(), claims: new Map(), claimTokens: new Map(),
     payments: new Map(), financings: new Map(),
     reports: new Map(), reportTokens: new Map(), notifications: [],
-    ledger: [], idem: new Map(),
+    ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
+    users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
   };
   repo = memRepo(M);
   const mutex = makeMutex();

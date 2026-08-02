@@ -3,23 +3,51 @@
 const config = require('./config');
 
 /**
- * Thin client over the Stanbic "SBG Transfer" disbursement API.
+ * Client for the Stanbic Bank Ghana "SBG Money Transfer" disbursement API.
  *
- * Endpoints (from the Postman collection):
- *   POST /api/sbg-transfer/v1/auth/login            -> accessToken
- *   GET  /api/sbg-transfer/v1/institutions          -> banks / receiving institutions
- *   GET  /api/sbg-transfer/v1/account-validation    -> validate beneficiary account
- *   GET  /api/sbg-transfer/v1/service-charge         -> fee for a serviceRequestId+amount
- *   POST /api/sbg-transfer/v1/disbursements          -> send money (pay out)
- *   GET  /api/sbg-transfer/v1/disbursements          -> history
- *   GET  /api/sbg-transfer/v1/disbursements/{id}     -> status check
+ * Verified against the official API document (STANBIC-GH GODIGI, v0.0.1, July 2025)
+ * and the public Postman collection. This API DISBURSES (pays out) from an onboarded
+ * Stanbic account to a Stanbic account, another bank, or a mobile wallet. It is the
+ * settlement/payout rail — not the patient collection rail.
  *
- * NOTE: this API DISBURSES (pays out). It is the settlement / payout rail of the
- * platform, not the patient collection rail. See README for the money-flow model.
+ * Two deployment targets exist; both are supported via SBG_BASE_URL + SBG_PATH_PREFIX:
+ *   - Marketplace gateway (Postman):  https://api.marketplaceuat.stanbic.com.gh
+ *                                      path prefix /api/sbg-transfer
+ *   - Direct smartapp host (doc):      https://ghuatsmartapp03.gh.sbicdirectory.com:8443/sbg-money-api
+ *                                      path prefix "" (endpoints begin at /v1/...)
+ *
+ * Endpoints (relative to the path prefix):
+ *   POST /v1/auth/login                     -> responseBody.data.accessToken
+ *   GET  /v1/institutions[?category=]       -> responseBody.data[] (BANKS | MOMO)
+ *   GET  /v1/account-validation             -> responseBody.data.serviceRequestId (the ticket)
+ *   GET  /v1/service-charge                 -> responseBody.data.charge
+ *   POST /v1/disbursements                  -> responseBody.data.status
+ *   GET  /v1/disbursements/{serviceRequestId} -> transfer status
+ *   GET  /v1/disbursements?startDate&endDate  -> history
+ *
+ * Success is signalled by responseHeader.statusCode "000" / responseCode "SUCCESS",
+ * not merely HTTP 200 — both are checked.
  */
+
+const SUCCESS_STATUS = '000';
+
+class SbgError extends Error {
+  constructor(message, { httpStatus, statusCode, responseCode, responseMessage, body } = {}) {
+    super(message);
+    this.name = 'SbgError';
+    this.httpStatus = httpStatus;
+    this.statusCode = statusCode;       // e.g. "000", "A10", "A44"
+    this.responseCode = responseCode;   // e.g. "SUCCESS", "FAILED"
+    this.responseMessage = responseMessage;
+    this.body = body;
+  }
+}
+
 class SbgClient {
   constructor(opts = {}) {
-    this.baseUrl = opts.baseUrl || config.sbg.baseUrl;
+    this.baseUrl = (opts.baseUrl || config.sbg.baseUrl || '').replace(/\/$/, '');
+    // Path prefix in front of /v1/... . Marketplace gateway = /api/sbg-transfer; direct host = "".
+    this.pathPrefix = (opts.pathPrefix != null ? opts.pathPrefix : config.sbg.pathPrefix || '').replace(/\/$/, '');
     this.username = opts.username || config.sbg.username;
     this.password = opts.password || config.sbg.password;
     this.sandbox = opts.sandbox != null ? opts.sandbox : config.sandbox;
@@ -27,26 +55,30 @@ class SbgClient {
     this._tokenExpiry = 0;
   }
 
+  _url(p) { return `${this.baseUrl}${this.pathPrefix}${p}`; }
+
   async _request(path, { method = 'GET', body, auth = true } = {}) {
-    const url = `${this.baseUrl}${path}`;
     const headers = { 'Content-Type': 'application/json' };
     if (auth) headers.Authorization = `Bearer ${await this.token()}`;
 
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
+    const res = await fetch(this._url(path), {
+      method, headers, body: body ? JSON.stringify(body) : undefined,
     });
 
     const text = await res.text();
     let json;
     try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
 
-    if (!res.ok) {
-      const err = new Error(`SBG ${method} ${path} failed: ${res.status}`);
-      err.status = res.status;
-      err.body = json;
-      throw err;
+    const header = json?.responseHeader || {};
+    const statusCode = header.statusCode;
+    const responseCode = header.responseCode;
+
+    // The bank returns its own status envelope; a 200 with statusCode != "000" is still a failure.
+    if (!res.ok || (statusCode && statusCode !== SUCCESS_STATUS)) {
+      throw new SbgError(
+        `SBG ${method} ${path} failed: HTTP ${res.status}${statusCode ? ` / ${statusCode} ${responseCode || ''}` : ''}`,
+        { httpStatus: res.status, statusCode, responseCode,
+          responseMessage: header.responseMessage, body: json });
     }
     return json;
   }
@@ -56,101 +88,95 @@ class SbgClient {
     const now = Date.now();
     if (this._token && now < this._tokenExpiry) return this._token;
 
-    const data = await this._request('/api/sbg-transfer/v1/auth/login', {
-      method: 'POST',
-      auth: false,
+    const data = await this._request('/v1/auth/login', {
+      method: 'POST', auth: false,
       body: { username: this.username, password: this.password },
     });
-    // Response shape from the collection: responseBody.data.accessToken
-    this._token =
-      data?.responseBody?.data?.accessToken ||
-      data?.data?.accessToken ||
-      data?.accessToken;
-    // Refresh a little early; adjust to your real token TTL.
-    this._tokenExpiry = now + 25 * 60 * 1000;
-    if (!this._token) throw new Error('SBG login returned no accessToken');
+    this._token = data?.responseBody?.data?.accessToken;
+    if (!this._token) throw new SbgError('SBG login returned no accessToken', { body: data });
+    // Doc: token lasts up to an hour. Refresh a little early.
+    this._tokenExpiry = now + 50 * 60 * 1000;
     return this._token;
   }
 
-  async listInstitutions() {
+  /** Institutions the beneficiary can belong to. Optional category BANKS | MOMO. */
+  async listInstitutions(category) {
     if (this.sandbox) {
-      return {
-        data: [
-          { serviceRoutingCode: '300591', name: 'Stanbic Bank Ghana' },
-          { serviceRoutingCode: '300592', name: 'MTN Mobile Money' },
-          { serviceRoutingCode: '300593', name: 'Vodafone Cash' },
-        ],
-      };
+      const all = [
+        { index: 0, name: 'Stanbic Bank Ghana', serviceRoutingCode: '300591', category: 'BANKS' },
+        { index: 1, name: 'MTN Mobile Money', serviceRoutingCode: 'MTN', category: 'MOMO' },
+        { index: 2, name: 'Telecel Cash', serviceRoutingCode: 'VOD', category: 'MOMO' },
+      ];
+      const data = category ? all.filter((i) => i.category === category) : all;
+      return { responseBody: { data } };
     }
-    return this._request('/api/sbg-transfer/v1/institutions');
-  }
-
-  async validateAccount({ serviceRoutingCode, beneficiaryAccount }) {
-    if (this.sandbox) {
-      return {
-        data: {
-          serviceRoutingCode,
-          beneficiaryAccount,
-          accountName: 'EURACARE HOSPITAL LTD',
-          valid: true,
-        },
-      };
-    }
-    const qs = new URLSearchParams({ serviceRoutingCode, beneficiaryAccount });
-    return this._request(`/api/sbg-transfer/v1/account-validation?${qs}`);
-  }
-
-  async getServiceCharge({ serviceRequestId, amount }) {
-    if (this.sandbox) {
-      const fee = Math.max(1, Math.round(Number(amount) * 0.01 * 100) / 100);
-      return { data: { serviceRequestId, amount: Number(amount), charge: fee } };
-    }
-    const qs = new URLSearchParams({ serviceRequestId, amount: String(amount) });
-    return this._request(`/api/sbg-transfer/v1/service-charge?${qs}`);
+    const qs = category ? `?category=${encodeURIComponent(category)}` : '';
+    return this._request(`/v1/institutions${qs}`);
   }
 
   /**
-   * Execute a payout. In the collection, the destination + amount are bound to a
-   * serviceRequestId that was created by the preceding account-validation /
-   * service-charge calls. We carry that id through.
+   * Validate a beneficiary account against an institution.
+   * Per the doc this REQUIRES category + serviceRoutingCode + beneficiaryAccount, and
+   * RETURNS the serviceRequestId (ticket) that tracks the rest of the transaction.
    */
+  async validateAccount({ category, serviceRoutingCode, beneficiaryAccount }) {
+    if (this.sandbox) {
+      return { responseBody: { data: {
+        serviceRequestId: `S${Date.now()}${Math.floor(Math.random() * 9000 + 1000)}`,
+        beneficiaryAccount, beneficiaryName: 'EURACARE HOSPITAL LTD',
+      } } };
+    }
+    const qs = new URLSearchParams({
+      category: category || 'BANKS', serviceRoutingCode, beneficiaryAccount,
+    });
+    return this._request(`/v1/account-validation?${qs}`);
+  }
+
+  /** Charge applicable to an amount, keyed by the ticket from account-validation. */
+  async getServiceCharge({ serviceRequestId, amount }) {
+    if (this.sandbox) {
+      const charge = Math.max(1, Math.round(Number(amount) * 0.01 * 100) / 100);
+      return { responseBody: { data: { currency: 'GHS', amount: Number(amount), charge } } };
+    }
+    const qs = new URLSearchParams({ serviceRequestId, amount: String(amount) });
+    return this._request(`/v1/service-charge?${qs}`);
+  }
+
+  /** Confirm the transfer — the actual payout. Bound to the validated ticket. */
   async disburse({ serviceRequestId, narration, extraDetails = '' }) {
     if (this.sandbox) {
-      return {
-        data: {
-          serviceRequestId,
-          status: 'SUCCESS',
-          narration,
-          reference: `SBX-${Date.now()}`,
-        },
-      };
+      return { responseBody: { data: {
+        serviceRequestId, status: 'SUCCESS', narration,
+        reference: `SBX-${Date.now()}`,
+        createdDate: new Date().toISOString(),
+      } } };
     }
-    return this._request('/api/sbg-transfer/v1/disbursements', {
-      method: 'POST',
-      body: { serviceRequestId, narration, extraDetails },
+    return this._request('/v1/disbursements', {
+      method: 'POST', body: { serviceRequestId, narration, extraDetails },
     });
   }
 
+  /** Status of a transfer: PENDING | SUCCESS | FAILED. */
   async getDisbursement(serviceRequestId) {
     if (this.sandbox) {
-      return {
-        data: { serviceRequestId, status: 'SUCCESS', settledAt: new Date().toISOString() },
-      };
+      return { responseBody: { data: { serviceRequestId, status: 'SUCCESS',
+        lastModifiedDate: new Date().toISOString() } } };
     }
-    return this._request(
-      `/api/sbg-transfer/v1/disbursements/${encodeURIComponent(serviceRequestId)}`
-    );
+    return this._request(`/v1/disbursements/${encodeURIComponent(serviceRequestId)}`);
   }
 
   async listDisbursements({ startDate, endDate, page, size } = {}) {
-    if (this.sandbox) return { data: [], page: page || 0, size: size || 20 };
+    if (this.sandbox) return { responseBody: { data: [] } };
     const qs = new URLSearchParams();
     if (startDate) qs.set('startDate', startDate);
     if (endDate) qs.set('endDate', endDate);
     if (page != null) qs.set('page', String(page));
     if (size != null) qs.set('size', String(size));
-    return this._request(`/api/sbg-transfer/v1/disbursements?${qs}`);
+    return this._request(`/v1/disbursements?${qs}`);
   }
 }
 
-module.exports = { SbgClient, sbg: new SbgClient() };
+// Helpers to read the bank's envelope regardless of nesting.
+const sbgData = (res) => res?.responseBody?.data ?? res?.data ?? res;
+
+module.exports = { SbgClient, SbgError, sbgData, sbg: new SbgClient() };
