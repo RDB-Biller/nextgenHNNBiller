@@ -52,7 +52,9 @@ function createBill(input) {
       memberId: insurance.memberId || insurance.insuranceNumber || null,
       sponsor: insurance.employer || insurance.sponsor || null, // {name,email} if a 3rd party sponsors the policy
     },
-    adjustments: { discountCode: adjustments.discountCode || null, discountPercent, copayPercent, cashbackPercent },
+    adjustments: { discountCode: adjustments.discountCode || null, discountPercent, copayPercent, cashbackPercent,
+      discountKind: adjustments.discountKind || 'standard', referredBy: adjustments.referredBy || null,
+      linkedMemberId: adjustments.linkedMemberId || null },
     totals: {
       subtotal: toGhs(subtotalP), discount: toGhs(discountP), net: toGhs(netP),
       payerShare: toGhs(payerShareP), cashback: toGhs(cashbackP), patientPayable: toGhs(patientPayableP),

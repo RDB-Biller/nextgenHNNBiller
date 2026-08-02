@@ -5,11 +5,22 @@ const store = require('../store');
 const { executePayerTransfer, transferStatus } = require('./settlement');
 const { notifyClaimOutcome } = require('./notifications');
 const ledger = require('./ledger');
+const payerSlots = require('./payerSlots');
+const networks = require('./networks');
+const fees = require('./fees');
 
 /** Route a bill to a payer (insurer/employer): create a claim + secure token. */
 async function routeToPayer(bill, payerId) {
   const payer = await store.payers.get(payerId);
   if (!payer) { const e = new Error('unknown_payer'); e.status = 422; throw e; }
+  // Facility-programmed slots are private to that facility and may be time-boxed.
+  if (payer.tenantId) {
+    if (payer.tenantId !== bill.tenantId) { const e = new Error('payer_not_available'); e.status = 403; throw e; }
+    if (!payerSlots.isActive(payer)) {
+      const e = new Error(payerSlots.isExpired(payer) ? 'payer_slot_expired' : 'payer_slot_disabled');
+      e.status = 422; throw e;
+    }
+  }
   if (!bill.coverage.memberId) { const e = new Error('missing_member_id'); e.status = 422; throw e; }
 
   const claim = {
@@ -53,9 +64,25 @@ async function authorize(claimId) {
   const payer = await store.payers.get(claim.payerId);
   const tenant = await store.tenants.get(claim.tenantId);
 
+  // NNEST: does this payer settle this provider instantly, and on what terms?
+  let decision;
+  try {
+    decision = await networks.resolve(payer, claim.tenantId, claim.amount);
+  } catch (e) {
+    claim.status = 'pending';
+    await store.claims.update(claim);
+    throw e;                       // out_of_network under a blocking narrow-network policy
+  }
+  claim.nnest = {
+    inNetwork: decision.inNetwork, expedited: decision.expedited, reason: decision.reason,
+    grossAmount: decision.grossAmount, promptPaymentDiscount: decision.promptPaymentDiscount,
+    settlementAmount: decision.settlementAmount, terms: decision.terms || null,
+  };
+  claim.settlementAmount = decision.settlementAmount;
+
   let transfer;
   try {
-    transfer = await executePayerTransfer({ bill, payer, tenant, amount: claim.amount });
+    transfer = await executePayerTransfer({ bill, payer, tenant, amount: decision.settlementAmount });
   } catch (e) {
     claim.status = 'pending'; // release for retry
     await store.claims.update(claim);
@@ -117,6 +144,12 @@ async function finalizeSettled(claim, bill) {
       refs: { claimId: claim.id, serviceRequestId: claim.serviceRequestId, reference: claim.transferReference },
     }));
   });
+  // SaaS revenue: expedited-settlement fee (NNEST terms take precedence over the
+  // facility default), plus a discount fee if one applies.
+  await fees.onClaimSettled(claim, bill);
+  if (bill.totals?.discount > 0) {
+    await fees.onDiscountApplied(bill, bill.adjustments?.discountKind || 'standard');
+  }
   await notifyClaimOutcome(claim, bill, 'settled');
 }
 

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { findItem } = require('./catalog');
 const store = require('../store');
+const fees = require('./fees');
 
 /**
  * Generate a medical report to support a financing request (loan or grant).
@@ -109,6 +110,8 @@ async function generate({ bill, kind, diagnosis, qa = [], amountRequested, loanT
     createdAt: new Date().toISOString(),
   };
   await store.reports.insert(report);
+  // Other charges: flat fee for producing the report, if configured.
+  await fees.onMedicalReport(report, bill);
   return report;
 }
 
