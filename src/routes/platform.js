@@ -16,6 +16,8 @@ const editions = require('../services/editions');
 const submissions = require('../services/submissions');
 const revenue = require('../services/revenue');
 const licensing = require('../services/licensing');
+const targets = require('../services/targets');
+const priceList = require('../services/priceList');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -86,7 +88,8 @@ router.get('/payers', async (req, res, next) => {
   try {
     const rows = (await store.payers.all()).filter((p) => !p.tenantId);
     res.json({ data: rows.map((p) => ({ id: p.id, name: p.name, kind: p.kind, apiKey: p.apiKey,
-      sourceAccount: p.sbg?.sourceAccount || null, contact: p.contact || null, tracker: p.tracker || null })) });
+      sourceAccount: p.sbg?.sourceAccount || null, contact: p.contact || null, tracker: p.tracker || null,
+      repriceClaims: p.repriceClaims === true })) });
   } catch (e) { next(e); }
 });
 
@@ -239,6 +242,74 @@ router.post('/clients/:id/renew', async (req, res, next) => {
       by: req.principal?.id || 'HNN',
     }));
   } catch (e) { next(e); }
+});
+
+// Toggle whether this payer's approved price list GOVERNS settlement (default off).
+// When on, a claim routed to this payer is repriced to its approved prices; the
+// patient covers any gap between billed and approved. When off (default), the billed
+// price governs and the list is reference-only.
+router.put('/payers/:id/reprice', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    payer.repriceClaims = req.body?.enabled === true;
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, repriceClaims: payer.repriceClaims });
+  } catch (e) { next(e); }
+});
+
+// ---- Payer volume targets ---------------------------------------------------
+// Set a processing target for an insurer/employer (monthly / 6-month / yearly / custom).
+router.put('/payers/:id/target', async (req, res, next) => {
+  try { res.json(await targets.setTarget(req.params.id, req.body || {})); }
+  catch (e) { next(e); }
+});
+
+router.delete('/payers/:id/target', async (req, res, next) => {
+  try { res.json(await targets.clearTarget(req.params.id)); }
+  catch (e) { next(e); }
+});
+
+// Progress for one payer, or all payers with a target.
+router.get('/payers/:id/target', async (req, res, next) => {
+  try {
+    const p = await targets.progress(req.params.id);
+    if (!p) return res.status(404).json({ error: 'no_target' });
+    res.json(p);
+  } catch (e) { next(e); }
+});
+
+router.get('/targets', async (req, res, next) => {
+  try { res.json({ data: await targets.allProgress() }); } catch (e) { next(e); }
+});
+
+// ---- Payer price lists (pre-approved prices, CSV upload) ---------------------
+// Body: { csv: "<raw csv text>", replace?: true }. The console reads an Excel/CSV
+// file to text and posts it here. Rows may target a provider for facility pricing.
+router.post('/payers/:id/pricelist', async (req, res, next) => {
+  try {
+    const csv = req.body?.csv;
+    if (!csv || typeof csv !== 'string') return res.status(422).json({ error: 'csv_required' });
+    res.json(await priceList.upload(req.params.id, csv, { replace: req.body.replace !== false }));
+  } catch (e) {
+    if (e.status === 422) return res.status(422).json({ error: e.message, detail: e.detail });
+    next(e);
+  }
+});
+
+router.get('/payers/:id/pricelist', async (req, res, next) => {
+  try {
+    if (req.query.q != null) {
+      return res.json({ data: await priceList.search(req.params.id, req.query.q, Math.min(parseInt(req.query.limit || '50', 10), 200)) });
+    }
+    const list = await priceList.get(req.params.id);
+    res.json({ payerId: req.params.id, count: list.count, uploadedAt: list.uploadedAt,
+      sample: (list.rows || []).slice(0, 20) });
+  } catch (e) { next(e); }
+});
+
+router.delete('/payers/:id/pricelist', async (req, res, next) => {
+  try { res.json(await priceList.clear(req.params.id)); } catch (e) { next(e); }
 });
 
 module.exports = router;

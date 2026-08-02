@@ -16,10 +16,15 @@ async function view(c) {
   const payer = await store.payers.get(c.payerId);
   return {
     claimId: c.id, status: c.status, payer: payer?.name, payerKind: payer?.kind,
-    provider: bill?.provider, amount: c.amount, currency: c.currency,
-    patientName: bill?.patient?.name || null, memberId: c.memberId,
-    sponsor: bill?.coverage?.sponsor?.name || null,
-    lineItems: (bill?.lineItems || []).map((i) => ({ name: i.name, cost: i.cost })),
+    provider: c.provider || bill?.provider, amount: c.amount, currency: c.currency,
+    patientName: c.patient?.name || bill?.patient?.name || null, memberId: c.memberId,
+    sponsor: c.patient?.sponsor || bill?.coverage?.sponsor?.name || null,
+    lineItems: (c.lineItems && c.lineItems.length
+      ? c.lineItems
+      : (bill?.lineItems || []).map((i) => ({ name: i.name, code: i.code || null,
+          qty: i.qty || 1, unitPrice: i.unitPrice ?? i.cost, lineTotal: i.cost }))),
+    breakdown: c.breakdown || null,
+    clinical: c.clinical || bill?.clinical || null,
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
   };
 }

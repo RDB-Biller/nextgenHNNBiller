@@ -3,10 +3,11 @@
 const express = require('express');
 const store = require('../store');
 const { createBill } = require('../services/billing');
-const { routeToPayer } = require('../services/claims');
+const { routeToPayer, routeToPayers } = require('../services/claims');
 const payerSlots = require('../services/payerSlots');
 const editions = require('../services/editions');
 const networks = require('../services/networks');
+const catalog = require('../services/catalog');
 
 const router = express.Router();
 async function ownBill(req) {
@@ -28,6 +29,16 @@ router.get('/edition', (req, res) => {
   res.json({ client: req.tenant.id, name: req.tenant.name,
     edition: editions.editionOf(req.tenant), features: editions.featureList(req.tenant),
     licence: editions.licenceState(req.tenant) });
+});
+
+// Chargeable catalog (demo items + full NHIS Medicines List). Search by code or name.
+router.get('/catalog', (req, res) => {
+  const q = req.query.q || req.query.search;
+  const limit = Math.min(parseInt(req.query.limit || '25', 10), 100);
+  const category = req.query.category || null;
+  if (q) return res.json({ count: catalog.count(), data: catalog.search(q, { limit, category }) });
+  // No query: return the count + a small sample (the full list is large).
+  res.json({ count: catalog.count(), data: catalog.DEFAULT_CATALOG.slice(0, limit) });
 });
 
 // This facility's expedited settlement terms, as set by each payer (read-only).
@@ -64,9 +75,25 @@ router.post('/:id/route', async (req, res, next) => {
   try {
     const bill = await ownBill(req);
     if (!bill) return res.status(404).json({ error: 'bill_not_found' });
-    const payerId = req.body.payerId || req.body.insurerId || bill.coverage.payerId;
+
+    // Multi-payer split: body has split:{payers:[...]}, or the bill was created with one.
+    const splitSpec = req.body.split || bill.coverage.split;
+    const splitPayers = splitSpec && Array.isArray(splitSpec.payers)
+      ? splitSpec.payers.filter((p) => p && p.payerId && p.paying !== false) : [];
+
+    if (splitPayers.length > 1) {
+      const { claims, split } = await routeToPayers(bill, splitSpec);
+      return res.status(201).json({
+        claims: claims.map((c) => ({ claimId: c.id, payerId: c.payerId, payerName: c.payerName,
+          amount: c.amount, payerLink: c.link })),
+        split: split.payers, mode: 'split',
+      });
+    }
+
+    const payerId = req.body.payerId || req.body.insurerId
+      || (splitPayers[0] && splitPayers[0].payerId) || bill.coverage.payerId;
     const { claim } = await routeToPayer(bill, payerId);
-    res.status(201).json({ claim, payerLink: claim.link });
+    res.status(201).json({ claim, payerLink: claim.link, mode: 'single' });
   } catch (e) { next(e); }
 });
 

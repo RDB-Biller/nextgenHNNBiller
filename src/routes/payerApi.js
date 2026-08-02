@@ -21,9 +21,21 @@ async function claimView(c) {
   const bill = await store.bills.get(c.billId);
   return {
     claimId: c.id, status: c.status, amount: c.amount, currency: c.currency,
-    provider: bill?.provider, patientName: bill?.patient?.name || null,
-    memberId: c.memberId, sponsor: bill?.coverage?.sponsor?.name || null,
-    lineItems: (bill?.lineItems || []).map((i) => ({ name: i.name, cost: i.cost })),
+    provider: c.provider || bill?.provider,
+    patientName: c.patient?.name || bill?.patient?.name || null,
+    memberId: c.memberId,
+    sponsor: c.patient?.sponsor || bill?.coverage?.sponsor?.name || null,
+    // Itemised breakdown: each line shows what the payer covers vs the patient portion.
+    lineItems: (c.lineItems && c.lineItems.length
+      ? c.lineItems
+      : (bill?.lineItems || []).map((i) => ({ name: i.name, code: i.code || null,
+          qty: i.qty || 1, unitPrice: i.unitPrice ?? i.cost, lineTotal: i.cost,
+          payerCovers: null, patientPortion: null }))),
+    breakdown: c.breakdown || (bill ? {
+      subtotal: bill.totals.subtotal, discount: bill.totals.discount,
+      net: bill.totals.net, payerShare: bill.totals.payerShare } : null),
+    clinical: c.clinical || bill?.clinical || null,
+    nnest: c.nnest || null,
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
     link: c.link, createdAt: c.createdAt,
   };
