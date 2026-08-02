@@ -3,6 +3,7 @@
 const express = require('express');
 const store = require('../store');
 const claimsService = require('../services/claims');
+const networks = require('../services/networks');
 const { idempotency } = require('../middleware/idempotency');
 
 const router = express.Router();
@@ -75,6 +76,53 @@ router.post('/claims/:id/reject', async (req, res, next) => {
     const c = await own(req, res); if (!c) return;
     await claimsService.reject(c.id, req.body?.reason);
     res.json(await claimView(await store.claims.get(c.id)));
+  } catch (e) { next(e); }
+});
+
+// ---- NNEST: Narrow Network Expedited Settlement Terms (payer-operated) -------
+
+// Network posture for this payer.
+router.get('/network', async (req, res, next) => {
+  try {
+    const terms = await networks.listByPayer(req.payer.id);
+    res.json({
+      payer: req.payer.name,
+      networkMode: req.payer.networkMode || 'open',
+      outOfNetworkPolicy: req.payer.outOfNetworkPolicy || 'standard',
+      caps: { feeRate: networks.MAX_FEE_RATE, promptPaymentDiscount: networks.MAX_PROMPT_DISCOUNT },
+      providers: terms.map((t) => ({
+        tenantId: t.tenantId, providerName: t.providerName, status: t.status,
+        settlement: t.settlement, feeRate: t.feeRate, chargeTo: t.chargeTo,
+        promptPaymentDiscountPercent: t.promptPaymentDiscountPercent,
+        maxClaimAmount: t.maxClaimAmount, effectiveFrom: t.effectiveFrom, effectiveTo: t.effectiveTo,
+        active: networks.isActive(t), updatedAt: t.updatedAt,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
+// Open vs narrow network, and what happens out of network.
+router.put('/network/posture', async (req, res, next) => {
+  try { res.json(await networks.setPosture(req.payer.id, req.body || {})); }
+  catch (e) { next(e); }
+});
+
+// Add or update a provider's expedited settlement terms.
+router.put('/network/providers/:tenantId', async (req, res, next) => {
+  try { res.json(await networks.setTerms(req.payer.id, req.params.tenantId, req.body || {})); }
+  catch (e) { next(e); }
+});
+
+// Suspend terms (provider stays on record; instant settlement stops).
+router.delete('/network/providers/:tenantId', async (req, res, next) => {
+  try { res.json(await networks.suspend(req.payer.id, req.params.tenantId)); }
+  catch (e) { next(e); }
+});
+
+// Dry-run: how would a claim of this size settle for this provider today?
+router.post('/network/preview', async (req, res, next) => {
+  try {
+    res.json(await networks.resolve(req.payer, req.body?.tenantId, Number(req.body?.amount) || 0));
   } catch (e) { next(e); }
 });
 
