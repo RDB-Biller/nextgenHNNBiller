@@ -31,6 +31,20 @@ insurance but still settles for its people. Same A2A mechanism for both.
 Big institutions integrate API-to-API; small entities use the front ends. Same
 backend, same actions, either way.
 
+## Provisioning partner API keys
+
+Issue a key for a clinic, payer (insurer/employer), or financier and hand it over:
+
+```bash
+# against your deployed DB (Railway):
+railway run node scripts/provision.js list
+railway run node scripts/provision.js tenant --name "City Clinic" --account 300591:0123456789 --email billing@city.example
+railway run node scripts/provision.js payer  --name "NHIS" --kind insurer --source 1300100999 --email claims@nhis.gov.gh
+railway run node scripts/provision.js financier --name "QuickLoan" --product momo_loan --source 1400200999
+```
+
+The command prints the key and the header to use. See the Partner Integration Guide.
+
 ## Run it
 
 ```bash
@@ -164,6 +178,265 @@ A retry while the first is still running gets `409 request_in_progress`; the sam
 a different body gets `422 idempotency_key_reused`; a `5xx` releases the key for a genuine
 retry. This complements the row-lock guard: locks stop double-execution inside the system,
 idempotency keys dedupe client retries that arrive as separate HTTP requests.
+
+## Revenue model (Admin / IT-lead console)
+
+`/app/admin.html` (auth `x-admin-key`, env `ADMIN_API_KEY`) lets an IT lead program the
+SaaS revenue model **per partner**. Rate caps are enforced server-side — the console
+cannot exceed them.
+
+| Rule | Basis | Cap | Charge to |
+| --- | --- | --- | --- |
+| `expedited_settlement` | payer share settled instantly | **15%** | insurer (reverse-bill), provider, or beneficiary entity (e.g. pharmacy) |
+| `discount_fee` | value of the discount granted | **15%** | insurer, provider, or beneficiary |
+| `claimit_margin` | NHIS/ClaimIt cashback refunded | 100% of cashback | member (netted from cashback), insurer, or provider |
+
+Discounts are attributable by kind — `standard`, `referral` (patient referred another),
+or `linked_payer` (a paying patient linked to an insured one) — set via
+`adjustments.discountKind` on a bill, so referral programmes can be priced separately.
+
+**Fees never touch the money flow.** Each fee is computed and **accrued to the
+append-only ledger as a receivable** (`platform_fee_*`, `cashMovement: false`) owed by the
+charged party, with the collection mode recorded (`reverse_bill`, `invoice`, or
+`netted_from_cashback`). This preserves the guarantee that the platform never custodies funds.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/admin/pricing/schema` | Rule types, caps, allowed charge targets |
+| GET | `/api/admin/tenants` | Partners to configure |
+| GET | `/api/admin/pricing/:tenantId` | Effective rules (saved or defaults) |
+| PUT | `/api/admin/pricing/:tenantId/:type` | Program a rule (rate clamped to cap) |
+| POST | `/api/admin/pricing/:tenantId/:type/preview` | Preview a fee, writes nothing |
+| GET | `/api/admin/revenue/:tenantId` | Revenue by type from the ledger |
+
+## NHIS ClaimIt tracker — two operating modes
+
+The tracker follows an NHIS claim through to the refund a sponsoring insurer (e.g. Acacia)
+pays back — up to **100%** of the NHIS amount. That refund becomes the member's **cashback**,
+and the configured `claimit_margin` rule is accrued as revenue. Both modes are fully supported:
+
+**A. Routed** — the bill is raised in HNN Biller and routed via the **NHIS ClaimIt Tracker**
+tab (alongside Acacia, GMTF, **GAB**). The claim is derived from that bill.
+
+**B. External (the common case)** — the NHIS claim is submitted and settled elsewhere, in
+your **EMR or the ClaimIt portal**. HNN Biller simply *receives the claim data* — how much
+is being claimed, for whom — and tracks the refund and cashback. **No bill is required**
+in this system; link a `billId` only if one happens to exist.
+
+Intake is **idempotent on `nhisClaimNumber`**, so an EMR can safely re-push.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/claimit` · `/claimit/summary` | Tracked claims and totals (split routed vs external) |
+| POST | `/api/v1/claimit` | Track one claim — pass `billId` (routed) **or** claim data (external) |
+| POST | `/api/v1/claimit/ingest` | Bulk intake: `{ "claims": [ ... ] }` from an EMR export |
+| POST | `/api/v1/claimit/:id/refund` | Record refund → cashback + margin |
+| POST | `/api/v1/claimit/:id/status` | Update status |
+
+External intake fields: `nhisClaimNumber`, `nhisAmount` (required), `provider`,
+`patientName`, `memberId`, `refundPercent` (default 100), `refundedBy` (default `acacia`),
+`refundDestination` (`provider` | `member`, default `provider`), `externalRef` (your EMR's
+own id), `claimedAt`.
+
+### Refund destination and cashback accounting
+
+`refundDestination` records who actually receives the insurer's refund, and the accounting
+follows:
+
+| Destination | Member-charged margin | Provider owes member |
+| --- | --- | --- |
+| `provider` (default) — refund lands with the clinic | **netted from cashback** at source | net cashback |
+| `member` — insurer pays the member directly | **invoiced** (we never touch that money) | nothing |
+
+A margin charged to the insurer is always `reverse_bill`, and the member keeps the full
+refund either way. The collection mode is written onto the ledger entry, and
+`/api/v1/claimit/summary` reports `cashbackOwedToMembers` plus the split of refunds by
+destination.
+
+```bash
+curl -X POST https://<app>/api/v1/claimit -H "x-api-key: <KEY>" -H "Content-Type: application/json" \
+  -d '{"nhisClaimNumber":"CLM-2026-001","nhisAmount":340,"patientName":"Kofi Owusu","memberId":"NHIS-2211","externalRef":"EMR-98211"}'
+```
+
+UI: `/app/claimit.html` — shows a mode badge per row, a form for recording externally
+settled claims, and a bulk JSON import.
+
+## Agnostic payer tabs (facility self-service)
+
+Each facility has **6 reserved payer slots — 3 insurer, 3 corporate** — that its own IT
+lead programs from the Revenue Console. When a hospital lands a new scheme, they stand
+the tab up themselves; no backend change or redeploy from the SaaS side.
+
+- **Facility-scoped.** A slot programmed by Euracare never appears for Nyaho. Routing a
+  bill to another facility's slot is rejected with `403 payer_not_available`.
+- **Time-boxed (optional).** Set `expiresAt` for a pilot; expired slots disappear from the
+  billing tabs and can't be routed to (`payer_slot_expired`).
+- **Ready to integrate.** Each programmed slot gets its own `x-payer-key`, so the new payer
+  can use the Payer API immediately, or just the secure claim link.
+- **Reusable.** Releasing a slot frees it for a different payer; past claims are untouched.
+- Corporate slots behave as **employer** payers on the settlement rail; insurer slots as insurers.
+
+The billing terminal renders its payer tabs **dynamically** from
+`GET /api/v1/bills/payers`, so a newly programmed tab appears without a code change.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/admin/payer-slots/:tenantId` | All 6 slots, programmed or empty |
+| PUT | `/api/admin/payer-slots/:tenantId/:kind/:index` | Program a slot (`kind` = `insurer`\|`corporate`, `index` 1-3) |
+| DELETE | `/api/admin/payer-slots/:tenantId/:kind/:index` | Release a slot for reuse |
+| GET | `/api/v1/bills/payers` | Payers this facility can route to (global + active slots) |
+
+Body for PUT: `{ "name": "Nationwide Health", "sourceAccount": "1300109001", "contactEmail": "claims@…", "expiresAt": "2026-12-31", "enabled": true }`
+
+## Composite APIs
+
+Seven standalone OpenAPI 3.0 specifications, one per feature group, plus a combined
+spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
+
+| Spec | Covers | Auth | Edition |
+| --- | --- | --- | --- |
+| `hnn-01-core-billing` | Bills, patient payments, routing, dashboard, edition check | `x-api-key` | all |
+| `hnn-02-payer-claims` | Claims, authorise A2A, secure links | `x-payer-key` | all |
+| `hnn-03-nhis-claimit` | NHIS tracking, refunds, cashback, bulk ingest | `x-api-key` | commercial |
+| `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
+| `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
+| `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
+| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** | `x-platform-key` | all |
+
+Every documented endpoint is verified against the app's mounted routes.
+
+## Editions, licensing and the master control board
+
+One deployment serves many clients, each on its own edition. Switching is a per-client
+flag flip — no redeploy, no data migration, **nothing deleted on downgrade**.
+
+| Edition | Includes |
+| --- | --- |
+| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |
+| `commercial` | Above **plus** revenue rules & other charges, financing, ClaimIt, payer tabs, ledger |
+
+- **Master control board** — `/app/platform.html`, auth `x-platform-key` (env `PLATFORM_ADMIN_KEY`).
+  Manage clients, payers, EMR/EHR partners, IT leads, and licences.
+- **IT leads** get personal **org-scoped** console keys (`x-console-key`); they can only
+  configure their own organisation (`403 out_of_scope` otherwise). Keys are rotatable and suspendable.
+- **Licence keys** (`HNN-COMM-…`) can be bound to one client and given an expiry; the client's
+  IT lead redeems one themselves at `POST /api/admin/edition/:tenantId/redeem`.
+- Commercial-only endpoints return **402 `upgrade_required`**; clients self-check with
+  `GET /api/v1/bills/edition`.
+
+### Other charges (report fees)
+
+Alongside the percentage rules, the IT lead sets **flat** fees in the Other charges section:
+`report_fee_mini` (Mini Medical Report) and `report_fee_standard` (Standard Medical Report),
+chargeable to the patient, provider, insurer or financier. They accrue automatically when a
+report is generated.
+
+## NNEST — Narrow Network Expedited Settlement Terms
+
+A feature of the instant-payment rail, **operationalised by the payer**. An insurer or
+corporate payer designates a narrow network of providers and sets the terms on which each
+is settled instantly.
+
+Per provider: `settlement` (instant | standard), `feeRate` + `chargeTo` (capped at 15%),
+optional `promptPaymentDiscountPercent` (the discount a provider grants for instant cash —
+it reduces the transferred amount, max 15%), optional `maxClaimAmount`, and an effective window.
+Per payer: `networkMode` (`open` | `narrow`) and `outOfNetworkPolicy` (`standard` | `block`).
+
+- **NNEST terms take precedence** over the facility's default `expedited_settlement` rule.
+- A claim that isn't expedited — out of network, over the ceiling, or terms suspended —
+  attracts **no expedited fee**.
+- Under narrow mode with `block`, authorisation is refused with **403 `out_of_network`**.
+- Each claim records `nnest`: gross, prompt-payment discount, net settled, and the reason.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/payer/network` | Posture + all provider terms |
+| PUT | `/api/payer/network/posture` | open vs narrow; out-of-network policy |
+| PUT | `/api/payer/network/providers/:tenantId` | Set a provider's terms |
+| DELETE | `/api/payer/network/providers/:tenantId` | Suspend terms |
+| POST | `/api/payer/network/preview` | Dry-run a claim — writes nothing |
+| GET | `/api/v1/bills/network-terms` | Provider's read-only view |
+
+UI: the NNEST panel in `/app/payers.html`.
+
+## Administrator submissions oversight
+
+The SaaS administrator sees **every claim submission across all connected developers**
+and can approve or decline centrally. **Approving triggers the Stanbic A2A transfer** to
+the provider — the same guarded, idempotent path a payer uses, writing a ledger entry.
+Funds never touch the platform. UI: `/app/submissions.html` (auth `x-platform-key`).
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/platform/submissions` | All submissions (`?status=`, `?tenantId=`, `?limit=`) |
+| GET | `/api/platform/submissions/summary` | Counts + value by status |
+| GET | `/api/platform/submissions/:id` | One enriched submission |
+| POST | `/api/platform/submissions/:id/approve` | Approve → run A2A transfer + settle |
+| POST | `/api/platform/submissions/:id/decline` | Decline with a reason |
+
+## Licensing model (non-commercial, fee-free by default)
+
+This build ships **non-commercial**: every feature available, and **all pricing set to
+zero**. The five per-transaction fee rules default to rate/amount `0` and stay that way
+until deliberately set. Non-commercial is the default edition for every client, new or seeded.
+
+HNN (the platform owner) controls a licensing **policy** from the master control board:
+
+| Mode | Behaviour |
+| --- | --- |
+| `free_non_commercial` (default) | Fee-free. Licences issued/renewed at no charge on a 6-month term, purely to keep entitlement current. |
+| `licensed` | A live licence is **required**. HNN sets a `licenseFee` per term. Switching on licensing starts a one-off **grace window** (default 30 days) so clients without a licence keep working while they pay; after grace, or once a held licence lapses, they are blocked (`402 license_required`) until they redeem/renew. |
+
+Licences carry a **6-month term** (`termMonths`, configurable) and an `expiresAt`. A
+commercial edition only counts while its licence is live — a lapsed licence falls back to
+non-commercial automatically. Renewal extends from the later of now or current expiry, so
+early renewal never loses time.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/platform/licensing` | Current policy |
+| PUT | `/api/platform/licensing` | Set mode / term / fee (activate revenue) |
+| GET | `/api/platform/licenses/state` | Every client's edition, expiry, days-left |
+| POST | `/api/platform/clients/:id/renew` | Renew a licence for another term |
+| POST | `/api/platform/licenses` | Issue a licence (term + fee) |
+
+Clients self-check with `GET /api/v1/bills/edition`, which now returns a `licence` block
+(`active`, `expiresAt`, `daysLeft`). Enforcement is a no-op while the policy is free — it
+only blocks when HNN switches to `licensed`. UI: the **Licensing policy** tab in
+`/app/platform.html`.
+
+## SaaS-wide revenue (platform owner)
+
+Accrued platform fees aggregated across every client, by type and by client.
+All figures are receivables (cashMovement:false) — the platform never holds funds.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/platform/revenue` | Totals by type and by client |
+| GET | `/api/platform/revenue/recent` | Recent fee activity feed |
+
+UI: `/app/revenue.html` (auth `x-platform-key`).
+
+## Stanbic settlement (verified against the SBG Money Transfer API doc)
+
+Settlement performs the bank's four-call sequence inside one authorize call:
+
+1. `POST /v1/auth/login` → access token (~1h)
+2. `GET /v1/account-validation` → **mints the serviceRequestId** (ticket) + beneficiaryName
+3. `GET /v1/service-charge` → fee, keyed by the ticket
+4. `POST /v1/disbursements` → status + reference
+
+Success requires `responseHeader.statusCode === "000"` (not just HTTP 200); a failure
+envelope raises `SbgError` with the bank's code. Configure with `SBG_BASE_URL`,
+`SBG_PATH_PREFIX`, `SBG_USERNAME`, `SBG_PASSWORD`, `SBG_SANDBOX`. Two hosts supported:
+the marketplace gateway (`/api/sbg-transfer` prefix) and the direct smartapp host
+(empty prefix). Sandbox settles instantly with an `SBX-` reference.
+
+## Running modes
+
+Same codebase, three deployments: **cloud/web** (Railway + Postgres, multi-tenant),
+**on-site** (hospital-local Node + local Postgres, LAN access, outbound HTTPS to Stanbic
+for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offline-capable).
 
 ## Before production
 

@@ -161,6 +161,104 @@ paths:
       parameters: [{ name: billId, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
 
+  /api/v1/claimit:
+    get:
+      summary: Tracked NHIS ClaimIt claims
+      security: [{ TenantKey: [] }]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Track an NHIS claim (routed via billId, or external claim data)
+      description: >
+        Two modes. Routed - pass billId for a bill raised here. External - the claim was
+        submitted/settled in your EMR or the ClaimIt portal; send the claim data only.
+        Idempotent on nhisClaimNumber.
+      security: [{ TenantKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billId: { type: string, description: routed mode }
+                nhisClaimNumber: { type: string }
+                nhisAmount: { type: number, description: amount being claimed (required for external) }
+                provider: { type: string }
+                patientName: { type: string }
+                memberId: { type: string }
+                refundPercent: { type: number, default: 100 }
+                refundedBy: { type: string, default: acacia }
+                refundDestination:
+                  type: string
+                  enum: [provider, member]
+                  default: provider
+                  description: >
+                    Who receives the insurer's refund. provider - lands with the clinic, so a
+                    member-charged margin is netted from the cashback and the balance is owed on.
+                    member - the insurer pays the member directly, so the margin is invoiced instead.
+                externalRef: { type: string, description: your EMR's own id }
+                claimedAt: { type: string }
+      responses: { '201': { description: Created }, '422': { description: Missing amount/provider } }
+  /api/v1/claimit/ingest:
+    post:
+      summary: Bulk intake of externally settled NHIS claims from an EMR export
+      security: [{ TenantKey: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { claims: { type: array, items: { type: object } } } } } }
+      responses: { '201': { description: Ingest result (created / duplicates / errors) } }
+  /api/v1/claimit/summary:
+    get: { summary: ClaimIt totals (routed vs external, cashback, margin), security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
+  /api/v1/claimit/{id}/refund:
+    post:
+      summary: Record the refund received - computes cashback and accrues the margin
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { amount: { type: number }, reference: { type: string } } } } } }
+      responses: { '200': { description: OK } }
+
+  /api/v1/bills/payers:
+    get:
+      summary: Payers this facility can route to (global + its active programmed slots)
+      security: [{ TenantKey: [] }]
+      responses: { '200': { description: OK } }
+  /api/admin/payer-slots/{tenantId}:
+    get:
+      summary: Agnostic payer slots for a facility (3 insurer + 3 corporate)
+      security: [{ AdminKey: [] }]
+      parameters: [{ name: tenantId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /api/admin/payer-slots/{tenantId}/{kind}/{index}:
+    put:
+      summary: Program an agnostic payer slot (facility self-service)
+      security: [{ AdminKey: [] }]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [insurer, corporate] } }
+        - { name: index, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 3 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                sourceAccount: { type: string, description: Stanbic account the payer settles from }
+                contactEmail: { type: string }
+                expiresAt: { type: string, description: optional, time-box a pilot }
+                enabled: { type: boolean, default: true }
+      responses: { '200': { description: Programmed (returns the slot payer API key) }, '422': { description: Invalid slot or missing name } }
+    delete:
+      summary: Release a slot for reuse (past claims unaffected)
+      security: [{ AdminKey: [] }]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: index, in: path, required: true, schema: { type: integer } }
+      responses: { '200': { description: Released } }
+
   /api/v1/webhooks/collection:
     post: { summary: Collection gateway confirms a patient self-pay (gateway-signed), responses: { '200': { description: OK } } }
 
@@ -168,6 +266,7 @@ components:
   securitySchemes:
     TenantKey: { type: apiKey, in: header, name: x-api-key }
     PayerKey: { type: apiKey, in: header, name: x-payer-key }
+    AdminKey: { type: apiKey, in: header, name: x-admin-key }
   schemas:
     CreateBill:
       type: object
