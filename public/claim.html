@@ -26,7 +26,14 @@ async function load(){
 }
 function render(c){
   document.getElementById('insname').textContent=c.payer||'';
-  const items=(c.lineItems||[]).map(i=>`<div class="line"><span>${esc(i.name)}</span><span class="num">GHS ${num(i.cost)}</span></div>`).join('');
+  const items=(c.lineItems||[]).map(i=>{
+    const qty=i.qty&&i.qty>1?` ×${i.qty}`:'';
+    const covers=(i.payerCovers!=null)?`<span class="num" style="color:var(--brand)">GHS ${num(i.payerCovers)}</span>`:`<span class="num">GHS ${num(i.lineTotal!=null?i.lineTotal:i.cost)}</span>`;
+    const code=i.code?`<span class="muted" style="font-size:11px"> · ${esc(i.code)}</span>`:'';
+    return `<div class="line"><span>${esc(i.name)}${qty}${code}</span>${covers}</div>`;
+  }).join('');
+  const bd=c.breakdown?`<div class="line muted" style="font-size:12px;margin-top:6px"><span>Subtotal ${num(c.breakdown.subtotal)} · discount ${num(c.breakdown.discount)} · net ${num(c.breakdown.net)}</span></div>${c.breakdown.repriced?`<div class="line muted" style="font-size:12px"><span>Repriced to approved prices — billed cover ${num(c.breakdown.billedCover)}, approved ${num(c.breakdown.approvedCover)}, patient absorbs ${num(c.breakdown.patientAbsorbs)}</span></div>`:''}`:'';
+  const clin=c.clinical&&(c.clinical.diagnosis||c.clinical.icdCode)?`<div class="line muted" style="font-size:12px;display:block"><span>Dx: ${esc(c.clinical.diagnosis||'—')}${c.clinical.icdCode?` · ${esc(c.clinical.icdVersion||'ICD')} ${esc(c.clinical.icdCode)}`:''}${c.clinical.differentialDiagnosis?` · DDx: ${esc(c.clinical.differentialDiagnosis)}`:''}${c.clinical.clinician?` · ${esc(c.clinical.clinician)}`:''}</span></div>`:'';
   if(c.status==='settled'){
     root.innerHTML=`<p class="eyebrow">Transfer complete</p>
       <div class="bignum">GHS ${num(c.amount)}</div>
@@ -36,16 +43,22 @@ function render(c){
     return;
   }
   if(c.status==='rejected'){ root.innerHTML='<span class="pill rejected">Rejected</span><p class="muted">This claim was declined.</p>'; return; }
+  const billTotal = (c.breakdown && c.breakdown.net != null) ? c.breakdown.net : null;
+  const showsPartial = billTotal != null && Math.abs(billTotal - c.amount) > 0.005;
   root.innerHTML=`
     <p class="eyebrow">Claim for authorisation</p>
     <div class="bignum">GHS ${num(c.amount)}</div>
-    <p class="muted" style="margin-top:4px">Payable to ${esc(c.provider)} on behalf of the patient</p>
+    <p class="muted" style="margin-top:4px">
+      ${showsPartial
+        ? `${c.payerKind==='employer'?'Employer':'Insurer'} share of a GHS ${num(billTotal)} bill — payable to ${esc(c.provider)}`
+        : `Payable to ${esc(c.provider)} on behalf of the patient`}
+    </p>
     <div style="margin:16px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
       <div class="line"><span class="muted">Patient</span><span>${esc(c.patientName||'—')}</span></div>
       <div class="line"><span class="muted">Member ID</span><span>${esc(c.memberId||'—')}</span></div>
       ${c.employer?`<div class="line"><span class="muted">Sponsor</span><span>${esc(c.employer)}</span></div>`:''}
     </div>
-    <div class="ledger" style="margin-bottom:16px">${items||'<p class="muted">No line detail.</p>'}</div>
+    <div class="ledger" style="margin-bottom:16px">${items||'<p class="muted">No line detail.</p>'}${bd}${clin}</div>
     <div class="row">
       <button class="accent" id="auth" onclick="authorize()">Authorise transfer from ${esc(c.payer)}</button>
       <button class="ghost" onclick="reject()">Decline</button>

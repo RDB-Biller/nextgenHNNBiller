@@ -7,7 +7,7 @@
 <div class="wrap">
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
-    <nav class="nav"><a href="apis.html">APIs</a><a href="dashboard.html">Dashboard</a><a href="payers.html">Payer console</a><a href="claimit.html">ClaimIt</a><a href="admin.html">Revenue</a></nav>
+    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a></nav>
   </div>
   <div class="grid cols-2">
     <div class="grid" style="align-content:start">
@@ -18,21 +18,43 @@
         <div class="row"><div class="field"><label>Member / Policy ID</label><input id="member" placeholder="ACA-00123"/></div>
         <div class="field"><label>Sponsor employer (if any)</label><input id="sponsor" placeholder="optional"/></div></div>
       </div>
-      <div class="card"><h2>Items</h2>
-        <div class="row"><select id="itemSel">
-          <option value="">Select item…</option>
-          <option value="GP-CONSULT|GP Consultation|100">GP Consultation — GHS 100</option>
-          <option value="FBC|Full Blood Count|120">Full Blood Count — GHS 120</option>
-          <option value="Coartem|Coartem|200">Coartem — GHS 200</option>
-        </select><input id="override" placeholder="Override ¢" style="max-width:120px"/>
-        <button class="primary" onclick="addCat()">Add</button></div>
+      <div class="card"><h2>Items <span class="muted" style="font-weight:400;font-size:12px">NHIS Medicines List + your items</span></h2>
+        <div class="row" style="position:relative">
+          <input id="itemSearch" placeholder="Search NHIS medicine by name or code (e.g. paracetamol, AMOXICCA1)…" autocomplete="off" oninput="searchCatalog()" onfocus="searchCatalog()"/>
+          <input id="qtyIn" placeholder="Qty" type="number" value="1" style="max-width:80px"/>
+          <input id="override" placeholder="Override ¢" style="max-width:120px"/>
+        </div>
+        <div id="searchResults" style="display:none;position:relative;z-index:5;background:#fff;border:1px solid var(--line);border-radius:8px;margin-top:-4px;max-height:240px;overflow:auto"></div>
         <div class="row" style="margin-top:10px"><input id="cname" placeholder="Custom item name"/>
-        <input id="ccost" placeholder="Cost" style="max-width:120px"/><button onclick="addCustom()">Add custom</button></div>
+        <input id="ccost" placeholder="Cost" style="max-width:120px"/><input id="cqty" placeholder="Qty" type="number" value="1" style="max-width:70px"/><button onclick="addCustom()">Add custom</button></div>
       </div>
-      <div class="card"><h2>Adjustments</h2>
-        <div class="row"><div class="field"><label>Copay % (patient share)</label><input id="copay" placeholder="e.g. 20"/></div>
-        <div class="field"><label>Cashback %</label><input id="cashback" placeholder="0"/></div>
-        <div class="field"><label>Discount code</label><input id="discount" placeholder="WELCOME10"/></div></div>
+      <div class="card"><h2>Who pays</h2>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:500">
+          <input type="checkbox" id="patientPays" onchange="onWhoPays()" style="width:auto"/> Patient pays a share (copay)
+        </label>
+        <div class="row" id="copayRow" style="display:none">
+          <div class="field"><label>Copay % (patient share)</label><input id="copay" placeholder="e.g. 20" oninput="preview()"/></div>
+          <div class="field"><label>Cashback %</label><input id="cashback" placeholder="0" oninput="preview()"/></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-weight:500">
+          <input type="checkbox" id="splitPays" onchange="onWhoPays()" style="width:auto"/> Split the covered portion between two or more payers
+        </label>
+        <div id="splitPanel" style="display:none;border-top:1px solid var(--line);padding-top:10px">
+          <p class="muted" style="font-size:12px;margin:0 0 8px">Tick each payer that is paying, and set their share (% of the covered portion). Shares should total 100%.</p>
+          <div id="splitList"></div>
+          <div class="row" style="margin-top:8px"><div class="field"><label>Split mode</label>
+            <select id="splitMode" onchange="renderSplit()"><option value="percent">Percentage</option><option value="amount">Explicit amount (GHS)</option></select></div></div>
+          <p class="muted" id="splitStatus" style="font-size:12px"></p>
+        </div>
+        <div class="row" style="margin-top:8px"><div class="field"><label>Discount code</label><input id="discount" placeholder="WELCOME10" oninput="preview()"/></div></div>
+      </div>
+      <div class="card"><h2>Clinical <span class="muted" style="font-weight:400;font-size:12px">optional · often required by insurers</span></h2>
+        <div class="row"><div class="field"><label>Diagnosis</label><input id="dx" placeholder="e.g. Uncomplicated malaria"/></div>
+        <div class="field"><label>Differential diagnosis</label><input id="ddx" placeholder="e.g. Typhoid, dengue"/></div></div>
+        <div class="row"><div class="field"><label>ICD version</label><select id="icdVersion"><option value="">—</option><option value="ICD-10">ICD-10</option><option value="ICD-11">ICD-11</option></select></div>
+        <div class="field"><label>ICD code</label><input id="icdCode" placeholder="e.g. B54 (ICD-10) / 1F40 (ICD-11)"/></div></div>
+        <div class="row"><div class="field"><label>Complaint</label><input id="complaint" placeholder="e.g. Fever, 3 days"/></div>
+        <div class="field"><label>Clinician</label><input id="clinician" placeholder="e.g. Dr. Owusu"/></div></div>
       </div>
     </div>
     <div class="grid" style="align-content:start">
@@ -48,6 +70,7 @@
         <div class="row" id="insurerTabs" style="margin-bottom:8px"><span class="muted">Loading…</span></div>
         <label>Employers &amp; corporate payors</label>
         <div class="row" id="employerTabs"></div>
+        <div id="splitAction" style="display:none;margin-top:10px"><button class="accent" onclick="routeSplit()" style="width:100%">Route split to selected payers</button></div>
         <div id="result" style="margin-top:14px"></div>
       </div>
       <div class="card"><h2>Financing &amp; credit <span class="tag" style="background:#FFF3E6;color:var(--warn)">optional</span></h2>
@@ -64,9 +87,8 @@
           <div class="field" id="finEmpWrap" style="display:none"><label>Employer</label>
             <select id="finEmp"><option value="acme">Acme Ltd</option><option value="savanna">Savanna Foods</option></select></div>
         </div>
-        <div class="field"><label>Diagnosis</label><input id="dx" placeholder="e.g. Uncomplicated malaria"/></div>
+        <p class="muted" style="font-size:12px;margin:4px 0">Diagnosis, complaint and clinician are taken from the Clinical section above.</p>
         <div class="row">
-          <div class="field"><label>Complaint</label><input id="qaComplaint" placeholder="Fever, 3 days"/></div>
           <div class="field"><label>Urgency</label><input id="qaUrgency" placeholder="Urgent / routine"/></div>
           <div class="field"><label>Plan / outcome</label><input id="qaPlan" placeholder="Recovery in 5 days"/></div>
         </div>
@@ -96,23 +118,75 @@ const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');set
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=(n)=>Number(n).toFixed(2);
 
-function addCat(){const v=$('itemSel').value;if(!v)return;const[code,name,price]=v.split('|');const o=$('override').value;items.push({code,name,cost:o?parseFloat(o):parseFloat(price)});$('override').value='';billId=null;preview();}
-function addCustom(){const n=$('cname').value.trim(),c=parseFloat($('ccost').value);if(!n||isNaN(c))return toast('Name and cost required');items.push({name:n,cost:c});$('cname').value='';$('ccost').value='';billId=null;preview();}
+let searchTimer=null;
+function searchCatalog(){
+  const q=$('itemSearch').value.trim();
+  clearTimeout(searchTimer);
+  if(q.length<2){ $('searchResults').style.display='none'; return; }
+  searchTimer=setTimeout(async()=>{
+    try{
+      const r=await fetch('/api/v1/bills/catalog?q='+encodeURIComponent(q)+'&limit=25',{headers:hdr()});
+      if(!r.ok)return;
+      const {data}=await r.json();
+      if(!data.length){ $('searchResults').innerHTML='<div style="padding:10px;color:var(--muted)">No match. Use "Add custom" below.</div>'; $('searchResults').style.display='block'; return; }
+      $('searchResults').innerHTML=data.map(m=>{
+        const price=m.price==null?'—':'GHS '+num(m.price);
+        const lvl=m.level?`<span class="muted" style="font-size:11px"> · Level ${esc(m.level)}</span>`:'';
+        return `<div class="line" style="cursor:pointer;padding:8px 10px" onclick='addFromCatalog(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+          <span>${esc(m.name)}<span class="muted" style="font-size:11px"> · ${esc(m.code)}${m.unit?' · '+esc(m.unit):''}</span>${lvl}</span>
+          <span class="num">${price}</span></div>`;
+      }).join('');
+      $('searchResults').style.display='block';
+    }catch(e){}
+  },180);
+}
+function addFromCatalog(m){
+  const q=parseInt($('qtyIn').value,10)||1;
+  const o=$('override').value;
+  items.push({code:m.code,name:m.name,cost:o?parseFloat(o):(m.price!=null?m.price:0),qty:q>0?q:1,
+    nhisTariffCode:m.source==='NHIS-ML-2025'?m.code:undefined});
+  $('itemSearch').value='';$('override').value='';$('qtyIn').value='1';
+  $('searchResults').style.display='none';billId=null;preview();
+}
+document.addEventListener('click',(e)=>{ if($('searchResults')&&!e.target.closest('#itemSearch')&&!e.target.closest('#searchResults'))$('searchResults').style.display='none'; });
+function addCustom(){const n=$('cname').value.trim(),c=parseFloat($('ccost').value);const q=$('cqty')?parseInt($('cqty').value,10):1;if(!n||isNaN(c))return toast('Name and cost required');items.push({name:n,cost:c,qty:q>0?q:1});$('cname').value='';$('ccost').value='';if($('cqty'))$('cqty').value='';billId=null;preview();}
 function rm(i){items.splice(i,1);billId=null;preview();}
-function adj(){return{copayPercent:$('copay').value||undefined,cashbackPercent:$('cashback').value||undefined,discountCode:$('discount').value||undefined};}
+function adj(){const patientPays=$('patientPays')&&$('patientPays').checked;const cr=$('copay').value;
+  // Explicit: patient copay only if the box is ticked; otherwise 0 (payers cover the net).
+  const copay=patientPays?(cr||'0'):0;
+  return{copayPercent:copay,cashbackPercent:(patientPays&&$('cashback').value)||undefined,discountCode:$('discount').value||undefined};}
 
 function preview(){
   const sub=items.reduce((s,i)=>s+i.cost,0);
   const disc={WELCOME10:.1,STAFF20:.2,NHIS5:.05}[($('discount').value||'').toUpperCase()]||0;
   const net=sub*(1-disc);
-  const cr=$('copay').value;const copay=cr===''?1:(parseFloat(cr)>1?parseFloat(cr)/100:parseFloat(cr));
+  const patientPays=$('patientPays')&&$('patientPays').checked;
+  const cr=$('copay').value;
+  // Explicit: patient share only when the copay box is ticked.
+  const copay=patientPays?(cr===''?0:(parseFloat(cr)>1?parseFloat(cr)/100:parseFloat(cr))):0;
   const cb=(parseFloat($('cashback').value)||0);const cbf=cb>1?cb/100:cb;
   const pb=net*copay,payer=net-pb,cash=pb*cbf,patient=Math.max(0,pb-cash);
-  const rows=items.map((i,ix)=>`<div class="line"><span>${esc(i.name)}</span><span class="num">GHS ${num(i.cost)} <a href="#" onclick="rm(${ix});return false" style="color:var(--bad);text-decoration:none">✕</a></span></div>`).join('');
+  // Split preview: allocate the payer portion across ticked payers.
+  let splitRows='';
+  if($('splitPays')&&$('splitPays').checked){
+    const sp=readSplit();const mode=$('splitMode')?$('splitMode').value:'percent';
+    if(sp&&sp.payers.length){
+      let sum=0;const parts=sp.payers.map(p=>{
+        const amt=mode==='amount'?(p.amount||0):payer*((p.percent||0)/100);sum+=amt;
+        const nm=(PAYERS.find(x=>x.id===p.payerId)||{}).name||p.payerId;
+        return `<div class="line"><span class="muted" style="padding-left:12px">↳ ${esc(nm)}${p.memberId?' ('+esc(p.memberId)+')':''}</span><span class="num">GHS ${num(amt)}</span></div>`;
+      }).join('');
+      const ok=Math.abs(sum-payer)<0.01;
+      $('splitStatus').innerHTML=ok?`<span style="color:var(--brand)">✓ Split covers the full GHS ${num(payer)} payer portion</span>`:`<span style="color:var(--bad)">Split totals GHS ${num(sum)} but payer portion is GHS ${num(payer)}</span>`;
+      splitRows=parts;
+    } else { $('splitStatus').textContent='Tick at least two payers and set their shares.'; }
+  }
+  const rows=items.map((i,ix)=>`<div class="line"><span>${esc(i.name)}${i.qty&&i.qty>1?' ×'+i.qty:''}</span><span class="num">GHS ${num(i.cost)} <a href="#" onclick="rm(${ix});return false" style="color:var(--bad);text-decoration:none">✕</a></span></div>`).join('');
   $('ledger').innerHTML=(rows||'<p class="muted">Add items to build the bill.</p>')+
     `<div class="line" style="border-top:2px solid var(--ink);margin-top:6px"><span class="muted">Subtotal</span><span class="num">GHS ${num(sub)}</span></div>`+
     (disc?`<div class="line"><span class="muted">Discount</span><span class="num">− GHS ${num(sub*disc)}</span></div>`:'')+
     `<div class="line"><span class="muted">Payer covers</span><span class="num">GHS ${num(payer)}</span></div>`+
+    splitRows+
     (cash?`<div class="line"><span class="muted">Cashback</span><span class="num">− GHS ${num(cash)}</span></div>`:'')+
     `<div class="line"><strong>Patient pays</strong><span class="num"><strong>GHS ${num(patient)}</strong></span></div>`;
 }
@@ -123,7 +197,14 @@ async function ensureBill(){
   if(!items.length){toast('Add at least one item');return null;}
   const body={provider:$('provider').value,patient:{name:$('pname').value,phone:$('pphone').value},
     items,adjustments:adj(),
-    insurance:{memberId:$('member').value||null, employer:$('sponsor').value?{name:$('sponsor').value}:null}};
+    insurance:{memberId:$('member').value||null, employer:$('sponsor').value?{name:$('sponsor').value}:null},
+    clinical:{ diagnosis:($('dx')&&$('dx').value)||null,
+      differentialDiagnosis:($('ddx')&&$('ddx').value)||null,
+      icdVersion:($('icdVersion')&&$('icdVersion').value)||null,
+      icdCode:($('icdCode')&&$('icdCode').value)||null,
+      complaint:($('complaint')&&$('complaint').value)||null,
+      clinician:($('clinician')&&$('clinician').value)||null }};
+  if($('splitPays')&&$('splitPays').checked){ const sp=readSplit(); if(sp) body.split=sp; }
   const r=await fetch('/api/v1/bills',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
   if(!r.ok){toast('Bill create failed');return null;}
   billId=(await r.json()).id;return billId;
@@ -137,7 +218,20 @@ async function payNow(method){
   else{$('result').innerHTML=`<p>Patient checkout link:</p><div class="linkbox">${location.origin}/pay/?intent=${intent.id}</div><p style="margin:8px 0 0"><a href="/pay/?intent=${intent.id}" target="_blank">Open patient page →</a></p>`;toast('Intent created');}
   reset();
 }
+async function routeSplit(){
+  const sp=readSplit();
+  if(!sp||sp.payers.length<2){toast('Tick at least two payers for a split');return;}
+  for(const p of sp.payers){ if(!p.memberId){toast('Member ID required for each paying payer');return;} }
+  const id=await ensureBill();if(!id)return;
+  const r=await fetch(`/api/v1/bills/${id}/route`,{method:'POST',headers:hdr(),body:JSON.stringify({split:sp})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));toast('Split route failed: '+(e.error||r.status));return;}
+  const {claims}=await r.json();
+  $('result').innerHTML=`<span class="pill awaiting_payer">Split routed to ${claims.length} payers</span>`+
+    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div><a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('');
+  toast('Split routed to '+claims.length+' payers');reset();
+}
 async function routePayer(payerId){
+  if($('splitPays')&&$('splitPays').checked){ return routeSplit(); }
   if(!$('member').value){toast('Member/Policy ID required to route');return;}
   const id=await ensureBill();if(!id)return;
   const r=await fetch(`/api/v1/bills/${id}/route`,{method:'POST',headers:hdr(),body:JSON.stringify({payerId})});
@@ -156,7 +250,10 @@ async function routePayer(payerId){
   }
   toast('Routed to '+payerId);reset();
 }
-function reset(){items=[];billId=null;preview();}
+function reset(){items=[];billId=null;
+  if($('patientPays'))$('patientPays').checked=false;
+  if($('splitPays'))$('splitPays').checked=false;
+  onWhoPays();preview();}
 
 let lastReportId=null;
 function finUI(){
@@ -165,7 +262,7 @@ function finUI(){
   $('finEmpWrap').style.display=t==='employer_loan'?'':'none';
 }
 function qa(){return [
-  {id:'complaint',a:$('qaComplaint').value||null},
+  {id:'complaint',a:($('complaint')&&$('complaint').value)||null},
   {id:'urgency',a:$('qaUrgency').value||null},
   {id:'plan',a:$('qaPlan').value||null},
   {id:'outcome',a:$('qaPlan').value||null},
@@ -198,16 +295,50 @@ async function reqFinancing(){
   $('finResult').innerHTML+=`<p style="margin:10px 0 0"><span class="pill ${esc(f.status)}">${esc(f.status.replace('_',' '))}</span> ${esc(type.replace('_',' '))} ${num(f.amount)}${extra}</p>`;
   toast('Financing: '+f.status);
 }
+let PAYERS=[];
 async function loadPayers(){
   try{
     const r=await fetch('/api/v1/bills/payers',{headers:hdr()});
     if(!r.ok) throw new Error();
     const {data}=await r.json();
+    PAYERS=data;
     const btn=(p)=>`<button onclick="routePayer('${esc(p.id)}')" title="${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
     const ins=data.filter(p=>p.group==='insurer'), emp=data.filter(p=>p.group==='employer');
     $('insurerTabs').innerHTML=ins.map(btn).join('')||'<span class="muted">None configured</span>';
     $('employerTabs').innerHTML=emp.map(btn).join('')||'<span class="muted">None configured</span>';
+    renderSplit();
   }catch(e){ $('insurerTabs').innerHTML='<span class="muted">Could not load payers</span>'; }
+}
+
+// ---- who pays: explicit copay + multi-payer split ----
+function onWhoPays(){
+  $('copayRow').style.display=$('patientPays').checked?'grid':'none';
+  $('splitPanel').style.display=$('splitPays').checked?'block':'none';
+  if($('splitAction'))$('splitAction').style.display=$('splitPays').checked?'block':'none';
+  if(!$('patientPays').checked){ $('copay').value=''; }
+  if($('splitPays').checked) renderSplit();
+  preview();
+}
+function renderSplit(){
+  if(!$('splitList'))return;
+  const mode=$('splitMode')?$('splitMode').value:'percent';
+  $('splitList').innerHTML=PAYERS.map(p=>`
+    <div class="line" style="gap:8px;align-items:center">
+      <label style="display:flex;align-items:center;gap:6px;flex:1"><input type="checkbox" class="spPay" data-id="${esc(p.id)}" data-name="${esc(p.name)}" onchange="preview()" style="width:auto"/> ${esc(p.name)} <span class="muted" style="font-size:11px">${esc(p.group||'')}</span></label>
+      <input class="spMember" data-id="${esc(p.id)}" placeholder="member ID" oninput="preview()" style="max-width:120px"/>
+      <input class="spVal" data-id="${esc(p.id)}" type="number" placeholder="${mode==='amount'?'GHS':'%'}" oninput="preview()" style="max-width:90px"/>
+    </div>`).join('')||'<span class="muted">No payers loaded.</span>';
+}
+function readSplit(){
+  const mode=$('splitMode')?$('splitMode').value:'percent';
+  const rows=[...document.querySelectorAll('.spPay')].filter(c=>c.checked);
+  const payers=rows.map(c=>{
+    const id=c.dataset.id;
+    const val=parseFloat(document.querySelector(`.spVal[data-id="${id}"]`).value)||0;
+    const member=document.querySelector(`.spMember[data-id="${id}"]`).value.trim()||null;
+    return mode==='amount'?{payerId:id,memberId:member,amount:val}:{payerId:id,memberId:member,percent:val};
+  });
+  return payers.length?{payers}:null;
 }
 $('apikey').addEventListener('change',loadPayers);
 loadPayers();

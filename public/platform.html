@@ -19,7 +19,7 @@
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span> Master Control</div>
       <p class="muted" style="margin:4px 0 0">Clients, payers, EMR partners, IT leads and licensing across the whole deployment.</p></div>
-    <nav class="nav"><a href="apis.html">APIs</a><a href="revenue.html">Revenue</a><a href="submissions.html">Submissions</a><a href="admin.html">IT-lead console</a><a href="biller.html">Billing</a></nav>
+    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="revenue.html" target="_blank" rel="noopener">Revenue</a><a href="submissions.html" target="_blank" rel="noopener">Submissions</a><a href="admin.html" target="_blank" rel="noopener">IT-lead console</a><a href="biller.html" target="_blank" rel="noopener">Billing</a></nav>
   </div>
 
   <div class="field" style="max-width:340px"><label>Platform key</label><input id="pkey" value="platform_demo_key_123" onchange="boot()"/></div>
@@ -77,7 +77,37 @@
         <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addPayer()">Create</button></div>
       </div>
     </div>
-    <div class="card"><h2>Global payers</h2><div id="payers"></div></div>
+    <div class="card" style="margin-bottom:14px"><h2>Global payers</h2><div id="payers"></div></div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Processing target</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Set a volume an insurer/employer aims to process through HNN, and track settled value against it.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="tg_payer"></select></div>
+        <div class="field"><label>Target (GHS)</label><input id="tg_amount" type="number" placeholder="1000000"/></div>
+        <div class="field"><label>Period</label><select id="tg_period"><option value="monthly">Monthly</option><option value="sixmonth">Every 6 months</option><option value="yearly">Yearly</option></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="setTarget()">Set target</button></div>
+      </div>
+      <div id="targetsBoard" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card"><h2>Pre-approved price list</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Upload an insurer's approved prices (CSV or Excel-exported CSV). Columns: <span class="key">code, name, price</span> and optionally <span class="key">unit, provider, category</span>. A <span class="key">provider</span> (tenant id or facility name) gives that facility its own price; blank = the payer's default.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pl_payer" onchange="loadPriceList()"></select></div>
+        <div class="field"><label>CSV / Excel file</label><input id="pl_file" type="file" accept=".csv,.tsv,text/csv,application/vnd.ms-excel"/></div>
+        <div class="field" style="display:flex;align-items:flex-end;gap:8px">
+          <button class="primary" style="flex:1" onclick="uploadPriceList()">Upload</button>
+          <button class="ghost" onclick="clearPriceList()">Clear</button>
+        </div>
+      </div>
+      <p class="muted" id="pl_status" style="font-size:12px"></p>
+      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-weight:500">
+        <input type="checkbox" id="pl_reprice" onchange="toggleReprice()" style="width:auto"/>
+        Let this price list <b>govern settlement</b> for this payer (default off — reference only)
+      </label>
+      <p class="muted" style="font-size:12px;margin:0 0 8px">When on, claims routed to this payer are repriced to its approved prices (facility-specific first, then default, else the billed price). The patient absorbs any gap between billed and approved.</p>
+      <div id="pl_preview"></div>
+    </div>
   </div>
 
   <div class="panel" id="p-emr">
@@ -120,6 +150,7 @@
 const $=(id)=>document.getElementById(id);
 const H=()=>({'Content-Type':'application/json','x-platform-key':$('pkey').value.trim()});
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
 let CLIENTS=[],PAYERS=[],EMR=[];
 
@@ -201,6 +232,71 @@ async function loadPayers(){
   $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Source account</th><th>Payer API key</th></tr></thead><tbody>`+
     PAYERS.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.kind==='employer'?'corporate':'insurer')}</td>
       <td>${esc(p.sourceAccount||'—')}</td><td><span class="key">${esc(p.apiKey||'')}</span></td></tr>`).join('')+`</tbody></table>`;
+  // fill target + pricelist payer selects
+  const opts='<option value="">Select payer…</option>'+PAYERS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if($('tg_payer'))$('tg_payer').innerHTML=opts;
+  if($('pl_payer'))$('pl_payer').innerHTML=opts;
+  loadTargets();
+}
+async function setTarget(){
+  const id=$('tg_payer').value; const amount=parseFloat($('tg_amount').value); const period=$('tg_period').value;
+  if(!id||!amount)return toast('Pick a payer and amount');
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/target`,{method:'PUT',headers:H(),body:JSON.stringify({amount,period})});
+  if(r.ok){toast('Target set');$('tg_amount').value='';loadTargets();}else toast('Failed');
+}
+async function loadTargets(){
+  if(!$('targetsBoard'))return;
+  const r=await (await fetch('/api/platform/targets',{headers:H()})).json().catch(()=>({data:[]}));
+  const data=r.data||[];
+  if(!data.length){ $('targetsBoard').innerHTML='<p class="muted" style="font-size:13px">No targets set yet.</p>'; return; }
+  $('targetsBoard').innerHTML=data.map(t=>{
+    const pct=Math.min(100,t.percent||0);
+    const col=pct>=100?'var(--brand)':pct>=60?'#167A5F':'var(--coral)';
+    return `<div style="margin:10px 0">
+      <div class="line"><strong>${esc(t.payerName)}</strong><span class="muted">${esc(t.periodLabel)} · ${t.daysLeft} days left</span></div>
+      <div style="background:#EEF2F0;border-radius:999px;height:12px;overflow:hidden;margin:4px 0"><div style="width:${pct}%;height:12px;background:${col}"></div></div>
+      <div class="line"><span class="muted" style="font-size:12px">GHS ${n2(t.processed)} of GHS ${n2(t.target)} (${t.percent}%) · ${t.claims} claims</span>
+        <a href="#" onclick="clearTarget('${esc(t.payerId)}');return false" style="color:var(--coral);font-size:12px">remove</a></div>
+    </div>`;
+  }).join('');
+}
+async function clearTarget(id){
+  await fetch(`/api/platform/payers/${encodeURIComponent(id)}/target`,{method:'DELETE',headers:H()});
+  toast('Target removed');loadTargets();
+}
+async function uploadPriceList(){
+  const id=$('pl_payer').value; const f=$('pl_file').files[0];
+  if(!id)return toast('Pick a payer'); if(!f)return toast('Choose a CSV file');
+  const csv=await f.text();
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{method:'POST',headers:H(),body:JSON.stringify({csv,replace:true})});
+  const o=await r.json();
+  if(r.ok){ $('pl_status').innerHTML=`<span style="color:var(--brand)">Imported ${o.imported} rows${o.skipped?`, skipped ${o.skipped}`:''}.</span>`; loadPriceList(); }
+  else { $('pl_status').innerHTML=`<span style="color:var(--coral)">Upload failed: ${esc(o.error||'')}${o.detail?' — '+esc((o.detail||[]).slice(0,3).join('; ')):''}</span>`; }
+}
+async function loadPriceList(){
+  const id=$('pl_payer').value; if(!id){ $('pl_preview').innerHTML=''; return; }
+  // reflect the payer's current reprice flag
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  if($('pl_reprice'))$('pl_reprice').checked=!!(payer&&payer.repriceClaims);
+  const r=await (await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{headers:H()})).json();
+  if(!r.count){ $('pl_preview').innerHTML='<p class="muted" style="font-size:13px">No price list uploaded for this payer.</p>'; return; }
+  $('pl_preview').innerHTML=`<p class="muted" style="font-size:12px">${r.count} prices · uploaded ${r.uploadedAt?new Date(r.uploadedAt).toLocaleString():''}</p>`+
+    `<table><thead><tr><th>Code</th><th>Name</th><th>Provider</th><th class="num">Price</th></tr></thead><tbody>`+
+    (r.sample||[]).map(x=>`<tr><td>${esc(x.code||'—')}</td><td>${esc(x.name||'—')}</td><td>${esc(x.provider||'default')}</td><td class="num">GHS ${n2(x.price)}</td></tr>`).join('')+
+    `</tbody></table>`;
+}
+async function clearPriceList(){
+  const id=$('pl_payer').value; if(!id)return toast('Pick a payer');
+  await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{method:'DELETE',headers:H()});
+  toast('Price list cleared');loadPriceList();
+}
+async function toggleReprice(){
+  const id=$('pl_payer').value; if(!id){ $('pl_reprice').checked=false; return toast('Pick a payer'); }
+  const enabled=$('pl_reprice').checked;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/reprice`,{method:'PUT',headers:H(),body:JSON.stringify({enabled})});
+  if(r.ok){ toast(enabled?'Repricing enabled — this payer\u2019s prices now govern settlement':'Repricing off — reference only');
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.repriceClaims=enabled; }
+  else { $('pl_reprice').checked=!enabled; toast('Failed'); }
 }
 async function addPayer(){
   const body={name:$('y_name').value.trim(),kind:$('y_kind').value,sourceAccount:$('y_src').value,email:$('y_email').value};
