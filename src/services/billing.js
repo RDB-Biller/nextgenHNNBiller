@@ -14,18 +14,43 @@ const toGhs = (p) => Math.round(p) / 100;
 function createBill(input) {
   const {
     provider, patient = {}, items = [], adjustments = {}, routing = 'Regular',
-    insurance = {},
+    insurance = {}, clinical = {}, split = null,
   } = input;
+
+  // Mandatory: a provider, a named patient, and at least one line item. Everything
+  // else (insurer, member id, clinical detail, financing) is optional here — the
+  // insurer/member is only enforced when the bill is actually ROUTED to a payer.
+  if (!provider) throw badRequest('provider is required');
+  if (!patient.name) throw badRequest('patient.name is required');
+  if (!Array.isArray(items) || items.length === 0) throw badRequest('at least one line item is required');
 
   const lineItems = items.map((it) => {
     let { name, cost } = it;
     let category = null;
+    let code = it.code || null;
     const cat = findItem(it.code || it.name);
-    if (cat) { name = name || cat.name; cost = cost != null ? cost : cat.price; category = cat.category; }
+    if (cat) {
+      name = name || cat.name;
+      cost = cost != null ? cost : cat.price;
+      category = cat.category;
+      code = code || cat.code || null;
+    }
     if (name == null || cost == null) {
       throw badRequest(`Line item needs a known code or explicit name+cost: ${JSON.stringify(it)}`);
     }
-    return { name, cost: Number(cost), category };
+    const qty = it.qty != null && Number(it.qty) > 0 ? Math.floor(Number(it.qty)) : 1;
+    const unitPrice = Number(cost);
+    // Optional per-item fields a richer EMR may supply — passed through untouched.
+    const extra = {};
+    if (it.nhisTariffCode) extra.nhisTariffCode = it.nhisTariffCode;
+    if (it.diagnosisCode) extra.diagnosisCode = it.diagnosisCode;
+    if (it.note) extra.note = String(it.note).slice(0, 200);
+    return {
+      code, name, category,
+      qty, unitPrice,
+      cost: Math.round(unitPrice * qty * 100) / 100, // line total = unit x qty
+      ...extra,
+    };
   });
 
   const subtotalP = lineItems.reduce((s, i) => s + toPesewas(i.cost), 0);
@@ -51,10 +76,25 @@ function createBill(input) {
       payerId: insurance.payerId || insurance.insurerId || null,
       memberId: insurance.memberId || insurance.insuranceNumber || null,
       sponsor: insurance.employer || insurance.sponsor || null, // {name,email} if a 3rd party sponsors the policy
+      // Optional multi-payer split of the covered portion. null = single payer.
+      // { payers: [{ payerId, memberId?, percent|amount, paying? }] }
+      split: split && Array.isArray(split.payers) && split.payers.length ? split : null,
     },
     adjustments: { discountCode: adjustments.discountCode || null, discountPercent, copayPercent, cashbackPercent,
       discountKind: adjustments.discountKind || 'standard', referredBy: adjustments.referredBy || null,
       linkedMemberId: adjustments.linkedMemberId || null },
+    // Optional clinical context for the claim (all optional — never required to bill).
+    clinical: {
+      diagnosis: clinical.diagnosis || null,
+      differentialDiagnosis: clinical.differentialDiagnosis || null,
+      diagnosisCode: clinical.diagnosisCode || null,
+      icdVersion: clinical.icdVersion || null,
+      icdCode: clinical.icdCode || null,
+      complaint: clinical.complaint || null,
+      clinician: clinical.clinician || clinical.clinicianName || null,
+      encounterDate: clinical.encounterDate || null,
+      notes: clinical.notes ? String(clinical.notes).slice(0, 500) : null,
+    },
     totals: {
       subtotal: toGhs(subtotalP), discount: toGhs(discountP), net: toGhs(netP),
       payerShare: toGhs(payerShareP), cashback: toGhs(cashbackP), patientPayable: toGhs(patientPayableP),
