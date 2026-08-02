@@ -69,52 +69,58 @@ paths:
               properties:
                 provider:
                   type: string
+                  description: REQUIRED. Provider/clinic name.
                 patient:
                   type: object
+                  required:
+                  - name
                   properties:
                     name:
                       type: string
+                      description: REQUIRED
                     phone:
-                      type: string
-                    email:
                       type: string
                 items:
                   type: array
+                  minItems: 1
+                  description: REQUIRED. At least one line item.
                   items:
                     type: object
                     properties:
                       code:
                         type: string
+                        description: Catalogue code (e.g. GP-CONSULT). Optional if name+cost given.
                       name:
                         type: string
                       cost:
                         type: number
+                        description: Unit price in GHS
                       qty:
                         type: integer
+                        default: 1
+                        description: Quantity (default 1). Line total = cost x qty.
+                      nhisTariffCode:
+                        type: string
+                        description: Optional NHIS tariff code passed through to the claim.
+                      diagnosisCode:
+                        type: string
+                        description: Optional per-item diagnosis/ICD code.
+                      note:
+                        type: string
                 adjustments:
                   type: object
                   properties:
-                    discountPercent:
-                      type: number
                     copayPercent:
                       type: number
+                      description: Patient share of net (0 = payers cover all). Explicit — no implicit
+                        default.
                     cashbackPercent:
                       type: number
                     discountCode:
                       type: string
-                    discountKind:
-                      type: string
-                      enum:
-                      - standard
-                      - referral
-                      - linked_payer
-                      description: Attributes the discount so referral programmes can be priced separately
-                    referredBy:
-                      type: string
-                    linkedMemberId:
-                      type: string
                 insurance:
                   type: object
+                  description: Optional at bill creation; memberId REQUIRED only when routing to a payer.
                   properties:
                     payerId:
                       type: string
@@ -122,11 +128,65 @@ paths:
                       type: string
                     employer:
                       type: object
-                      properties:
-                        name:
-                          type: string
-                        email:
-                          type: string
+                clinical:
+                  type: object
+                  description: OPTIONAL clinical context carried onto the claim (insurers often require
+                    it). Never required to bill.
+                  properties:
+                    diagnosis:
+                      type: string
+                    differentialDiagnosis:
+                      type: string
+                      description: Optional differential diagnosis
+                    icdVersion:
+                      type: string
+                      enum:
+                      - ICD-10
+                      - ICD-11
+                      description: ICD classification version
+                    icdCode:
+                      type: string
+                      description: ICD-10 or ICD-11 code, e.g. B54 / 1F40
+                    complaint:
+                      type: string
+                    clinician:
+                      type: string
+                    encounterDate:
+                      type: string
+                    notes:
+                      type: string
+                split:
+                  type: object
+                  description: OPTIONAL. Split the covered (payer) portion between two or more payers.
+                    Omit for a single payer. Each payer gets its own itemised claim; the claims sum exactly
+                    to the payer share.
+                  properties:
+                    payers:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                        - payerId
+                        properties:
+                          payerId:
+                            type: string
+                          memberId:
+                            type: string
+                            description: Member/policy ID with THIS payer
+                          percent:
+                            type: number
+                            description: Share as % of the payer portion (use percent OR amount)
+                          amount:
+                            type: number
+                            description: Explicit GHS share (amounts must sum to the payer portion)
+                          paying:
+                            type: boolean
+                            default: true
+                            description: Set false to exclude a listed payer (checkbox off)
+              required:
+              - provider
+              - patient
+              - items
       responses:
         '201':
           description: Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable)
@@ -180,13 +240,19 @@ paths:
               properties:
                 payerId:
                   type: string
+                  description: Single-payer routing
+                split:
+                  type: object
+                  description: 'Multi-payer routing: { payers:[{payerId,memberId,percent|amount,paying?}]
+                    }. Overrides any split set at bill creation.'
       responses:
         '201':
-          description: claim + payerLink
+          description: 'Single: { claim, payerLink, mode:"single" }. Split: { claims:[{claimId,payerId,payerName,amount,payerLink}],
+            split, mode:"split" }.'
         '403':
           description: payer_not_available (another facility’s slot)
         '422':
-          description: unknown_payer / payer_slot_expired / missing_member_id
+          description: invalid_split / split_amounts_do_not_match_payer_share / missing_member_id / unknown_payer
   /api/v1/bills/payers:
     get:
       tags:
@@ -371,3 +437,32 @@ paths:
       responses:
         '200':
           description: OK
+  /api/v1/bills/catalog:
+    get:
+      tags:
+      - Bills
+      summary: Search the chargeable catalog (NHIS Medicines List + your items)
+      description: Type-ahead search over 550+ NHIS formulations (official codes, tariff prices, prescribing
+        level) plus demo items. Use q to search by name or code.
+      security:
+      - ApiKey: []
+      parameters:
+      - name: q
+        in: query
+        schema:
+          type: string
+        description: Search text (name or code)
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 25
+          maximum: 100
+      - name: category
+        in: query
+        schema:
+          type: string
+        description: Filter, e.g. drug
+      responses:
+        '200':
+          description: '{ count:{total,nhis,demo}, data:[{code,name,category,price,unit,level}] }'

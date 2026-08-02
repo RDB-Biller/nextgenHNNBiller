@@ -45,6 +45,12 @@
     },
     {
       "name": "Licensing"
+    },
+    {
+      "name": "Targets"
+    },
+    {
+      "name": "Price Lists"
     }
   ],
   "components": {
@@ -877,6 +883,308 @@
         "responses": {
           "200": {
             "description": "{ client, edition, expiresAt, feeAmount }"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/target": {
+      "put": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Set a payer processing target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Target GHS to process"
+                  },
+                  "period": {
+                    "type": "string",
+                    "enum": [
+                      "monthly",
+                      "sixmonth",
+                      "yearly",
+                      "custom"
+                    ],
+                    "default": "monthly"
+                  },
+                  "anchor": {
+                    "type": "string",
+                    "description": "ISO date the schedule counts from"
+                  },
+                  "startDate": {
+                    "type": "string"
+                  },
+                  "endDate": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved target"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Progress against a payer target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ target, processed, remaining, percent, claims, periodStart, periodEnd, daysLeft }"
+          },
+          "404": {
+            "description": "no_target"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Remove a payer target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cleared"
+          }
+        }
+      }
+    },
+    "/api/platform/targets": {
+      "get": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Progress for all payers with a target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data:[...] }"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/pricelist": {
+      "post": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Upload a payer pre-approved price list (CSV text)",
+        "description": "Body { csv, replace? }. CSV columns: code, name, price [, unit, provider, category]. A provider (tenant id or facility name) sets a facility-specific price; blank rows are the payer default.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "csv"
+                ],
+                "properties": {
+                  "csv": {
+                    "type": "string",
+                    "description": "Raw CSV text (Excel exported to CSV works)"
+                  },
+                  "replace": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ imported, total, skipped, errors }"
+          },
+          "422": {
+            "description": "csv_required / no_valid_rows"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Get a payer price list (or search with q)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ count, uploadedAt, sample[] } or { data[] } when q set"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Clear a payer price list",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cleared"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/reprice": {
+      "put": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Toggle whether a payer\u2019s price list governs settlement (default off)",
+        "description": "When enabled, claims routed to this payer are repriced to its approved prices (facility-specific first, then default, else the billed price). The patient absorbs any gap between billed and approved. Default off = the list is reference-only and the billed price governs.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ payerId, repriceClaims }"
           }
         }
       }

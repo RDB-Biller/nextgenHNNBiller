@@ -119,7 +119,91 @@ paths:
         description: ''
       responses:
         '200':
-          description: OK
+          description: 'Itemised claim: lineItems[] each with payerCovers/patientPortion, breakdown{subtotal,discount,net,payerShare,patientShare},
+            patient, clinical.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claimId:
+                    type: string
+                  status:
+                    type: string
+                  amount:
+                    type: number
+                  lineItems:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                        name:
+                          type: string
+                        qty:
+                          type: integer
+                        unitPrice:
+                          type: number
+                        lineTotal:
+                          type: number
+                        payerCovers:
+                          type: number
+                          description: What this payer covers for the line
+                        patientPortion:
+                          type: number
+                        nhisTariffCode:
+                          type: string
+                        approvedPrice:
+                          type: number
+                          description: Approved unit price applied when repricing is on
+                  breakdown:
+                    type: object
+                    properties:
+                      subtotal:
+                        type: number
+                      discount:
+                        type: number
+                      net:
+                        type: number
+                      payerShare:
+                        type: number
+                      patientShare:
+                        type: number
+                      thisPayerCovers:
+                        type: number
+                        description: What THIS payer covers (its claim amount)
+                      repriced:
+                        type: boolean
+                      billedCover:
+                        type: number
+                      approvedCover:
+                        type: number
+                      patientAbsorbs:
+                        type: number
+                  clinical:
+                    type: object
+                  memberId:
+                    type: string
+                  patientName:
+                    type: string
+                  split:
+                    type: array
+                    nullable: true
+                    description: If present, this claim is one of a multi-payer split; lists all payers
+                      and their amounts. Each payer authorises only its own claim.
+                    items:
+                      type: object
+                      properties:
+                        payerId:
+                          type: string
+                        amount:
+                          type: number
+                        percent:
+                          type: number
+                  repriced:
+                    type: boolean
+                    description: True if the payer’s approved price list governed this claim
   /api/payer/claims/{id}/authorize:
     post:
       tags:

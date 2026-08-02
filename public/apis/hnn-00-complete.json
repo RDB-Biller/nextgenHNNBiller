@@ -119,6 +119,12 @@
     },
     {
       "name": "Licensing"
+    },
+    {
+      "name": "Targets"
+    },
+    {
+      "name": "Price Lists"
     }
   ],
   "paths": {
@@ -141,38 +147,57 @@
                 "type": "object",
                 "properties": {
                   "provider": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "REQUIRED. Provider/clinic name."
                   },
                   "patient": {
                     "type": "object",
+                    "required": [
+                      "name"
+                    ],
                     "properties": {
                       "name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "REQUIRED"
                       },
                       "phone": {
-                        "type": "string"
-                      },
-                      "email": {
                         "type": "string"
                       }
                     }
                   },
                   "items": {
                     "type": "array",
+                    "minItems": 1,
+                    "description": "REQUIRED. At least one line item.",
                     "items": {
                       "type": "object",
                       "properties": {
                         "code": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Catalogue code (e.g. GP-CONSULT). Optional if name+cost given."
                         },
                         "name": {
                           "type": "string"
                         },
                         "cost": {
-                          "type": "number"
+                          "type": "number",
+                          "description": "Unit price in GHS"
                         },
                         "qty": {
-                          "type": "integer"
+                          "type": "integer",
+                          "default": 1,
+                          "description": "Quantity (default 1). Line total = cost x qty."
+                        },
+                        "nhisTariffCode": {
+                          "type": "string",
+                          "description": "Optional NHIS tariff code passed through to the claim."
+                        },
+                        "diagnosisCode": {
+                          "type": "string",
+                          "description": "Optional per-item diagnosis/ICD code."
+                        },
+                        "note": {
+                          "type": "string"
                         }
                       }
                     }
@@ -180,37 +205,21 @@
                   "adjustments": {
                     "type": "object",
                     "properties": {
-                      "discountPercent": {
-                        "type": "number"
-                      },
                       "copayPercent": {
-                        "type": "number"
+                        "type": "number",
+                        "description": "Patient share of net (0 = payers cover all). Explicit \u2014 no implicit default."
                       },
                       "cashbackPercent": {
                         "type": "number"
                       },
                       "discountCode": {
                         "type": "string"
-                      },
-                      "discountKind": {
-                        "type": "string",
-                        "enum": [
-                          "standard",
-                          "referral",
-                          "linked_payer"
-                        ],
-                        "description": "Attributes the discount so referral programmes can be priced separately"
-                      },
-                      "referredBy": {
-                        "type": "string"
-                      },
-                      "linkedMemberId": {
-                        "type": "string"
                       }
                     }
                   },
                   "insurance": {
                     "type": "object",
+                    "description": "Optional at bill creation; memberId REQUIRED only when routing to a payer.",
                     "properties": {
                       "payerId": {
                         "type": "string"
@@ -219,19 +228,90 @@
                         "type": "string"
                       },
                       "employer": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "email": {
-                            "type": "string"
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "clinical": {
+                    "type": "object",
+                    "description": "OPTIONAL clinical context carried onto the claim (insurers often require it). Never required to bill.",
+                    "properties": {
+                      "diagnosis": {
+                        "type": "string"
+                      },
+                      "differentialDiagnosis": {
+                        "type": "string",
+                        "description": "Optional differential diagnosis"
+                      },
+                      "icdVersion": {
+                        "type": "string",
+                        "enum": [
+                          "ICD-10",
+                          "ICD-11"
+                        ],
+                        "description": "ICD classification version"
+                      },
+                      "icdCode": {
+                        "type": "string",
+                        "description": "ICD-10 or ICD-11 code, e.g. B54 / 1F40"
+                      },
+                      "complaint": {
+                        "type": "string"
+                      },
+                      "clinician": {
+                        "type": "string"
+                      },
+                      "encounterDate": {
+                        "type": "string"
+                      },
+                      "notes": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "split": {
+                    "type": "object",
+                    "description": "OPTIONAL. Split the covered (payer) portion between two or more payers. Omit for a single payer. Each payer gets its own itemised claim; the claims sum exactly to the payer share.",
+                    "properties": {
+                      "payers": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "payerId"
+                          ],
+                          "properties": {
+                            "payerId": {
+                              "type": "string"
+                            },
+                            "memberId": {
+                              "type": "string",
+                              "description": "Member/policy ID with THIS payer"
+                            },
+                            "percent": {
+                              "type": "number",
+                              "description": "Share as % of the payer portion (use percent OR amount)"
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Explicit GHS share (amounts must sum to the payer portion)"
+                            },
+                            "paying": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "Set false to exclude a listed payer (checkbox off)"
+                            }
                           }
                         }
                       }
                     }
                   }
-                }
+                },
+                "required": [
+                  "provider",
+                  "patient",
+                  "items"
+                ]
               }
             }
           }
@@ -320,7 +400,12 @@
                 "type": "object",
                 "properties": {
                   "payerId": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Single-payer routing"
+                  },
+                  "split": {
+                    "type": "object",
+                    "description": "Multi-payer routing: { payers:[{payerId,memberId,percent|amount,paying?}] }. Overrides any split set at bill creation."
                   }
                 }
               }
@@ -329,13 +414,13 @@
         },
         "responses": {
           "201": {
-            "description": "claim + payerLink"
+            "description": "Single: { claim, payerLink, mode:\"single\" }. Split: { claims:[{claimId,payerId,payerName,amount,payerLink}], split, mode:\"split\" }."
           },
           "403": {
             "description": "payer_not_available (another facility\u2019s slot)"
           },
           "422": {
-            "description": "unknown_payer / payer_slot_expired / missing_member_id"
+            "description": "invalid_split / split_amounts_do_not_match_payer_share / missing_member_id / unknown_payer"
           }
         }
       }
@@ -624,7 +709,130 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Itemised claim: lineItems[] each with payerCovers/patientPortion, breakdown{subtotal,discount,net,payerShare,patientShare}, patient, clinical.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claimId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number"
+                    },
+                    "lineItems": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "qty": {
+                            "type": "integer"
+                          },
+                          "unitPrice": {
+                            "type": "number"
+                          },
+                          "lineTotal": {
+                            "type": "number"
+                          },
+                          "payerCovers": {
+                            "type": "number",
+                            "description": "What this payer covers for the line"
+                          },
+                          "patientPortion": {
+                            "type": "number"
+                          },
+                          "nhisTariffCode": {
+                            "type": "string"
+                          },
+                          "approvedPrice": {
+                            "type": "number",
+                            "description": "Approved unit price applied when repricing is on"
+                          }
+                        }
+                      }
+                    },
+                    "breakdown": {
+                      "type": "object",
+                      "properties": {
+                        "subtotal": {
+                          "type": "number"
+                        },
+                        "discount": {
+                          "type": "number"
+                        },
+                        "net": {
+                          "type": "number"
+                        },
+                        "payerShare": {
+                          "type": "number"
+                        },
+                        "patientShare": {
+                          "type": "number"
+                        },
+                        "thisPayerCovers": {
+                          "type": "number",
+                          "description": "What THIS payer covers (its claim amount)"
+                        },
+                        "repriced": {
+                          "type": "boolean"
+                        },
+                        "billedCover": {
+                          "type": "number"
+                        },
+                        "approvedCover": {
+                          "type": "number"
+                        },
+                        "patientAbsorbs": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "clinical": {
+                      "type": "object"
+                    },
+                    "memberId": {
+                      "type": "string"
+                    },
+                    "patientName": {
+                      "type": "string"
+                    },
+                    "split": {
+                      "type": "array",
+                      "nullable": true,
+                      "description": "If present, this claim is one of a multi-payer split; lists all payers and their amounts. Each payer authorises only its own claim.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "payerId": {
+                            "type": "string"
+                          },
+                          "amount": {
+                            "type": "number"
+                          },
+                          "percent": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "repriced": {
+                      "type": "boolean",
+                      "description": "True if the payer\u2019s approved price list governed this claim"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3102,6 +3310,354 @@
         "responses": {
           "200": {
             "description": "{ client, edition, expiresAt, feeAmount }"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/catalog": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Search the chargeable catalog (NHIS Medicines List + your items)",
+        "description": "Type-ahead search over 550+ NHIS formulations (official codes, tariff prices, prescribing level) plus demo items. Use q to search by name or code.",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text (name or code)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter, e.g. drug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ count:{total,nhis,demo}, data:[{code,name,category,price,unit,level}] }"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/target": {
+      "put": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Set a payer processing target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Target GHS to process"
+                  },
+                  "period": {
+                    "type": "string",
+                    "enum": [
+                      "monthly",
+                      "sixmonth",
+                      "yearly",
+                      "custom"
+                    ],
+                    "default": "monthly"
+                  },
+                  "anchor": {
+                    "type": "string",
+                    "description": "ISO date the schedule counts from"
+                  },
+                  "startDate": {
+                    "type": "string"
+                  },
+                  "endDate": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved target"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Progress against a payer target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ target, processed, remaining, percent, claims, periodStart, periodEnd, daysLeft }"
+          },
+          "404": {
+            "description": "no_target"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Remove a payer target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cleared"
+          }
+        }
+      }
+    },
+    "/api/platform/targets": {
+      "get": {
+        "tags": [
+          "Targets"
+        ],
+        "summary": "Progress for all payers with a target",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data:[...] }"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/pricelist": {
+      "post": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Upload a payer pre-approved price list (CSV text)",
+        "description": "Body { csv, replace? }. CSV columns: code, name, price [, unit, provider, category]. A provider (tenant id or facility name) sets a facility-specific price; blank rows are the payer default.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "csv"
+                ],
+                "properties": {
+                  "csv": {
+                    "type": "string",
+                    "description": "Raw CSV text (Excel exported to CSV works)"
+                  },
+                  "replace": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ imported, total, skipped, errors }"
+          },
+          "422": {
+            "description": "csv_required / no_valid_rows"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Get a payer price list (or search with q)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ count, uploadedAt, sample[] } or { data[] } when q set"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Clear a payer price list",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "cleared"
+          }
+        }
+      }
+    },
+    "/api/platform/payers/{id}/reprice": {
+      "put": {
+        "tags": [
+          "Price Lists"
+        ],
+        "summary": "Toggle whether a payer\u2019s price list governs settlement (default off)",
+        "description": "When enabled, claims routed to this payer are repriced to its approved prices (facility-specific first, then default, else the billed price). The patient absorbs any gap between billed and approved. Default off = the list is reference-only and the billed price governs.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ payerId, repriceClaims }"
           }
         }
       }
