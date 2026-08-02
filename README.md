@@ -405,6 +405,55 @@ Clients self-check with `GET /api/v1/bills/edition`, which now returns a `licenc
 only blocks when HNN switches to `licensed`. UI: the **Licensing policy** tab in
 `/app/platform.html`.
 
+## Payer targets & price lists (master console)
+
+**Volume targets.** Set a processing target for an insurer/employer over a window and
+track settled value against it:
+- `PUT /api/platform/payers/:id/target` { amount, period: monthly|sixmonth|yearly|custom }
+- `GET /api/platform/payers/:id/target` → processed, remaining, percent, days left
+- `GET /api/platform/targets` → all payers with a target
+
+Progress is measured from the ledger's settled `payer_settlement` entries within the
+current period, so it reflects real A2A money moved to clinics.
+
+**Pre-approved price lists.** Upload an insurer's approved prices from CSV/Excel:
+- `POST /api/platform/payers/:id/pricelist` { csv, replace? }
+- Columns: `code, name, price` and optionally `unit, provider, category`.
+- A `provider` (tenant id or facility name) gives that facility its own price;
+  blank rows are the payer default — so prices can vary between hospitals/pharmacies.
+- `GET /api/platform/payers/:id/pricelist?q=` to view/search; `DELETE` to clear.
+
+**Repricing (opt-in, default off).** By default an uploaded price list is reference-only
+and the billed price governs settlement. Turn on `PUT /api/platform/payers/:id/reprice`
+{ enabled:true } to make a payer’s approved prices GOVERN its claims: each line is capped
+at the approved price (facility-specific first, then payer default, else the billed price),
+and the patient absorbs any gap between billed and approved. The claim carries `repriced:true`
+and a breakdown of billedCover / approvedCover / patientAbsorbs. In a split, each payer
+reprices independently.
+
+Both are managed from the **Payers** tab on the master console (`/app/platform.html`).
+
+## Multi-payer split
+
+The covered (payer) portion of a bill can be divided between two or more payers
+(insurer+insurer, or insurer+employer). Set it at bill creation or on the route call:
+
+```json
+{ "split": { "payers": [
+  { "payerId":"acacia", "memberId":"ACA-1", "percent":60 },
+  { "payerId":"gmtf",   "memberId":"GM-1",  "percent":40 }
+] } }
+```
+
+Percentages (of the payer portion) or explicit amounts (must sum to it). A patient
+copay, if any, is taken off the top first; the remainder is what gets split. Each payer
+receives its **own itemised claim** and authorises independently — the claims always sum
+exactly to the payer portion. The bill is marked settled only once **every** split claim
+has settled. `POST /api/v1/bills/{id}/route` returns one claim + payer link per payer.
+
+Who-pays is **explicit**: `adjustments.copayPercent` sets the patient share (0 = payers
+cover all, no implicit default), and `split` sets how payers divide the rest.
+
 ## SaaS-wide revenue (platform owner)
 
 Accrued platform fees aggregated across every client, by type and by client.
