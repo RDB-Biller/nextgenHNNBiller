@@ -39,9 +39,9 @@ CREATE TABLE IF NOT EXISTS notifications (id text PRIMARY KEY, bill_id text, cre
 CREATE TABLE IF NOT EXISTS ledger (id text PRIMARY KEY, tenant_id text, bill_id text, type text, amount numeric, currency text, cash_movement boolean, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 ALTER TABLE IF EXISTS payers ADD COLUMN IF NOT EXISTS tenant_id text;
 CREATE INDEX IF NOT EXISTS idx_payers_tenant ON payers(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_type, org_id);
 ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS edition text;
 CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, api_key text UNIQUE, role text, org_type text, org_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_type, org_id);
 CREATE TABLE IF NOT EXISTS licenses (key text PRIMARY KEY, edition text, status text, org_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS emr_partners (id text PRIMARY KEY, api_key text UNIQUE, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key text PRIMARY KEY, data jsonb NOT NULL, updated_at timestamptz DEFAULT now());
@@ -401,7 +401,21 @@ if (usePg) {
   repo = pgRepo((t, p) => pool.query(t, p));
   tx = pgTx;
   init = async () => {
-    await pool.query(SCHEMA);
+    // Run schema statements one at a time, tables first, so a single ordering
+    // issue can't abort the whole boot. All statements are IF NOT EXISTS / IF EXISTS,
+    // so this is safe to re-run on an existing database.
+    const statements = SCHEMA.split(';').map((s) => s.trim()).filter(Boolean);
+    const isTable = (s) => /^CREATE TABLE/i.test(s);
+    const ordered = [...statements.filter(isTable), ...statements.filter((s) => !isTable(s))];
+    for (const stmt of ordered) {
+      try {
+        await pool.query(stmt);
+      } catch (e) {
+        // Never let one DDL statement (e.g. an index on a not-yet-present table)
+        // take down startup; log and continue. Tables are created first above.
+        console.warn(`Schema step skipped (${e.code || 'err'}): ${stmt.slice(0, 60)}…`);
+      }
+    }
     await seedInto(repo);
     console.log('Store: PostgreSQL (persistent)');
   };
