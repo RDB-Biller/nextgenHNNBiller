@@ -11,7 +11,7 @@ Bills patients at the point of care and settles the money two ways, always paid
    Stanbic account straight to the clinic** on the patient's behalf (account-to-account
    over the Stanbic SBG rail). All parties are then notified.
 
-A **payer** is whoever covers the bill: an **insurer** (Acacia, GMTF (Mahama Cares), …) **or an
+A **payer** is whoever covers the bill: an **insurer** (Acacia, Cosmopolitan, GMTF (Mahama Cares), …) **or an
 employer** that pays staff bills directly — the SME case where a company can't buy
 insurance but still settles for its people. Same A2A mechanism for both.
 
@@ -216,7 +216,7 @@ pays back — up to **100%** of the NHIS amount. That refund becomes the member'
 and the configured `claimit_margin` rule is accrued as revenue. Both modes are fully supported:
 
 **A. Routed** — the bill is raised in HNN Biller and routed via the **NHIS ClaimIt Tracker**
-tab (alongside Acacia, GMTF, **GAB**). The claim is derived from that bill.
+tab (alongside Acacia, Cosmopolitan, GMTF, **GAB**). The claim is derived from that bill.
 
 **B. External (the common case)** — the NHIS claim is submitted and settled elsewhere, in
 your **EMR or the ClaimIt portal**. HNN Biller simply *receives the claim data* — how much
