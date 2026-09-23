@@ -27,6 +27,8 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 const PUBLIC = path.join(__dirname, '..', 'public');
 
+app.get('/', (req, res) => res.redirect('/app/dashboard.html'));
+
 app.get('/health', (req, res) => res.json({ ok: true, sandbox: config.sandbox }));
 
 // Public front ends + their public APIs
