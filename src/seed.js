@@ -15,6 +15,8 @@ const tenants = [
 ];
 
 const payers = [
+  { id: 'cosmopolitan', apiKey: 'payer_cosmopolitan_key', name: 'Cosmopolitan Health Insurance', kind: 'insurer',
+    contact: { email: 'claims@cosmopolitan.example' }, sbg: { sourceAccount: '1300100900' } },
   { id: 'acacia', apiKey: 'payer_acacia_key', name: 'Acacia Health Insurance', kind: 'insurer',
     contact: { email: 'claims@acacia.example' }, sbg: { sourceAccount: '1300100200' } },
   { id: 'gmtf', apiKey: 'payer_gmtf_key', name: 'GMTF (Mahama Cares)', kind: 'insurer',
@@ -22,7 +24,7 @@ const payers = [
   { id: 'international', apiKey: 'payer_intl_key', name: 'International Insurance', kind: 'insurer',
     contact: { email: 'claims@intl.example' }, sbg: { sourceAccount: '1300100400' } },
   { id: 'nhis-claimit', apiKey: 'payer_nhis_claimit_key', name: 'NHIS ClaimIt Tracker', kind: 'insurer',
-    tracker: 'claimit', refundedBy: 'acacia',
+    tracker: 'claimit', refundedBy: 'cosmopolitan',
     contact: { email: 'claims@nhis.example' }, sbg: { sourceAccount: '1300100700' } },
   { id: 'gab', apiKey: 'payer_gab_key', name: 'GAB', kind: 'insurer',
     contact: { email: 'claims@gab.example' }, sbg: { sourceAccount: '1300100800' } },

@@ -72,7 +72,7 @@ async function track(input = {}) {
     source: input.source || (mode === 'external' ? 'emr' : 'hnn_biller'),
     nhisAmount: round(amount),                // amount being claimed
     refundPercent: pct,
-    refundedBy: input.refundedBy || 'acacia',
+    refundedBy: input.refundedBy || 'cosmopolitan',
     refundDestination: input.refundDestination === 'member' ? 'member' : 'provider',
     expectedRefund: round(amount * pct),
     claimedAt: input.claimedAt || new Date().toISOString(),
