@@ -242,7 +242,7 @@ async function routePayer(payerId){
     <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`;
   if(payerId==='nhis-claimit'){
     const t=await fetch('/api/v1/claimit',{method:'POST',headers:hdr(),
-      body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'acacia'})});
+      body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'cosmopolitan'})});
     if(t.ok){ const rec=await t.json();
       $('result').innerHTML+=`<p style="margin:8px 0 0"><span class="pill awaiting_payer">ClaimIt tracked</span>
         ${esc(rec.id.slice(0,14))}… · expected refund GHS ${num(rec.expectedRefund)}
