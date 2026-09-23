@@ -242,7 +242,7 @@ async function routePayer(payerId){
     <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`;
   if(payerId==='nhis-claimit'){
     const t=await fetch('/api/v1/claimit',{method:'POST',headers:hdr(),
-      body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'acacia'})});
+      body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'cosmopolitan'})});
     if(t.ok){ const rec=await t.json();
       $('result').innerHTML+=`<p style="margin:8px 0 0"><span class="pill awaiting_payer">ClaimIt tracked</span>
         ${esc(rec.id.slice(0,14))}… · expected refund GHS ${num(rec.expectedRefund)}
@@ -302,9 +302,9 @@ async function loadPayers(){
     if(!r.ok) throw new Error();
     const {data}=await r.json();
     PAYERS=data;
-    const btn=(p)=>`<button onclick="routePayer('${esc(p.id)}')" title="${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
+    const btn=(p,isDefault)=>`<button class="${isDefault?'accent active default':''}" onclick="routePayer('${esc(p.id)}')" title="${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
     const ins=data.filter(p=>p.group==='insurer'), emp=data.filter(p=>p.group==='employer');
-    $('insurerTabs').innerHTML=ins.map(btn).join('')||'<span class="muted">None configured</span>';
+    $('insurerTabs').innerHTML=ins.map((p,i)=>btn(p,i===0)).join('')||'<span class="muted">None configured</span>';
     $('employerTabs').innerHTML=emp.map(btn).join('')||'<span class="muted">None configured</span>';
     renderSplit();
   }catch(e){ $('insurerTabs').innerHTML='<span class="muted">Could not load payers</span>'; }
@@ -322,9 +322,9 @@ function onWhoPays(){
 function renderSplit(){
   if(!$('splitList'))return;
   const mode=$('splitMode')?$('splitMode').value:'percent';
-  $('splitList').innerHTML=PAYERS.map(p=>`
+  $('splitList').innerHTML=PAYERS.map((p,i)=>`
     <div class="line" style="gap:8px;align-items:center">
-      <label style="display:flex;align-items:center;gap:6px;flex:1"><input type="checkbox" class="spPay" data-id="${esc(p.id)}" data-name="${esc(p.name)}" onchange="preview()" style="width:auto"/> ${esc(p.name)} <span class="muted" style="font-size:11px">${esc(p.group||'')}</span></label>
+      <label style="display:flex;align-items:center;gap:6px;flex:1"><input type="checkbox" class="spPay" data-id="${esc(p.id)}" data-name="${esc(p.name)}" onchange="preview()" style="width:auto" ${i===0?'checked':''}/> ${esc(p.name)} <span class="muted" style="font-size:11px">${esc(p.group||'')}</span></label>
       <input class="spMember" data-id="${esc(p.id)}" placeholder="member ID" oninput="preview()" style="max-width:120px"/>
       <input class="spVal" data-id="${esc(p.id)}" type="number" placeholder="${mode==='amount'?'GHS':'%'}" oninput="preview()" style="max-width:90px"/>
     </div>`).join('')||'<span class="muted">No payers loaded.</span>';
