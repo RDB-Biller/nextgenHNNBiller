@@ -15,7 +15,7 @@ paths:
       summary: Create a bill
       security: [{ TenantKey: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateBill' } } } }
-      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
+      responses: { '201': { description: 'Created. A patient verification link is generated and sent automatically — response includes patientVerification:{status,link}, not persisted onto the bill itself.', content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
     get: { summary: List bills, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
   /api/v1/bills/{id}:
     get:
@@ -74,7 +74,7 @@ paths:
       description: Accepts an optional `Idempotency-Key` header to dedupe retries.
       security: [{ PayerKey: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Settled or authorised } }
+      responses: { '200': { description: Settled or authorised }, '409': { description: 'patient_verification_pending — this payer has requirePatientVerification on and the patient has not yet confirmed the bill (see /verify/api)' } }
   /api/payer/claims/{id}/reject:
     post:
       summary: Decline the claim
@@ -93,6 +93,27 @@ paths:
     post: { summary: Authorise via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
   /claim/api/{token}/reject:
     post: { summary: Decline via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+
+  # ---- Patient bill verification (no key, token-scoped) ----
+  # A verification is created automatically the moment a bill is created (see /api/v1/bills)
+  # and never blocks billing itself. A payer only enforces it if it opts in via
+  # /api/platform/payers/{id}/require-verification (default off).
+  /verify/api/{token}:
+    get:
+      summary: View a bill by its verification token (patient-facing)
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: verification_not_found } }
+  /verify/api/{token}/confirm:
+    post:
+      summary: Patient confirms the bill is accurate
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: 'Verified' }, '409': { description: 'verification_not_pending — already verified or disputed' } }
+  /verify/api/{token}/dispute:
+    post:
+      summary: Patient flags the bill as inaccurate — notifies the provider
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { '200': { description: 'Disputed' }, '409': { description: 'verification_not_pending — already verified or disputed' } }
 
   # ---- Optional financing of the patient share ----
   /api/v1/financing/questions:
@@ -304,3 +325,9 @@ components:
             payerShare: { type: number }
             cashback: { type: number }
             patientPayable: { type: number }
+        patientVerification:
+          type: object
+          description: One-time snapshot returned on creation only — the live record lives at /verify/api/{token}.
+          properties:
+            status: { type: string, enum: [pending, verified, disputed] }
+            link: { type: string, example: '/verify/?token=abc123' }

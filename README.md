@@ -62,7 +62,7 @@ notification fan-out. `npm run smoke` runs it over HTTP.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/api/v1/bills` | Create an itemised bill (patient, coverage, items, adjustments) |
+| POST | `/api/v1/bills` | Create an itemised bill (patient, coverage, items, adjustments) — automatically sends the patient a verification link (`patientVerification` in the response) |
 | POST | `/api/v1/bills/:id/route` | **Tap a payer** → claim + secure link |
 | POST | `/api/v1/payments/intents` | Patient self-pay (mtn-momo / card / cash) |
 | GET | `/api/v1/bills` · `/bills/:id` · `/claims` · `/dashboard` | Read |
@@ -75,11 +75,23 @@ notification fan-out. `npm run smoke` runs it over HTTP.
 | GET | `/api/payer/me` · `/summary` | Identity + KPIs |
 | GET | `/api/payer/claims?status=pending` | Claims addressed to this payer |
 | GET | `/api/payer/claims/:id` | Claim detail (member, lines, amount) |
-| POST | `/api/payer/claims/:id/authorize` | Authorise the A2A transfer to the clinic |
+| POST | `/api/payer/claims/:id/authorize` | Authorise the A2A transfer to the clinic — `409 patient_verification_pending` if this payer requires verification and the patient hasn't confirmed yet |
 | POST | `/api/payer/claims/:id/reject` | Decline `{reason}` |
 
 Secure link portal (token, no key): `GET /claim/api/:token`,
 `POST /claim/api/:token/authorize|reject`. Full contract in `openapi.yaml`.
+
+## Patient bill verification
+
+Every bill gets its own verification link the moment it's created — a courtesy step,
+separate from claim routing, that never blocks billing. The patient opens
+`/verify/?token=...` to confirm the charges or flag them as wrong (disputing notifies
+the clinic). A payer can opt into *requiring* it — `PUT
+/api/platform/payers/:id/require-verification {enabled}` (off by default, same pattern
+as `reprice`) — in which case authorising a claim is refused until the patient has
+verified. Status is never duplicated onto the bill/claim; it's always read live from
+`src/services/verification.js`. Portal: `GET /verify/api/:token`, `POST
+/verify/api/:token/confirm|dispute`.
 
 ## Money split
 
