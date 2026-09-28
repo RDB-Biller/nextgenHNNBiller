@@ -111,7 +111,7 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
-let items=[], billId=null;
+let items=[], billId=null, lastVerification=null;
 const $=(id)=>document.getElementById(id);
 const hdr=()=>({'Content-Type':'application/json','x-api-key':$('apikey').value.trim()});
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
@@ -207,15 +207,46 @@ async function ensureBill(){
   if($('splitPays')&&$('splitPays').checked){ const sp=readSplit(); if(sp) body.split=sp; }
   const r=await fetch('/api/v1/bills',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
   if(!r.ok){toast('Bill create failed');return null;}
-  billId=(await r.json()).id;return billId;
+  const bill=await r.json();
+  billId=bill.id;
+  lastVerification=bill.patientVerification?{...bill.patientVerification,billId:bill.id}:null;
+  return billId;
+}
+// The link a patient uses to confirm (or dispute) this bill — sent automatically
+// when the bill was created. Shown alongside whichever settle/route result is on
+// screen, with a way to resend it if the patient hasn't responded yet.
+function verifBlock(){
+  if(!lastVerification)return '';
+  const bid=esc(lastVerification.billId);
+  const pill=lastVerification.status==='disputed'?'rejected':(lastVerification.status==='verified'?'settled':'awaiting_payer');
+  const label=lastVerification.status==='disputed'?'Patient disputed the bill':(lastVerification.status==='verified'?'Patient verified':'Awaiting patient verification');
+  return `<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+    <span class="pill ${pill}">${label}</span>
+    <p style="margin:8px 0 0">Patient verification link:</p>
+    <div class="linkbox">${location.origin}${lastVerification.link}</div>
+    <p style="margin:8px 0 0"><a href="${lastVerification.link}" target="_blank">Open patient page →</a>
+    &nbsp;·&nbsp;<a href="#" onclick="resendVerification('${bid}',this);return false">Resend link to patient</a></p>
+  </div>`;
+}
+async function resendVerification(id,el){
+  const original=el.textContent;
+  el.textContent='Sending…';
+  try{
+    const r=await fetch(`/api/v1/bills/${id}/verification/reissue`,{method:'POST',headers:hdr()});
+    if(!r.ok){const e=await r.json().catch(()=>({}));toast('Resend failed: '+(e.error||r.status));el.textContent=original;return;}
+    const v=await r.json();
+    if(lastVerification&&lastVerification.billId===id)lastVerification.status=v.status;
+    toast('Verification link resent to patient'+(v.remindersSent?' (reminder #'+v.remindersSent+')':''));
+    el.textContent=original;
+  }catch(e){toast('Resend failed');el.textContent=original;}
 }
 async function payNow(method){
   const id=await ensureBill();if(!id)return;
   const r=await fetch('/api/v1/payments/intents',{method:'POST',headers:hdr(),body:JSON.stringify({billId:id,method})});
   if(!r.ok){toast('Payment failed');return;}
   const intent=await r.json();
-  if(method==='cash'){$('result').innerHTML=`<span class="pill settled">Settled</span> Cash recorded · ${intent.currency} ${num(intent.amount)}`;toast('Cash recorded');}
-  else{$('result').innerHTML=`<p>Patient checkout link:</p><div class="linkbox">${location.origin}/pay/?intent=${intent.id}</div><p style="margin:8px 0 0"><a href="/pay/?intent=${intent.id}" target="_blank">Open patient page →</a></p>`;toast('Intent created');}
+  if(method==='cash'){$('result').innerHTML=`<span class="pill settled">Settled</span> Cash recorded · ${intent.currency} ${num(intent.amount)}`+verifBlock();toast('Cash recorded');}
+  else{$('result').innerHTML=`<p>Patient checkout link:</p><div class="linkbox">${location.origin}/pay/?intent=${intent.id}</div><p style="margin:8px 0 0"><a href="/pay/?intent=${intent.id}" target="_blank">Open patient page →</a></p>`+verifBlock();toast('Intent created');}
   reset();
 }
 async function routeSplit(){
@@ -227,7 +258,7 @@ async function routeSplit(){
   if(!r.ok){const e=await r.json().catch(()=>({}));toast('Split route failed: '+(e.error||r.status));return;}
   const {claims}=await r.json();
   $('result').innerHTML=`<span class="pill awaiting_payer">Split routed to ${claims.length} payers</span>`+
-    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div><a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('');
+    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div><a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
   toast('Split routed to '+claims.length+' payers');reset();
 }
 async function routePayer(payerId){
@@ -239,7 +270,7 @@ async function routePayer(payerId){
   const {claim}=await r.json();
   $('result').innerHTML=`<span class="pill awaiting_payer">Awaiting ${esc(payerId)}</span> Claim ${esc(claim.id.slice(0,14))}… · GHS ${num(claim.amount)}
     <p style="margin:8px 0 0">Secure link delivered to payer:</p><div class="linkbox">${location.origin}${claim.link}</div>
-    <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`;
+    <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`+verifBlock();
   if(payerId==='nhis-claimit'){
     const t=await fetch('/api/v1/claimit',{method:'POST',headers:hdr(),
       body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'acacia'})});

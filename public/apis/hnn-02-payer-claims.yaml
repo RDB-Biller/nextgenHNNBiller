@@ -232,9 +232,40 @@ paths:
                       verifiedAt:
                         type: string
                         nullable: true
+                      verifiedBy:
+                        type: string
+                        nullable: true
+                        enum:
+                        - patient
+                        - payer_override
+                        - prior_approval
+                        description: Who satisfied the gate — the patient via their own link, this payer marking
+                          it verified some other way, or a referenced prior approval. Null while still pending.
                       disputeReason:
                         type: string
                         nullable: true
+                      remindersSent:
+                        type: integer
+                        description: How many times the link has been reissued to the patient
+                  matchingPriorApprovals:
+                    type: array
+                    description: This payer's own active prior approvals for the claim's member — reference one's
+                      id in POST .../verification/override instead of typing a free-text reason.
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        description:
+                          type: string
+                        amountCap:
+                          type: number
+                          nullable: true
+                        expiresAt:
+                          type: string
+                          nullable: true
+                        timesUsed:
+                          type: integer
   /api/payer/claims/{id}/authorize:
     post:
       tags:
@@ -289,6 +320,139 @@ paths:
       responses:
         '200':
           description: OK
+  /api/payer/claims/{id}/verification/reissue:
+    post:
+      tags:
+      - Payer
+      summary: Resend the patient's verification link
+      description: For when your dashboard shows a claim still pending verification and you'd rather
+        nudge the patient than override. Reuses the same link; a disputed record is reset to pending
+        first.
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: Updated claim view (see GET /api/payer/claims/{id})
+        '404':
+          description: claim_not_found / verification_not_found
+        '409':
+          description: verification_not_pending (already verified)
+  /api/payer/claims/{id}/verification/override:
+    post:
+      tags:
+      - Payer
+      summary: Mark verified without the patient's own confirmation
+      description: For when you reviewed the claim directly, called the hospital, or the member already
+        has a matching prior approval on file. Pass priorApprovalId to reference one (validated as
+        yours, active, and its usage trail is updated) — omit it and give a free-text reason instead
+        for any other manual verification.
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Free-text — how it was verified (ignored if priorApprovalId is set)
+                priorApprovalId:
+                  type: string
+                  description: One of YOUR OWN active prior approvals for this claim's member (see
+                    matchingPriorApprovals on the claim detail, or GET /api/payer/prior-approvals)
+      responses:
+        '200':
+          description: Updated claim view (see GET /api/payer/claims/{id})
+        '404':
+          description: claim_not_found / verification_not_found / prior_approval_not_found (not yours,
+            or no such id)
+        '409':
+          description: verification_not_pending (already verified) / prior_approval_not_active (revoked
+            or expired)
+  /api/payer/prior-approvals:
+    get:
+      tags:
+      - Payer
+      summary: List your prior approvals
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: '{ data:[{id,payerId,memberId,patientName,description,amountCap,status,effectiveStatus,createdAt,expiresAt,timesUsed,lastUsedAt,lastUsedClaimId}]
+            }. effectiveStatus is computed (active/expired/revoked); status only ever records active/revoked.'
+    post:
+      tags:
+      - Payer
+      summary: Record a pre-authorization for a member
+      description: Advance approval for a member's service, scoped to your payer account + their member
+        ID (not a specific provider, since they may be seen anywhere). A later claim for that member
+        can then be verified by referencing this instead of waiting on the patient — see POST
+        .../verification/override.
+      security:
+      - PayerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - memberId
+              properties:
+                memberId:
+                  type: string
+                patientName:
+                  type: string
+                description:
+                  type: string
+                  description: e.g. "Elective surgery, Ridge Hospital"
+                amountCap:
+                  type: number
+                  description: OPTIONAL — informational only, never hard-enforced automatically
+                expiresAt:
+                  type: string
+                  description: OPTIONAL ISO date/time
+      responses:
+        '201':
+          description: Prior approval record
+        '422':
+          description: member_id_required
+  /api/payer/prior-approvals/{id}:
+    delete:
+      tags:
+      - Payer
+      summary: Revoke a prior approval
+      description: Only the payer who created it can revoke it. Revoking does not affect any claim
+        already verified by referencing it — it only stops matching future ones.
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: Revoked prior approval record
+        '404':
+          description: prior_approval_not_found (not yours, or no such id)
   /claim/api/{token}:
     get:
       tags:
@@ -340,6 +504,61 @@ paths:
       responses:
         '200':
           description: OK
+  /claim/api/{token}/verification/reissue:
+    post:
+      tags:
+      - Claim link
+      summary: Resend the patient's verification link via secure link
+      description: Same action as POST /api/payer/claims/{id}/verification/reissue, for a payer using
+        the emailed claim link instead of the Payer API.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: Updated claim view (see GET /claim/api/{token})
+        '404':
+          description: claim_not_found / verification_not_found
+        '409':
+          description: verification_not_pending (already verified)
+  /claim/api/{token}/verification/override:
+    post:
+      tags:
+      - Claim link
+      summary: Mark verified without the patient's own confirmation, via secure link
+      description: Same action as POST /api/payer/claims/{id}/verification/override, for a payer using
+        the emailed claim link instead of the Payer API.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                priorApprovalId:
+                  type: string
+                  description: One of this claim's payer's own active prior approvals for the member
+                    (see matchingPriorApprovals on GET /claim/api/{token})
+      responses:
+        '200':
+          description: Updated claim view (see GET /claim/api/{token})
+        '404':
+          description: claim_not_found / verification_not_found / prior_approval_not_found
+        '409':
+          description: verification_not_pending (already verified) / prior_approval_not_active (revoked
+            or expired)
   /verify/api/{token}:
     get:
       tags:

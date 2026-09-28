@@ -30,6 +30,12 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, properties: { payerId: { type: string, example: acacia } } } } } }
       responses: { '201': { description: Claim created }, '422': { description: Unknown payer or missing member id } }
+  /api/v1/bills/{id}/verification/reissue:
+    post:
+      summary: Resend the patient verification link (same token) — resets a disputed record to pending
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: '{ status, link, remindersSent }' }, '409': { description: verification_not_pending } }
 
   /api/v1/payments/intents:
     post:
@@ -82,6 +88,32 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
       responses: { '200': { description: Rejected } }
+  /api/payer/claims/{id}/verification/reissue:
+    post:
+      summary: Resend the patient's verification link — nudge instead of override
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Updated claim view }, '409': { description: verification_not_pending } }
+  /api/payer/claims/{id}/verification/override:
+    post:
+      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital, or a prior approval on file)
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string }, priorApprovalId: { type: string, description: 'One of your own active prior approvals for this member' } } } } } }
+      responses: { '200': { description: Updated claim view }, '409': { description: 'verification_not_pending / prior_approval_not_active' } }
+  /api/payer/prior-approvals:
+    get: { summary: List your prior approvals, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } }
+    post:
+      summary: Record a pre-authorization for a member — reference it later via .../verification/override
+      security: [{ PayerKey: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [memberId], properties: { memberId: { type: string }, patientName: { type: string }, description: { type: string }, amountCap: { type: number }, expiresAt: { type: string } } } } } }
+      responses: { '201': { description: Created }, '422': { description: member_id_required } }
+  /api/payer/prior-approvals/{id}:
+    delete:
+      summary: Revoke a prior approval (only the payer who created it can)
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Revoked }, '404': { description: prior_approval_not_found } }
 
   # ---- Secure link portal (no key, token-scoped) ----
   /claim/api/{token}:
@@ -93,6 +125,14 @@ paths:
     post: { summary: Authorise via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
   /claim/api/{token}/reject:
     post: { summary: Decline via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /claim/api/{token}/verification/reissue:
+    post: { summary: Resend the patient's verification link via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK }, '409': { description: verification_not_pending } } }
+  /claim/api/{token}/verification/override:
+    post:
+      summary: Mark verified without the patient's own confirmation, via secure link
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string }, priorApprovalId: { type: string } } } } } }
+      responses: { '200': { description: OK }, '409': { description: 'verification_not_pending / prior_approval_not_active' } }
 
   # ---- Patient bill verification (no key, token-scoped) ----
   # A verification is created automatically the moment a bill is created (see /api/v1/bills)

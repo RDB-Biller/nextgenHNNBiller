@@ -64,6 +64,7 @@ notification fan-out. `npm run smoke` runs it over HTTP.
 | --- | --- | --- |
 | POST | `/api/v1/bills` | Create an itemised bill (patient, coverage, items, adjustments) — automatically sends the patient a verification link (`patientVerification` in the response) |
 | POST | `/api/v1/bills/:id/route` | **Tap a payer** → claim + secure link |
+| POST | `/api/v1/bills/:id/verification/reissue` | Resend the patient's verification link (`biller.html` shows it under the settle/route result, with a Resend link) |
 | POST | `/api/v1/payments/intents` | Patient self-pay (mtn-momo / card / cash) |
 | GET | `/api/v1/bills` · `/bills/:id` · `/claims` · `/dashboard` | Read |
 | GET | `/api/v1/institutions` · `/account-validation` | SBG proxies |
@@ -77,28 +78,60 @@ notification fan-out. `npm run smoke` runs it over HTTP.
 | GET | `/api/payer/claims/:id` | Claim detail (member, lines, amount) |
 | POST | `/api/payer/claims/:id/authorize` | Authorise the A2A transfer to the clinic — `409 patient_verification_pending` if this payer requires verification and the patient hasn't confirmed yet |
 | POST | `/api/payer/claims/:id/reject` | Decline `{reason}` |
+| POST | `/api/payer/claims/:id/verification/reissue` | Resend the patient's verification link |
+| POST | `/api/payer/claims/:id/verification/override` | Mark verified without the patient's own confirmation — `{reason}` (reviewed directly, called the hospital, …) or `{priorApprovalId}` |
+| GET, POST | `/api/payer/prior-approvals` | List / record a pre-authorization for a member (`{memberId, description, amountCap?, expiresAt?}`) |
+| DELETE | `/api/payer/prior-approvals/:id` | Revoke one (only the payer who created it can) |
 
 Secure link portal (token, no key): `GET /claim/api/:token`,
-`POST /claim/api/:token/authorize|reject`. Full contract in `openapi.yaml`.
+`POST /claim/api/:token/authorize|reject|verification/reissue|verification/override`.
+Full contract in `openapi.yaml`.
 
 ## Patient bill verification
 
 Every bill gets its own verification link the moment it's created — a courtesy step,
 separate from claim routing, that never blocks billing. The patient opens
 `/verify/?token=...` to confirm the charges or flag them as wrong (disputing notifies
-the clinic). A payer can opt into *requiring* it — `PUT
-/api/platform/payers/:id/require-verification {enabled}` (off by default, same pattern
-as `reprice`) — in which case authorising a claim is refused until the patient has
-verified. Status is never duplicated onto the bill/claim; it's always read live from
+the clinic). `biller.html` shows this link under the settle/route result (with a
+**Resend** action) so hospital staff always have it to hand, since
+`src/services/notifications.js` only logs a delivery record — there's no real SMS/email
+gateway wired up yet.
+
+A payer can opt into *requiring* verification before it will authorise —
+`PUT /api/platform/payers/:id/require-verification {enabled}` (off by default, same
+pattern as `reprice`). While a bill is unverified, the payer isn't stuck waiting on the
+patient:
+
+- **Reissue** — resend the same link (`POST .../verification/reissue`, from
+  `payers.html`, `claim.html`, or the clinic side above). A disputed record resets to
+  pending first.
+- **Override** — mark it verified some other way (`POST .../verification/override`
+  with a free-text `reason`): the payer looked at the claim directly, called the
+  hospital, or is relying on a **prior approval** (below). Recorded as `verifiedBy:
+  "payer_override"` or `"prior_approval"`, distinct from the patient's own
+  `"patient"` confirmation.
+- **Prior approval** — an insurer/employer can pre-authorise a member for a service
+  ahead of time (`POST /api/payer/prior-approvals {memberId, description,
+  amountCap?, expiresAt?}`). A later claim for that member surfaces any active,
+  unexpired match as `matchingPriorApprovals` on the claim view, ready to reference
+  by id in an override instead of typing a reason. Usage is tracked (`timesUsed`,
+  `lastUsedClaimId`) but never hard-enforced — `amountCap`/`expiresAt` are
+  informational, the payer's own judgement call. `src/services/priorApproval.js`.
+
+Status is never duplicated onto the bill/claim; it's always read live from
 `src/services/verification.js`. Portal: `GET /verify/api/:token`, `POST
-/verify/api/:token/confirm|dispute`.
+/verify/api/:token/confirm|dispute` (patient-only — reissue/override are payer/clinic
+actions, not exposed here).
+
+**Known simplification:** verification is one record per *bill*, not per claim. On a
+bill split across multiple payers, any one payer's override (or the patient's own
+confirmation) satisfies the gate for all of them, since there's currently no way for
+the patient to tell payers apart when confirming. Fine for the common case; a
+per-payer verification record would be the next step if that turns out to matter.
 
 The clinic dashboard (`dashboard.html`, `GET /api/v1/dashboard`) tracks whatever hasn't
 been verified yet as a follow-up queue — `totals.pendingVerification` (count) and
 `pendingVerifications[]` (oldest first, with patient/provider/amount/status/link).
-`src/services/notifications.js` only logs a delivery record — there's no real SMS/email
-gateway wired up yet — so this list doubles as how staff find the actual link to
-re-share with a patient themselves in the meantime.
 
 ## Money split
 

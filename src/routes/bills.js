@@ -103,4 +103,17 @@ router.post('/:id/route', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Resend the patient verification link (same token) — for hospital staff to nudge a
+// patient who hasn't responded yet. A disputed record is reset to pending first.
+router.post('/:id/verification/reissue', async (req, res, next) => {
+  try {
+    const bill = await ownBill(req);
+    if (!bill) return res.status(404).json({ error: 'bill_not_found' });
+    const v = await verification.forBill(bill.id);
+    if (!v) return res.status(404).json({ error: 'verification_not_found' });
+    const updated = await verification.reissue(v.id);
+    res.json({ status: updated.status, link: updated.link, remindersSent: updated.remindersSent });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

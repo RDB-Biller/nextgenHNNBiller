@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS payments (id text PRIMARY KEY, bill_id text, status t
 CREATE TABLE IF NOT EXISTS financings (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS reports (id text PRIMARY KEY, tenant_id text, bill_id text, share_token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS verifications (id text PRIMARY KEY, tenant_id text, bill_id text, status text, token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS prior_approvals (id text PRIMARY KEY, payer_id text, member_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications (id text PRIMARY KEY, bill_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS ledger (id text PRIMARY KEY, tenant_id text, bill_id text, type text, amount numeric, currency text, cash_movement boolean, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 ALTER TABLE IF EXISTS payers ADD COLUMN IF NOT EXISTS tenant_id text;
@@ -60,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_claims_bill ON claims(bill_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_bill ON notifications(bill_id);
 CREATE INDEX IF NOT EXISTS idx_verifications_bill ON verifications(bill_id);
 CREATE INDEX IF NOT EXISTS idx_verifications_tenant ON verifications(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_prior_approvals_payer ON prior_approvals(payer_id);
+CREATE INDEX IF NOT EXISTS idx_prior_approvals_member ON prior_approvals(member_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
@@ -137,6 +140,12 @@ function pgRepo(exec) {
       listByTenant: (t) => many('SELECT data FROM verifications WHERE tenant_id=$1 ORDER BY created_at', [t]),
       insert: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
       update: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
+    },
+    priorApprovals: {
+      get: (id) => one('SELECT data FROM prior_approvals WHERE id=$1', [id]),
+      listByPayer: (p) => many('SELECT data FROM prior_approvals WHERE payer_id=$1 ORDER BY created_at DESC', [p]),
+      insert: (pa) => exec(upsert('prior_approvals', ['payer_id', 'member_id', 'status']), [pa.id, pa.payerId, pa.memberId, pa.status, pa]),
+      update: (pa) => exec(upsert('prior_approvals', ['payer_id', 'member_id', 'status']), [pa.id, pa.payerId, pa.memberId, pa.status, pa]),
     },
     notifications: {
       insert: (n) => exec(upsert('notifications', ['bill_id']), [n.id, n.billId, n]),
@@ -315,6 +324,12 @@ function memRepo(M) {
       insert: async (v) => { M.verifications.set(v.id, v); if (v.token) M.verifyTokens.set(v.token, v.id); },
       update: async (v) => M.verifications.set(v.id, v),
     },
+    priorApprovals: {
+      get: async (id) => M.priorApprovals.get(id) || null,
+      listByPayer: async (p) => list(M.priorApprovals, (pa) => pa.payerId === p).reverse(),
+      insert: async (pa) => M.priorApprovals.set(pa.id, pa),
+      update: async (pa) => M.priorApprovals.set(pa.id, pa),
+    },
     notifications: {
       insert: async (n) => { M.notifications.push(n); },
       listByTenant: async (t) => {
@@ -448,7 +463,7 @@ if (usePg) {
     bills: new Map(), claims: new Map(), claimTokens: new Map(),
     payments: new Map(), financings: new Map(),
     reports: new Map(), reportTokens: new Map(),
-    verifications: new Map(), verifyTokens: new Map(), notifications: [],
+    verifications: new Map(), verifyTokens: new Map(), priorApprovals: new Map(), notifications: [],
     ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
   };

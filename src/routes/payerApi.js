@@ -4,6 +4,7 @@ const express = require('express');
 const store = require('../store');
 const claimsService = require('../services/claims');
 const verification = require('../services/verification');
+const priorApproval = require('../services/priorApproval');
 const networks = require('../services/networks');
 const { idempotency } = require('../middleware/idempotency');
 
@@ -22,6 +23,9 @@ async function claimView(c) {
   const bill = await store.bills.get(c.billId);
   const payer = await store.payers.get(c.payerId);
   const v = await verification.forBill(c.billId);
+  // Prior approvals this payer already has on file for this member — offered as a
+  // one-click override reason so the payer doesn't have to retype/find the id.
+  const matchingPriorApprovals = c.memberId ? await priorApproval.activeForMember(c.payerId, c.memberId) : [];
   return {
     claimId: c.id, status: c.status, amount: c.amount, currency: c.currency,
     provider: c.provider || bill?.provider,
@@ -43,7 +47,9 @@ async function claimView(c) {
     // whether that has happened yet — shown so the pending state is visible before
     // an Authorise action is attempted (see services/claims.js authorize()).
     requirePatientVerification: payer?.requirePatientVerification === true,
-    patientVerification: v ? { status: v.status, verifiedAt: v.verifiedAt || null, disputeReason: v.disputeReason || null } : { status: 'not_sent' },
+    patientVerification: v ? { status: v.status, verifiedAt: v.verifiedAt || null, verifiedBy: v.verifiedBy || null, disputeReason: v.disputeReason || null, remindersSent: v.remindersSent || 0 } : { status: 'not_sent' },
+    matchingPriorApprovals: matchingPriorApprovals.map((pa) => ({
+      id: pa.id, description: pa.description, amountCap: pa.amountCap, expiresAt: pa.expiresAt, timesUsed: pa.timesUsed })),
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
     link: c.link, createdAt: c.createdAt,
   };
@@ -97,6 +103,58 @@ router.post('/claims/:id/reject', async (req, res, next) => {
     await claimsService.reject(c.id, req.body?.reason);
     res.json(await claimView(await store.claims.get(c.id)));
   } catch (e) { next(e); }
+});
+
+// ---- Patient verification: reissue / manual override -------------------------
+
+// Resend the same verification link to the patient — for when the payer's own
+// dashboard shows it's still pending and they'd rather nudge than override.
+router.post('/claims/:id/verification/reissue', async (req, res, next) => {
+  try {
+    const c = await own(req, res); if (!c) return;
+    const v = await verification.forBill(c.billId);
+    if (!v) return res.status(404).json({ error: 'verification_not_found' });
+    await verification.reissue(v.id);
+    res.json(await claimView(await store.claims.get(c.id)));
+  } catch (e) { next(e); }
+});
+
+// The payer marks the bill verified themselves — they reviewed the claim directly,
+// called the hospital, or the member already has a matching prior approval on file
+// (pass priorApprovalId to reference one; it's validated as this payer's own,
+// active, and its usage trail is updated).
+router.post('/claims/:id/verification/override', async (req, res, next) => {
+  try {
+    const c = await own(req, res); if (!c) return;
+    const v = await verification.forBill(c.billId);
+    if (!v) return res.status(404).json({ error: 'verification_not_found' });
+    const priorApprovalId = req.body?.priorApprovalId || null;
+    if (priorApprovalId) {
+      const pa = await store.priorApprovals.get(priorApprovalId);
+      if (!pa || pa.payerId !== req.payer.id) return res.status(404).json({ error: 'prior_approval_not_found' });
+      if (priorApproval.effectiveStatus(pa) !== 'active') return res.status(409).json({ error: 'prior_approval_not_active' });
+      await priorApproval.markUsed(pa.id, c.id);
+    }
+    await verification.overrideVerify(v.id, { by: req.payer.id, reason: req.body?.reason, priorApprovalId });
+    res.json(await claimView(await store.claims.get(c.id)));
+  } catch (e) { next(e); }
+});
+
+// ---- Prior approvals: payer-recorded pre-authorization ------------------------
+
+router.get('/prior-approvals', async (req, res, next) => {
+  try { res.json({ data: await priorApproval.listByPayer(req.payer.id) }); }
+  catch (e) { next(e); }
+});
+
+router.post('/prior-approvals', async (req, res, next) => {
+  try { res.status(201).json(await priorApproval.create(req.payer.id, req.body || {})); }
+  catch (e) { next(e); }
+});
+
+router.delete('/prior-approvals/:id', async (req, res, next) => {
+  try { res.json(await priorApproval.revoke(req.params.id, req.payer.id)); }
+  catch (e) { next(e); }
 });
 
 // ---- NNEST: Narrow Network Expedited Settlement Terms (payer-operated) -------

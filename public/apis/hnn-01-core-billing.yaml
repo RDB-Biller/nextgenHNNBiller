@@ -257,6 +257,31 @@ paths:
           description: payer_not_available (another facility’s slot)
         '422':
           description: invalid_split / split_amounts_do_not_match_payer_share / missing_member_id / unknown_payer
+  /api/v1/bills/{id}/verification/reissue:
+    post:
+      tags:
+      - Bills
+      summary: Resend the patient's verification link
+      description: For hospital staff to nudge a patient who hasn't responded yet — reuses the same
+        token/link, so anywhere it was already shared stays valid. A previously disputed record is
+        reset to pending first, so a fresh look is possible once whatever was disputed has been
+        corrected. Counts and timestamps the reminder (remindersSent, lastRemindedAt).
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Bill id
+      responses:
+        '200':
+          description: '{ status, link, remindersSent }'
+        '404':
+          description: bill_not_found / verification_not_found
+        '409':
+          description: verification_not_pending (already verified)
   /api/v1/bills/payers:
     get:
       tags:
