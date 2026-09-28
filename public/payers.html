@@ -40,14 +40,22 @@ async function load(){
   $('kpis').innerHTML=[['Pending',s.pending],['Pending value',`GHS ${num(s.pendingValue)}`],['Settled value',`GHS ${num(s.settledValue)}`]]
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
   const d=await(await fetch('/api/payer/claims',{headers:{'x-payer-key':key()}})).json();
-  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>`+
+  const vpill=(pv)=>pv.status==='verified'?'<span class="pill settled">verified</span>'
+    :pv.status==='disputed'?'<span class="pill rejected">disputed</span>'
+    :'<span class="pill pending">pending</span>';
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Verification</th><th>Status</th><th></th></tr></thead><tbody>`+
     (d.data.map(c=>`<tr><td>${esc(c.claimId.slice(0,12))}…</td><td>${esc(c.patientName||'—')}</td><td>${esc(c.memberId||'—')}</td>
-      <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td><td>${pill(c.status)}</td>
-      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=7 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+      <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td>
+      <td>${vpill(c.patientVerification||{status:'not_sent'})}</td>
+      <td>${pill(c.status)}</td>
+      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=8 class="muted">No claims.</td></tr>')+`</tbody></table>`;
 }
 async function authz(id){
   const r=await fetch(`/api/payer/claims/${id}/authorize`,{method:'POST',headers:{'x-payer-key':key()}});
-  if(r.ok){toast('Transfer authorised');load();}else toast('Failed');
+  if(r.ok){toast('Transfer authorised');load();return;}
+  const e=await r.json().catch(()=>({}));
+  toast(e.message==='patient_verification_pending'?'Blocked: the patient has not verified this bill yet':'Failed');
+  load();
 }
 async function rej(id){
   const reason=prompt('Reason (optional):')||'';

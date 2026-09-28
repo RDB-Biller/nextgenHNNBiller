@@ -230,7 +230,7 @@
         },
         "responses": {
           "201": {
-            "description": "Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable)"
+            "description": "Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable). A verification link is generated and sent to the patient automatically \u2014 the response includes patientVerification:{status,link} as a one-time snapshot (not persisted onto the bill; the live record is read at GET /verify/api/{token}). See the Payer & Claims API for how a payer can require verification before authorising."
           }
         }
       },

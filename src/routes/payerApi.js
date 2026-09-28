@@ -3,6 +3,7 @@
 const express = require('express');
 const store = require('../store');
 const claimsService = require('../services/claims');
+const verification = require('../services/verification');
 const networks = require('../services/networks');
 const { idempotency } = require('../middleware/idempotency');
 
@@ -19,6 +20,8 @@ router.use(async (req, res, next) => {
 
 async function claimView(c) {
   const bill = await store.bills.get(c.billId);
+  const payer = await store.payers.get(c.payerId);
+  const v = await verification.forBill(c.billId);
   return {
     claimId: c.id, status: c.status, amount: c.amount, currency: c.currency,
     provider: c.provider || bill?.provider,
@@ -36,6 +39,11 @@ async function claimView(c) {
       net: bill.totals.net, payerShare: bill.totals.payerShare } : null),
     clinical: c.clinical || bill?.clinical || null,
     nnest: c.nnest || null,
+    // Whether this payer requires the patient to verify before authorising, and
+    // whether that has happened yet — shown so the pending state is visible before
+    // an Authorise action is attempted (see services/claims.js authorize()).
+    requirePatientVerification: payer?.requirePatientVerification === true,
+    patientVerification: v ? { status: v.status, verifiedAt: v.verifiedAt || null, disputeReason: v.disputeReason || null } : { status: 'not_sent' },
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
     link: c.link, createdAt: c.createdAt,
   };

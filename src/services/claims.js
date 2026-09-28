@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const store = require('../store');
 const { executePayerTransfer, transferStatus } = require('./settlement');
 const { notifyClaimOutcome } = require('./notifications');
+const verification = require('./verification');
 const ledger = require('./ledger');
 const payerSlots = require('./payerSlots');
 const networks = require('./networks');
@@ -186,6 +187,21 @@ const getByToken = (token) => store.claims.byToken(token);
  * OUTSIDE the lock (never hold a row lock across a network call). Step 3: finalise.
  */
 async function authorize(claimId) {
+  // Opt-in gate (payer.requirePatientVerification, default off — mirrors repriceClaims):
+  // when on, the patient must have verified their bill before this payer can
+  // authorise the A2A transfer. A cheap read-mostly pre-check, outside the row lock —
+  // this never moves money, so it doesn't need tx()/FOR UPDATE, just a check before we
+  // ever enter it. A missing or disputed verification is treated the same as pending.
+  const peek = await store.claims.get(claimId);
+  if (!peek) { const e = new Error('claim_not_found'); e.status = 404; throw e; }
+  const payerPeek = await store.payers.get(peek.payerId);
+  if (payerPeek?.requirePatientVerification === true) {
+    const v = await verification.forBill(peek.billId);
+    if (!v || v.status !== 'verified') {
+      const e = new Error('patient_verification_pending'); e.status = 409; throw e;
+    }
+  }
+
   const claim = await store.tx(async (t) => {
     const c = await t.claims.get(claimId, { forUpdate: true });
     if (!c) { const e = new Error('claim_not_found'); e.status = 404; throw e; }

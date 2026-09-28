@@ -45,6 +45,10 @@ function render(c){
   if(c.status==='rejected'){ root.innerHTML='<span class="pill rejected">Rejected</span><p class="muted">This claim was declined.</p>'; return; }
   const billTotal = (c.breakdown && c.breakdown.net != null) ? c.breakdown.net : null;
   const showsPartial = billTotal != null && Math.abs(billTotal - c.amount) > 0.005;
+  const pv=c.patientVerification||{status:'not_sent'};
+  const verifBanner = pv.status==='verified' ? '' : pv.status==='disputed'
+    ? `<div style="background:#FBE6E1;color:var(--bad);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:14px">Patient disputed this bill${pv.disputeReason?': '+esc(pv.disputeReason):''}.</div>`
+    : `<div style="background:#FFF3E6;color:var(--warn);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:14px">Patient verification is pending${c.requirePatientVerification?' — authorisation is blocked until the patient verifies.':'.'}</div>`;
   root.innerHTML=`
     <p class="eyebrow">Claim for authorisation</p>
     <div class="bignum">GHS ${num(c.amount)}</div>
@@ -59,6 +63,7 @@ function render(c){
       ${c.employer?`<div class="line"><span class="muted">Sponsor</span><span>${esc(c.employer)}</span></div>`:''}
     </div>
     <div class="ledger" style="margin-bottom:16px">${items||'<p class="muted">No line detail.</p>'}${bd}${clin}</div>
+    ${verifBanner}
     <div class="row">
       <button class="accent" id="auth" onclick="authorize()">Authorise transfer from ${esc(c.payer)}</button>
       <button class="ghost" onclick="reject()">Decline</button>
@@ -67,7 +72,11 @@ function render(c){
 async function authorize(){
   const b=document.getElementById('auth'); b.disabled=true; b.textContent='Transferring…';
   const r=await fetch(`/claim/api/${encodeURIComponent(token)}/authorize`,{method:'POST'});
-  if(!r.ok){toast('Transfer failed');b.disabled=false;b.textContent='Retry';return;}
+  if(!r.ok){
+    const e=await r.json().catch(()=>({}));
+    toast(e.message==='patient_verification_pending'?'Blocked: the patient has not verified this bill yet':'Transfer failed');
+    b.disabled=false;b.textContent='Retry';return;
+  }
   render(await r.json()); toast('Transfer authorised');
 }
 async function reject(){

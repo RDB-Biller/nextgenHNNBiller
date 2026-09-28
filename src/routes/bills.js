@@ -4,6 +4,7 @@ const express = require('express');
 const store = require('../store');
 const { createBill } = require('../services/billing');
 const { routeToPayer, routeToPayers } = require('../services/claims');
+const verification = require('../services/verification');
 const payerSlots = require('../services/payerSlots');
 const editions = require('../services/editions');
 const networks = require('../services/networks');
@@ -20,7 +21,12 @@ router.post('/', async (req, res, next) => {
     const bill = createBill(req.body || {});
     bill.tenantId = req.tenant.id;
     await store.bills.insert(bill);
-    res.status(201).json(bill);
+    // The patient is sent a verification link immediately, for every bill — this is
+    // a courtesy confirmation step and never blocks bill creation itself. Not
+    // persisted onto the bill (single source of truth stays the verifications
+    // table); this is just a one-time convenience snapshot in the response.
+    const v = await verification.createForBill(bill);
+    res.status(201).json({ ...bill, patientVerification: { status: v.status, link: v.link } });
   } catch (e) { next(e); }
 });
 

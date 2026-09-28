@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS claims (id text PRIMARY KEY, tenant_id text, payer_id
 CREATE TABLE IF NOT EXISTS payments (id text PRIMARY KEY, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS financings (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS reports (id text PRIMARY KEY, tenant_id text, bill_id text, share_token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS verifications (id text PRIMARY KEY, tenant_id text, bill_id text, status text, token text UNIQUE, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications (id text PRIMARY KEY, bill_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS ledger (id text PRIMARY KEY, tenant_id text, bill_id text, type text, amount numeric, currency text, cash_movement boolean, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 ALTER TABLE IF EXISTS payers ADD COLUMN IF NOT EXISTS tenant_id text;
@@ -57,6 +58,8 @@ CREATE INDEX IF NOT EXISTS idx_claims_payer ON claims(payer_id);
 ALTER TABLE IF EXISTS claims ADD COLUMN IF NOT EXISTS bill_id text;
 CREATE INDEX IF NOT EXISTS idx_claims_bill ON claims(bill_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_bill ON notifications(bill_id);
+CREATE INDEX IF NOT EXISTS idx_verifications_bill ON verifications(bill_id);
+CREATE INDEX IF NOT EXISTS idx_verifications_tenant ON verifications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
@@ -126,6 +129,13 @@ function pgRepo(exec) {
       get: (id) => one('SELECT data FROM reports WHERE id=$1', [id]),
       byToken: (t) => one('SELECT data FROM reports WHERE share_token=$1', [t]),
       insert: (r) => exec(upsert('reports', ['tenant_id', 'bill_id', 'share_token']), [r.id, r.tenantId, r.billId, r.shareToken, r]),
+    },
+    verifications: {
+      get: (id) => one('SELECT data FROM verifications WHERE id=$1', [id]),
+      byToken: (t) => one('SELECT data FROM verifications WHERE token=$1', [t]),
+      byBill: (b) => one('SELECT data FROM verifications WHERE bill_id=$1', [b]),
+      insert: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
+      update: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
     },
     notifications: {
       insert: (n) => exec(upsert('notifications', ['bill_id']), [n.id, n.billId, n]),
@@ -296,6 +306,13 @@ function memRepo(M) {
       byToken: async (t) => M.reports.get(M.reportTokens.get(t)) || null,
       insert: async (r) => { M.reports.set(r.id, r); if (r.shareToken) M.reportTokens.set(r.shareToken, r.id); },
     },
+    verifications: {
+      get: async (id) => M.verifications.get(id) || null,
+      byToken: async (t) => M.verifications.get(M.verifyTokens.get(t)) || null,
+      byBill: async (b) => list(M.verifications, (v) => v.billId === b)[0] || null,
+      insert: async (v) => { M.verifications.set(v.id, v); if (v.token) M.verifyTokens.set(v.token, v.id); },
+      update: async (v) => M.verifications.set(v.id, v),
+    },
     notifications: {
       insert: async (n) => { M.notifications.push(n); },
       listByTenant: async (t) => {
@@ -428,7 +445,8 @@ if (usePg) {
     tenants: new Map(), payers: new Map(), financiers: new Map(),
     bills: new Map(), claims: new Map(), claimTokens: new Map(),
     payments: new Map(), financings: new Map(),
-    reports: new Map(), reportTokens: new Map(), notifications: [],
+    reports: new Map(), reportTokens: new Map(),
+    verifications: new Map(), verifyTokens: new Map(), notifications: [],
     ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
   };

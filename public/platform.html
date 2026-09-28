@@ -90,6 +90,19 @@
       <div id="targetsBoard" style="margin-top:12px"></div>
     </div>
 
+    <div class="card" style="margin-bottom:14px"><h2>Patient verification gate</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">When on, this payer's claims can't be authorised until the patient has verified the bill via the link sent automatically at billing time.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pv_payer" onchange="loadVerifyGate()"></select></div>
+        <div class="field" style="display:flex;align-items:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;margin:0 0 11px">
+            <input type="checkbox" id="pv_require" onchange="toggleVerifyGate()" style="width:auto"/>
+            Require patient verification before authorisation
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="card"><h2>Pre-approved price list</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Upload an insurer's approved prices (CSV or Excel-exported CSV). Columns: <span class="key">code, name, price</span> and optionally <span class="key">unit, provider, category</span>. A <span class="key">provider</span> (tenant id or facility name) gives that facility its own price; blank = the payer's default.</p>
       <div class="row">
@@ -229,14 +242,30 @@ async function toggle(id,status){const r=await fetch(`/api/platform/users/${id}/
 
 async function loadPayers(){
   const r=await (await fetch('/api/platform/payers',{headers:H()})).json(); PAYERS=r.data||[];
-  $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Source account</th><th>Payer API key</th></tr></thead><tbody>`+
+  $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Source account</th><th>Payer API key</th><th>Verify gate</th></tr></thead><tbody>`+
     PAYERS.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.kind==='employer'?'corporate':'insurer')}</td>
-      <td>${esc(p.sourceAccount||'—')}</td><td><span class="key">${esc(p.apiKey||'')}</span></td></tr>`).join('')+`</tbody></table>`;
-  // fill target + pricelist payer selects
+      <td>${esc(p.sourceAccount||'—')}</td><td><span class="key">${esc(p.apiKey||'')}</span></td>
+      <td>${p.requirePatientVerification?'<span class="pill settled">on</span>':'<span class="pill open">off</span>'}</td></tr>`).join('')+`</tbody></table>`;
+  // fill target + pricelist + verify-gate payer selects
   const opts='<option value="">Select payer…</option>'+PAYERS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   if($('tg_payer'))$('tg_payer').innerHTML=opts;
   if($('pl_payer'))$('pl_payer').innerHTML=opts;
+  if($('pv_payer'))$('pv_payer').innerHTML=opts;
   loadTargets();
+}
+function loadVerifyGate(){
+  const id=$('pv_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  if($('pv_require'))$('pv_require').checked=!!(payer&&payer.requirePatientVerification);
+}
+async function toggleVerifyGate(){
+  const id=$('pv_payer').value; if(!id){ $('pv_require').checked=false; return toast('Pick a payer'); }
+  const enabled=$('pv_require').checked;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/require-verification`,{method:'PUT',headers:H(),body:JSON.stringify({enabled})});
+  if(r.ok){ toast(enabled?'Patients must now verify before this payer can authorise':'Verification gate off');
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.requirePatientVerification=enabled;
+    await loadPayers(); $('pv_payer').value=id; }
+  else { $('pv_require').checked=!enabled; toast('Failed'); }
 }
 async function setTarget(){
   const id=$('tg_payer').value; const amount=parseFloat($('tg_amount').value); const period=$('tg_period').value;

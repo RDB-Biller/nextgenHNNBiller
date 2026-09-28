@@ -89,7 +89,7 @@ router.get('/payers', async (req, res, next) => {
     const rows = (await store.payers.all()).filter((p) => !p.tenantId);
     res.json({ data: rows.map((p) => ({ id: p.id, name: p.name, kind: p.kind, apiKey: p.apiKey,
       sourceAccount: p.sbg?.sourceAccount || null, contact: p.contact || null, tracker: p.tracker || null,
-      repriceClaims: p.repriceClaims === true })) });
+      repriceClaims: p.repriceClaims === true, requirePatientVerification: p.requirePatientVerification === true })) });
   } catch (e) { next(e); }
 });
 
@@ -255,6 +255,20 @@ router.put('/payers/:id/reprice', async (req, res, next) => {
     payer.repriceClaims = req.body?.enabled === true;
     await store.payers.save(payer);
     res.json({ payerId: payer.id, repriceClaims: payer.repriceClaims });
+  } catch (e) { next(e); }
+});
+
+// Toggle whether this payer requires the PATIENT to verify their bill before this
+// payer can authorise the A2A transfer (default off). When on, authorize() is
+// blocked with 409 patient_verification_pending until the patient confirms via the
+// link sent automatically when the bill was created (see services/verification.js).
+router.put('/payers/:id/require-verification', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    payer.requirePatientVerification = req.body?.enabled === true;
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, requirePatientVerification: payer.requirePatientVerification });
   } catch (e) { next(e); }
 });
 

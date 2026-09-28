@@ -38,6 +38,16 @@ info:
     to the ledger as receivables._
 
 
+    ### Patient verification
+
+    Every bill gets a patient verification link the moment it is created (see the Core Billing API) —
+    a courtesy confirmation step that never blocks billing or routing. A payer can optionally require
+    it: set `requirePatientVerification` via the Master Control API and `POST …/authorize` (API or secure
+    link) is refused with `409 patient_verification_pending` until the patient confirms. Both the claims-list
+    and claim-detail responses below include a live `patientVerification{status}` so you can show the
+    pending state before attempting to authorise.
+
+
     ### NNEST — Narrow Network Expedited Settlement Terms
 
     A feature of the instant-payment rail that **you operationalise**. Designate a narrow network of providers
@@ -54,6 +64,7 @@ servers:
 tags:
 - name: Payer
 - name: Claim link
+- name: Verification link
 - name: NNEST
 components:
   securitySchemes:
@@ -204,6 +215,26 @@ paths:
                   repriced:
                     type: boolean
                     description: True if the payer’s approved price list governed this claim
+                  requirePatientVerification:
+                    type: boolean
+                    description: Whether YOUR payer account currently requires this before authorising
+                  patientVerification:
+                    type: object
+                    description: Live status — not_sent should not occur once a bill exists, since it is created automatically.
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                        - pending
+                        - verified
+                        - disputed
+                        - not_sent
+                      verifiedAt:
+                        type: string
+                        nullable: true
+                      disputeReason:
+                        type: string
+                        nullable: true
   /api/payer/claims/{id}/authorize:
     post:
       tags:
@@ -229,7 +260,8 @@ paths:
         '200':
           description: Claim now authorized or settled
         '409':
-          description: claim_not_pending / request_in_progress
+          description: claim_not_pending / request_in_progress / patient_verification_pending (you require
+            it and the patient has not confirmed yet — see the Verification link endpoints below)
         '422':
           description: idempotency_key_reused
   /api/payer/claims/{id}/reject:
@@ -308,6 +340,71 @@ paths:
       responses:
         '200':
           description: OK
+  /verify/api/{token}:
+    get:
+      tags:
+      - Verification link
+      summary: Patient views their bill by verification token (no key)
+      description: This is the link sent automatically when the bill was created — a token distinct
+        from the claim's own /claim/api token.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: verification_not_found
+  /verify/api/{token}/confirm:
+    post:
+      tags:
+      - Verification link
+      summary: Patient confirms the bill is accurate
+      description: Flips status pending -> verified. This is what lets an authorize() call succeed once
+        you require verification.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: Verified
+        '409':
+          description: verification_not_pending (already verified or disputed)
+  /verify/api/{token}/dispute:
+    post:
+      tags:
+      - Verification link
+      summary: Patient flags the bill as inaccurate
+      description: Flips status pending -> disputed and notifies the provider with the reason given.
+        Does not itself reject the claim — the provider follows up.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Disputed
+        '409':
+          description: verification_not_pending (already verified or disputed)
   /api/payer/network:
     get:
       tags:

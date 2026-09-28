@@ -4,15 +4,35 @@ const crypto = require('crypto');
 const store = require('../store');
 
 /** Fan-out log. References, amounts, and links only — never member IDs or clinical detail. */
-async function notify({ party, channel = 'email', to, subject, body, claimId, billId }) {
+async function notify({ party, channel = 'email', to, subject, body, claimId, billId, verificationId }) {
   const n = {
     id: `ntf_${crypto.randomBytes(5).toString('hex')}`,
     party, channel, to: mask(to), subject, body,
-    claimId: claimId || null, billId: billId || null,
+    claimId: claimId || null, billId: billId || null, verificationId: verificationId || null,
     createdAt: new Date().toISOString(), delivered: true,
   };
   await store.notifications.insert(n);
   return n;
+}
+
+/** Ask the patient to verify a freshly-created bill, right away. */
+async function notifyPatientVerification(verification, bill) {
+  const amount = `${bill.currency} ${(bill.totals?.net ?? 0).toFixed(2)}`;
+  await notify({ party: 'patient', channel: 'sms', to: bill.patient?.phone,
+    subject: 'Please verify your bill',
+    body: `Please verify your bill of ${amount} at ${bill.provider}. This confirms the charges are correct before your insurer or other payer is asked to pay: ${verification.link}`,
+    billId: bill.id, verificationId: verification.id });
+}
+
+/** Tell the provider when a patient disputes their bill instead of verifying it. */
+async function notifyVerificationOutcome(verification, bill, outcome) {
+  if (outcome !== 'disputed') return;
+  const tenants = await store.tenants.all();
+  const tenant = tenants.find((t) => t.id === bill.tenantId);
+  await notify({ party: 'provider', to: tenant?.contact?.email,
+    subject: `Patient disputed bill ${bill.id}`,
+    body: `${bill.patient?.name || 'The patient'} disputed the charges on their bill at ${bill.provider}. Reason: ${verification.disputeReason || 'not specified'}. Please review before any payer is asked to approve it.`,
+    billId: bill.id, verificationId: verification.id });
 }
 
 /** Notify the parties for a claim outcome (provider, patient, payer, sponsor employer). */
@@ -72,4 +92,4 @@ function mask(v) {
   return s.length <= 4 ? s : `${'•'.repeat(s.length - 4)}${s.slice(-4)}`;
 }
 
-module.exports = { notify, notifyClaimOutcome };
+module.exports = { notify, notifyClaimOutcome, notifyPatientVerification, notifyVerificationOutcome };

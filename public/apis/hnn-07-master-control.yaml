@@ -54,6 +54,7 @@ tags:
 - name: Licensing
 - name: Targets
 - name: Price Lists
+- name: Patient Verification
 components:
   securitySchemes:
     PlatformKey:
@@ -745,3 +746,33 @@ paths:
       responses:
         '200':
           description: '{ payerId, repriceClaims }'
+  /api/platform/payers/{id}/require-verification:
+    put:
+      tags:
+      - Patient Verification
+      summary: Toggle whether this payer requires the patient to verify their bill first (default off)
+      description: When enabled, POST …/authorize (Payer API or secure claim link) is refused with 409
+        patient_verification_pending until the patient confirms via the link sent automatically when
+        the bill was created. A missing or disputed verification counts the same as pending. See the
+        Payer & Claims API.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: '{ payerId, requirePatientVerification }'
+        '404':
+          description: payer_not_found
