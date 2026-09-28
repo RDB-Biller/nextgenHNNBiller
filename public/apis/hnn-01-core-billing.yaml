@@ -329,7 +329,11 @@ paths:
     get:
       tags:
       - Dashboard
-      summary: Totals, recent bills, claims, notifications
+      summary: Totals, recent bills, claims, notifications, and the pending patient-verification
+        follow-up queue
+      description: 'totals.pendingVerification is a count; pendingVerifications is the list (oldest
+        first) — each with patientName, provider, amount, status (pending|disputed), disputeReason,
+        and the verify link. Excludes anything already verified.'
       security:
       - TenantKey: []
       responses:

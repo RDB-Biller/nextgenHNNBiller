@@ -42,7 +42,7 @@ paths:
       responses: { '201': { description: Created } }
 
   /api/v1/claims: { get: { summary: List claims raised by the clinic, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
-  /api/v1/dashboard: { get: { summary: Clinic dashboard data, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
+  /api/v1/dashboard: { get: { summary: 'Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[] (oldest first), the patient bill-verification follow-up queue', security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
   /api/v1/institutions: { get: { summary: Receiving institutions (SBG proxy), security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
   /api/v1/account-validation:
     get:

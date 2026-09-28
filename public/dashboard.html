@@ -11,6 +11,10 @@
   </div>
   <div class="field" style="max-width:280px"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123" onchange="refresh()"/></div>
   <div class="grid cols-3" id="kpis" style="margin:8px 0 18px"></div>
+  <div class="card" style="margin-bottom:16px"><h2>Pending patient verification</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Every bill sends the patient a link to confirm the charges. These haven't been confirmed yet — oldest first. A dispute needs your follow-up; the link is safe to re-share with the patient over WhatsApp/SMS yourself.</p>
+    <div id="pendingVerif"></div>
+  </div>
   <div class="grid cols-2">
     <div class="card"><h2>Recent bills</h2><div id="bills"></div></div>
     <div class="card"><h2>Notifications sent</h2><div id="notes"></div></div>
@@ -21,6 +25,8 @@ const $=(id)=>document.getElementById(id);
 const num=(n)=>Number(n||0).toFixed(2);
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pill=(s)=>`<span class="pill ${esc(s)}">${esc(String(s).replace('_',' '))}</span>`;
+const vpill=(s)=>s==='disputed'?'<span class="pill rejected">disputed</span>':'<span class="pill pending">pending</span>';
+const since=(iso)=>{const d=Math.floor((Date.now()-new Date(iso).getTime())/86400000);return d<=0?'today':d===1?'1 day ago':`${d} days ago`;};
 
 async function refresh(){
   const r=await fetch('/api/v1/dashboard',{headers:{'x-api-key':$('apikey').value.trim()}});
@@ -29,12 +35,18 @@ async function refresh(){
   const t=d.totals;
   $('kpis').innerHTML=[
     ['Settled value',`GHS ${num(t.settledValue)}`],['Awaiting payer',t.awaitingPayer],
-    ['Settled',t.settled],['Open',t.open],['Rejected',t.rejected],['Total bills',t.bills]
+    ['Verification pending',t.pendingVerification],['Open',t.open],['Rejected',t.rejected],['Total bills',t.bills]
   ].slice(0,3).map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
   $('bills').innerHTML=`<table><thead><tr><th>Bill</th><th>Patient</th><th>Route</th><th class="num">Net</th><th>Status</th></tr></thead><tbody>`+
     (d.recentBills.map(b=>`<tr><td>${esc(b.id.slice(0,12))}…</td><td>${esc(b.patient?.name||'—')}</td>
       <td>${esc(b.coverage?.payerId||b.settlementMethod||'—')}</td><td class="num">${num(b.totals?.net)}</td><td>${pill(b.status)}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">No bills yet.</td></tr>')+`</tbody></table>`;
   $('notes').innerHTML=d.notifications.map(n=>`<div class="line"><span><strong>${esc(n.party)}</strong> · ${esc(n.subject)}<br><span class="muted" style="font-size:12px">${esc(n.body)}</span></span></div>`).join('')||'<p class="muted">No notifications yet.</p>';
+  $('pendingVerif').innerHTML=`<table><thead><tr><th>Patient</th><th>Provider</th><th class="num">Amount</th><th>Status</th><th>Since</th><th>Link</th></tr></thead><tbody>`+
+    ((d.pendingVerifications||[]).map(v=>`<tr><td>${esc(v.patientName||'—')}</td><td>${esc(v.provider||'—')}</td>
+      <td class="num">${num(v.amount)}</td><td>${vpill(v.status)}${v.status==='disputed'&&v.disputeReason?`<div class="muted" style="font-size:11px;margin-top:2px">${esc(v.disputeReason)}</div>`:''}</td>
+      <td class="muted">${since(v.createdAt)}</td>
+      <td><a href="${esc(location.origin+v.link)}" target="_blank" rel="noopener">${esc(location.origin+v.link)}</a></td></tr>`).join('')
+    ||'<tr><td colspan=6 class="muted">Nothing pending — every bill has been verified.</td></tr>')+`</tbody></table>`;
 }
 refresh();
 </script>

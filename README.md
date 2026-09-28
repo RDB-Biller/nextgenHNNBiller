@@ -93,6 +93,13 @@ verified. Status is never duplicated onto the bill/claim; it's always read live 
 `src/services/verification.js`. Portal: `GET /verify/api/:token`, `POST
 /verify/api/:token/confirm|dispute`.
 
+The clinic dashboard (`dashboard.html`, `GET /api/v1/dashboard`) tracks whatever hasn't
+been verified yet as a follow-up queue — `totals.pendingVerification` (count) and
+`pendingVerifications[]` (oldest first, with patient/provider/amount/status/link).
+`src/services/notifications.js` only logs a delivery record — there's no real SMS/email
+gateway wired up yet — so this list doubles as how staff find the actual link to
+re-share with a patient themselves in the meantime.
+
 ## Money split
 
 `subtotal − discount = net`. Patient pays `copay%` of net (minus cashback); the
