@@ -20,7 +20,7 @@
 <div class="wrap">
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span> Master Control</div>
-      <p class="muted" style="margin:4px 0 0">Clients, payers, EMR partners, IT leads and licensing across the whole deployment.</p></div>
+      <p class="muted" style="margin:4px 0 0">Clients, payers, EMR partners, IT leads, messaging and licensing across the whole deployment.</p></div>
     <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="revenue.html" target="_blank" rel="noopener">Revenue</a><a href="submissions.html" target="_blank" rel="noopener">Submissions</a><a href="admin.html" target="_blank" rel="noopener">IT-lead console</a><a href="biller.html" target="_blank" rel="noopener">Billing</a></nav>
   </div>
 
@@ -29,6 +29,7 @@
 
   <div class="tabs">
     <button class="on" onclick="tab('clients',this)">Clients</button>
+    <button onclick="tab('messaging',this)">Messaging</button>
     <button onclick="tab('opmode',this)">Operating mode</button>
     <button onclick="tab('leads',this)">IT leads</button>
     <button onclick="tab('payers',this)">Payers</button>
@@ -47,10 +48,12 @@
         <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addClient()">Create</button></div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:14px"><h2>Clients</h2><div id="clients"></div></div>
+    <div class="card"><h2>Clients</h2><div id="clients"></div></div>
+  </div>
 
+  <div class="panel" id="p-messaging">
     <div class="card" style="margin-bottom:14px"><h2>Messaging test account (platform-wide)</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test and deactivate again when done — used by any client below that hasn't set up its own. Nothing here is sent for real unless the server's <span class="key">MESSAGING_SANDBOX</span> is also set to <span class="key">false</span>; that's the one deployment-wide switch nothing on this page can override.</p>
+      <p class="muted" style="margin-top:0;font-size:13px">One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test and deactivate again when done — used by any client below that hasn't set up its own. Whether this actually sends for real is controlled by the Messaging rail under <b>Operating mode</b>, not by anything on this card.</p>
       <p class="muted" id="mta_enc_warn" style="display:none;font-size:13px;color:var(--bad)">The server has no <span class="key">CREDENTIAL_ENCRYPTION_KEY</span> set — saving credentials will fail until it does. Nothing is ever stored unencrypted.</p>
       <div class="row">
         <div class="field"><label>Provider</label><select id="mta_provider" onchange="renderProviderFields('mta')"></select></div>

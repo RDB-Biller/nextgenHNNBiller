@@ -148,7 +148,7 @@ been verified yet as a follow-up queue — `totals.pendingVerification` (count) 
 Off for every channel, for every client, by default. A platform admin turns channels on
 per client — `PUT /api/platform/clients/:id/verification-channels {sms?, whatsapp?,
 includeTreatmentDetail?}` (`platform.html`, "Patient verification by SMS/WhatsApp" under
-the Clients tab). When a channel is on, the same verification message that carries the
+the **Messaging** tab). When a channel is on, the same verification message that carries the
 link also goes out on SMS and/or WhatsApp, with a 6-digit one-time code the patient can
 text back instead of opening the link. The code expires after
 `VERIFICATION_OTP_TTL_MINUTES` (default 60 minutes) and locks after
@@ -186,11 +186,11 @@ actually uses is resolved per-tenant by `resolveSender(tenant)`:
    credentials" and saved working credentials — always wins when configured
    (`PUT /api/platform/clients/:id/messaging-credentials`, the "Bring your own
    credentials" sub-section under each client's verification settings in
-   `platform.html`).
+   `platform.html`'s **Messaging** tab).
 2. Otherwise, the **platform-wide shared test account** — one set of real credentials
    HNN can activate for a live test and deactivate again when done, used by any client
    that hasn't set up its own (`PUT /api/platform/messaging/test-account`, the
-   "Messaging test account" card in `platform.html`).
+   "Messaging test account" card in `platform.html`'s **Messaging** tab).
 3. Otherwise, **sandbox** — logs the message instead of sending it.
 
 All of that sits underneath the Messaging rail's sandbox/live switch — see
@@ -691,6 +691,13 @@ While Messaging is sandboxed, `biller.html`'s "simulate patient reply" control a
 `otpCodeSandbox` in the bill-creation response keep working exactly as before — see
 **SMS / WhatsApp verification** above — now driven by this live setting rather than
 the static env var.
+
+`biller.html` also shows a **"Master control"** link in its own nav, but only while
+the whole deployment is fully sandboxed (both rails) — it checks the public,
+key-less `GET /health` on load and hides itself the moment either rail goes live.
+It's a convenience shortcut for whoever's demoing at the clinic terminal, not a
+credential boundary: `platform.html` still requires its own platform key regardless
+of whether the link is shown.
 
 ## Stanbic settlement (verified against the SBG Money Transfer API doc)
 

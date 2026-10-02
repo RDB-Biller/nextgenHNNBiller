@@ -7,7 +7,7 @@
 <div class="wrap">
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
-    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a></nav>
+    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a><a id="nav-mc" href="platform.html" target="_blank" rel="noopener" style="display:none">Master control</a></nav>
   </div>
   <div class="grid cols-2">
     <div class="grid" style="align-content:start">
@@ -423,5 +423,23 @@ $('apikey').addEventListener('change',loadPayers);
 loadPayers();
 finUI();
 preview();
+
+// Master Control is a convenience shortcut for whoever's at this terminal, not
+// a credential boundary (platform.html still needs its own platform key) — but
+// a clinic terminal has no business one-click-linking to the admin board once
+// real settlement or real messaging is in play. /health needs no key and
+// reflects Master Control's live Operating Mode (see services/operatingMode.js),
+// so show the link only while the whole deployment is still fully sandboxed;
+// it disappears the moment either rail goes live.
+async function showMasterControlLinkIfSandbox(){
+  try{
+    const h=await (await fetch('/health')).json();
+    const m=h&&h.operatingMode;
+    if(m&&m.settlement&&m.messaging&&m.settlement.sandbox&&m.messaging.sandbox){
+      $('nav-mc').style.display='';
+    }
+  }catch(e){/* health check failing shouldn't block the billing terminal */}
+}
+showMasterControlLinkIfSandbox();
 </script>
 </body></html>
