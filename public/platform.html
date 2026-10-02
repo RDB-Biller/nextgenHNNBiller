@@ -110,6 +110,12 @@
     <div class="card" style="margin-bottom:14px"><h2>Contact groups</h2>
       <p class="muted" style="margin-top:0;font-size:13px">A group is a list of phone numbers a campaign can message as one batch. <span id="cg_seed_note"></span></p>
       <div id="cg_list"></div>
+      <div id="cg_contacts_wrap" style="display:none;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+        <h3 id="cg_contacts_title" style="margin:0 0 6px;font-size:15px"></h3>
+        <p class="muted" style="margin:0 0 8px;font-size:12px">Mark a number <b>do-not-contact</b> to exclude it from both this group's blasts and individual sends. <b>Message…</b> sends a one-off note to just that number, right now.</p>
+        <div id="cg_contacts_list"></div>
+        <button onclick="$('cg_contacts_wrap').style.display='none'" style="margin-top:8px">Close</button>
+      </div>
       <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
         <p class="muted" style="margin:0 0 8px;font-size:13px"><b>New group</b> — paste numbers one per line or comma-separated (any of <span class="key">024…</span>, <span class="key">233…</span>, <span class="key">+233…</span> is fine).</p>
         <div class="field"><label>Group name</label><input id="cg_name" placeholder="Trade fair leads, Oct 2026"/></div>
@@ -120,7 +126,7 @@
     </div>
 
     <div class="card" style="margin-bottom:14px"><h2>Compose &amp; send</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">Sends a real message to every contact in the group through this deployment's Messaging rail (see <b>Operating mode</b> for sandbox/live, and the shared test account under <b>Messaging</b>). This is the one button on this page that reaches real phones — there's a confirmation step before anything goes out.</p>
+      <p class="muted" style="margin-top:0;font-size:13px">Sends a real message to every contact in the group through this deployment's Messaging rail (see <b>Operating mode</b> for sandbox/live, and the shared test account under <b>Messaging</b>), skipping any number marked do-not-contact. This is the one button on this page that reaches real phones — there's a confirmation step before anything goes out.</p>
       <div class="row">
         <div class="field"><label>Group</label><select id="cp_group"></select></div>
         <div class="field"><label>Channel</label><select id="cp_channel" onchange="updateCharCount()"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option></select></div>
@@ -1071,24 +1077,72 @@ async function loadAccrualHistory(){
 
 // ---- Campaigns: contact groups, compose & send, sent history, trial sign-ups
 let CAMPAIGN_GROUPS=[];
+let CURRENT_GROUP_CONTACTS=[];
 async function loadCampaignGroups(){
   const r=await (await fetch('/api/platform/campaigns/groups',{headers:H()})).json().catch(()=>null);
   CAMPAIGN_GROUPS=(r&&r.data)||[];
   renderGroupsList(CAMPAIGN_GROUPS);
   const sel=$('cp_group'); const prev=sel.value;
   sel.innerHTML=CAMPAIGN_GROUPS.length
-    ?CAMPAIGN_GROUPS.map(g=>`<option value="${g.id}">${esc(g.name)} (${g.contactCount})</option>`).join('')
+    ?CAMPAIGN_GROUPS.map(g=>`<option value="${g.id}">${esc(g.name)} (${g.eligibleCount}${g.suppressedCount?' of '+g.contactCount:''})</option>`).join('')
     :'<option value="">No groups yet — create one on the left</option>';
   if(prev&&CAMPAIGN_GROUPS.some(g=>g.id===prev))sel.value=prev;
 }
 function renderGroupsList(groups){
-  $('cg_list').innerHTML=groups.length?`<table><thead><tr><th>Name</th><th>Contacts</th><th>Source</th><th>Created</th></tr></thead><tbody>`+
-    groups.map(g=>`<tr><td>${esc(g.name)}</td><td>${g.contactCount}</td>
+  $('cg_list').innerHTML=groups.length?`<table><thead><tr><th>Name</th><th>Contacts</th><th>Source</th><th>Created</th><th></th></tr></thead><tbody>`+
+    groups.map(g=>`<tr><td>${esc(g.name)}</td><td>${g.contactCount}${g.suppressedCount?` <span class="muted" style="font-size:11px">(${g.suppressedCount} do-not-contact)</span>`:''}</td>
       <td class="muted" style="font-size:12px">${esc(g.source||'')}</td>
-      <td class="muted" style="font-size:12px">${g.createdAt?new Date(g.createdAt).toLocaleDateString():'—'}</td></tr>`).join('')+
+      <td class="muted" style="font-size:12px">${g.createdAt?new Date(g.createdAt).toLocaleDateString():'—'}</td>
+      <td><button onclick="viewGroupContacts('${g.id}')">View contacts</button></td></tr>`).join('')+
     `</tbody></table>`:'<p class="muted">No groups yet.</p>';
   const seed=groups.find(g=>g.id==='ghana-health-providers');
   $('cg_seed_note').textContent=seed?`The initial "${seed.name}" list (${seed.contactCount} contacts) is ready to use below.`:'';
+}
+async function viewGroupContacts(groupId){
+  const r=await (await fetch(`/api/platform/campaigns/groups/${encodeURIComponent(groupId)}/contacts?limit=1000`,{headers:H()})).json().catch(()=>null);
+  if(!r||r.error){toast('Failed to load contacts');return;}
+  $('cg_contacts_title').textContent=`Contacts — ${r.group?r.group.name:groupId} (${(r.data||[]).length})`;
+  CURRENT_GROUP_CONTACTS=r.data||[];
+  renderGroupContacts(CURRENT_GROUP_CONTACTS);
+  $('cg_contacts_wrap').style.display='';
+  $('cg_contacts_wrap').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function renderGroupContacts(rows){
+  $('cg_contacts_list').innerHTML=rows.length?`<table><thead><tr><th>Phone</th><th>Region/Suburb</th><th>Last sent</th><th>Status</th><th></th></tr></thead><tbody>`+
+    rows.map(c=>`<tr${c.suppressed?' style="opacity:.55"':''}>
+      <td>${esc(c.phone)}</td>
+      <td class="muted" style="font-size:12px">${esc([c.region,c.suburb].filter(Boolean).join(' / ')||'—')}</td>
+      <td class="muted" style="font-size:12px">${c.lastSentAt?new Date(c.lastSentAt).toLocaleString()+' ('+esc(c.lastSentStatus||'')+' · '+esc(c.lastSentChannel||'')+')':'—'}</td>
+      <td>${c.suppressed?'<span class="pill open">do-not-contact</span>':'<span class="pill settled">reachable</span>'}</td>
+      <td style="white-space:nowrap">
+        <button onclick="toggleSuppress('${c.id}',${!c.suppressed})">${c.suppressed?'Re-enable':'Do-not-contact'}</button>
+        ${c.suppressed?'':`<button onclick="messageOne('${c.id}')">Message…</button>`}
+      </td>
+    </tr>`).join('')+`</tbody></table>`:'<p class="muted">No contacts in this group.</p>';
+}
+async function toggleSuppress(contactId,suppressed){
+  const r=await fetch(`/api/platform/campaigns/contacts/${encodeURIComponent(contactId)}/suppress`,{method:'PUT',headers:H(),body:JSON.stringify({suppressed})});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok||o.error){toast('Failed: '+(o.error||r.status));return;}
+  toast(suppressed?'Marked do-not-contact':'Re-enabled');
+  const idx=CURRENT_GROUP_CONTACTS.findIndex(c=>c.id===contactId);
+  if(idx>-1)CURRENT_GROUP_CONTACTS[idx]=o;
+  renderGroupContacts(CURRENT_GROUP_CONTACTS);
+  loadCampaignGroups();
+}
+async function messageOne(contactId){
+  const c=CURRENT_GROUP_CONTACTS.find(x=>x.id===contactId); const phone=c?c.phone:contactId;
+  const channel=($('cp_channel')&&$('cp_channel').value)||'sms';
+  const body=prompt(`One-off message to ${phone} (sent right now, not part of a campaign):`,'');
+  if(body===null)return;
+  const text=body.trim(); if(!text)return toast('Nothing to send');
+  if(!confirm(`Send this ${channel.toUpperCase()} to ${phone} now?\n\n"${text}"`))return;
+  const r=await fetch(`/api/platform/campaigns/contacts/${encodeURIComponent(contactId)}/send`,{method:'POST',headers:H(),body:JSON.stringify({body:text,channel})});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok||o.error){toast('Failed: '+(o.error||r.status));return;}
+  toast(o.ok?'Sent':'Send failed'+(o.error?': '+o.error:''));
+  if(o.contact){const idx=CURRENT_GROUP_CONTACTS.findIndex(x=>x.id===contactId);if(idx>-1)CURRENT_GROUP_CONTACTS[idx]=o.contact;}
+  renderGroupContacts(CURRENT_GROUP_CONTACTS);
 }
 async function createGroup(){
   const name=$('cg_name').value.trim(), numbers=$('cg_numbers').value;
@@ -1116,8 +1170,9 @@ async function sendCampaign(btn){
   const channel=$('cp_channel').value;
   const body=$('cp_body').value.trim(); if(!body)return toast('Write a message first');
   const group=CAMPAIGN_GROUPS.find(g=>g.id===groupId);
-  const n=group?group.contactCount:'an unknown number of';
-  const typed=prompt(`This sends a real ${channel.toUpperCase()} message to ${n} phone number(s) in "${group?group.name:groupId}" right now. This cannot be undone.\n\nType SEND to confirm:`);
+  const n=group?group.eligibleCount:'an unknown number of';
+  const skipNote=group&&group.suppressedCount?` (${group.suppressedCount} do-not-contact number(s) will be skipped)`:'';
+  const typed=prompt(`This sends a real ${channel.toUpperCase()} message to ${n} phone number(s) in "${group?group.name:groupId}" right now${skipNote}. This cannot be undone.\n\nType SEND to confirm:`);
   if(typed===null)return;
   if(typed.trim().toUpperCase()!=='SEND'){toast('Not sent — type SEND exactly to confirm');return;}
   btn.disabled=true;btn.textContent='Starting…';
@@ -1143,7 +1198,7 @@ function renderCampaignsList(rows){
       <td>${esc(c.groupName||c.groupId)}</td>
       <td>${esc(c.channel)}</td>
       <td style="max-width:260px" class="muted"><span style="font-size:12px">${esc((c.body||'').slice(0,80))}${(c.body||'').length>80?'…':''}</span></td>
-      <td>${c.sentCount}/${c.totalRecipients}${c.failedCount?` <span style="color:var(--bad)">(${c.failedCount} failed)</span>`:''}</td>
+      <td>${c.sentCount}/${c.totalRecipients}${c.failedCount?` <span style="color:var(--bad)">(${c.failedCount} failed)</span>`:''}${c.suppressedCount?` <span class="muted" style="font-size:11px">(${c.suppressedCount} do-not-contact skipped)</span>`:''}</td>
       <td><span class="pill ${c.status==='completed'?'settled':(c.status==='sending'?'pending':'open')}">${esc(c.status)}</span></td>
     </tr>`).join('')+`</tbody></table>`:'<p class="muted">No campaigns sent yet.</p>';
 }

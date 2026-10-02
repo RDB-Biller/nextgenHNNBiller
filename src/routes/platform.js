@@ -723,6 +723,37 @@ router.get('/campaigns/groups/:id/contacts', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Body: { suppressed: true|false }. Marks (or clears) a single number as
+// do-not-contact -- enforced in BOTH sending paths: a suppressed contact is
+// dropped from a group blast (POST /campaigns, see createCampaign's
+// suppressedCount) and refused outright from a one-off send below, so
+// marking it here takes it out of reach of a campaign either way, not just
+// one of the two.
+router.put('/campaigns/contacts/:id/suppress', async (req, res, next) => {
+  try { res.json(await campaigns.setContactSuppressed(req.params.id, !!req.body?.suppressed)); }
+  catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Body: { body, channel: 'sms'|'whatsapp' }. Sends one message to one
+// contact right now -- the "reach a number individually" counterpart to a
+// group blast. Synchronous (a single message, unlike runSend's background
+// loop); refuses with 422 contact_suppressed for a do-not-contact number.
+router.post('/campaigns/contacts/:id/send', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const result = await campaigns.sendIndividual({
+      contactId: req.params.id, body: b.body, channel: b.channel, createdBy: req.principal?.id || 'HNN',
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
 router.get('/campaigns', async (req, res, next) => {
   try { res.json({ data: await campaigns.listCampaigns(), smsAdvisoryLimit: campaigns.SMS_ADVISORY_LIMIT }); }
   catch (e) { next(e); }

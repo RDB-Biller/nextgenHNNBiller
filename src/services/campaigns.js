@@ -75,21 +75,32 @@ async function ensureSeedGroup() {
       id: `cc_${rand()}`, groupId: group.id,
       phone: row.phone, phoneNormalized: messaging.normalizePhone(row.phone),
       region: row.region || null, suburb: row.suburb || null,
+      suppressed: false, lastSentAt: null, lastSentStatus: null, lastSentChannel: null,
       createdAt: new Date().toISOString(),
     });
   }
   return group;
 }
 
+/** contactCount is everyone in the group; eligibleCount/suppressedCount split
+ * that by the do-not-contact flag, so callers (the group picker, the send
+ * confirmation) can show how many a blast would actually reach without a
+ * second round trip to list every contact. */
+async function groupCounts(groupId) {
+  const rows = await store.campaignContacts.listByGroup(groupId);
+  const suppressedCount = rows.filter((c) => c.suppressed).length;
+  return { contactCount: rows.length, suppressedCount, eligibleCount: rows.length - suppressedCount };
+}
+
 async function listGroups() {
   const groups = await store.campaignGroups.all();
-  return Promise.all(groups.map(async (g) => ({ ...g, contactCount: await store.campaignContacts.countByGroup(g.id) })));
+  return Promise.all(groups.map(async (g) => ({ ...g, ...(await groupCounts(g.id)) })));
 }
 
 async function getGroup(id) {
   const g = await store.campaignGroups.get(id);
   if (!g) return null;
-  return { ...g, contactCount: await store.campaignContacts.countByGroup(id) };
+  return { ...g, ...(await groupCounts(id)) };
 }
 
 /** Body: { name, numbers: "one per line, or comma-separated" }. Each number is
@@ -109,22 +120,45 @@ async function createGroup({ name, numbers }) {
     if (!phone) { rejected.push(cand); continue; }
     await store.campaignContacts.insert({
       id: `cc_${rand()}`, groupId: group.id, phone, phoneNormalized: messaging.normalizePhone(phone),
-      region: null, suburb: null, createdAt: new Date().toISOString(),
+      region: null, suburb: null,
+      suppressed: false, lastSentAt: null, lastSentStatus: null, lastSentChannel: null,
+      createdAt: new Date().toISOString(),
     });
     added++;
   }
   return { group: await getGroup(group.id), added, rejected };
 }
 
+function contactView(c) {
+  return {
+    id: c.id, groupId: c.groupId, phone: c.phone, region: c.region || null, suburb: c.suburb || null,
+    suppressed: !!c.suppressed,
+    lastSentAt: c.lastSentAt || null, lastSentStatus: c.lastSentStatus || null, lastSentChannel: c.lastSentChannel || null,
+  };
+}
+
 async function listContacts(groupId, limit = 500) {
   const rows = await store.campaignContacts.listByGroup(groupId);
-  return rows.slice(0, limit);
+  return rows.slice(0, limit).map(contactView);
+}
+
+/** Flips a single contact's do-not-contact flag. Enforced in both
+ * createCampaign() (blasts silently skip a suppressed contact, counted in
+ * suppressedCount) and sendIndividual() (refuses outright, 422), so marking a
+ * number here takes it out of reach of both sending paths the same way. */
+async function setContactSuppressed(contactId, suppressed) {
+  const contact = await store.campaignContacts.get(contactId);
+  if (!contact) { const e = new Error('contact_not_found'); e.status = 404; throw e; }
+  contact.suppressed = !!suppressed;
+  await store.campaignContacts.update(contact);
+  return contactView(contact);
 }
 
 function campaignView(c) {
   return {
     id: c.id, groupId: c.groupId, groupName: c.groupName, body: c.body, channel: c.channel,
-    status: c.status, totalRecipients: c.totalRecipients, sentCount: c.sentCount, failedCount: c.failedCount,
+    status: c.status, totalRecipients: c.totalRecipients, suppressedCount: c.suppressedCount || 0,
+    sentCount: c.sentCount, failedCount: c.failedCount,
     createdAt: c.createdAt, startedAt: c.startedAt, completedAt: c.completedAt, createdBy: c.createdBy,
     overLength: c.channel === 'sms' && (c.body || '').length > SMS_ADVISORY_LIMIT,
   };
@@ -149,12 +183,18 @@ async function createCampaign({ groupId, body, channel, createdBy }) {
   if (!text) { const e = new Error('body_required'); e.status = 422; throw e; }
   const group = await store.campaignGroups.get(groupId);
   if (!group) { const e = new Error('group_not_found'); e.status = 404; throw e; }
-  const contacts = await store.campaignContacts.listByGroup(groupId);
-  if (!contacts.length) { const e = new Error('group_has_no_contacts'); e.status = 422; throw e; }
+  const allContacts = await store.campaignContacts.listByGroup(groupId);
+  if (!allContacts.length) { const e = new Error('group_has_no_contacts'); e.status = 422; throw e; }
+  // Do-not-contact numbers (see setContactSuppressed) never receive a blast —
+  // dropped here, before totalRecipients is even computed, rather than sent
+  // to and then filtered out of runSend().
+  const contacts = allContacts.filter((c) => !c.suppressed);
+  const suppressedCount = allContacts.length - contacts.length;
+  if (!contacts.length) { const e = new Error('group_has_no_eligible_contacts'); e.status = 422; throw e; }
 
   const campaign = {
     id: `camp_${rand()}`, groupId, groupName: group.name, body: text, channel,
-    status: 'sending', totalRecipients: contacts.length, sentCount: 0, failedCount: 0,
+    status: 'sending', totalRecipients: contacts.length, suppressedCount, sentCount: 0, failedCount: 0,
     createdAt: new Date().toISOString(), startedAt: new Date().toISOString(), completedAt: null,
     createdBy: createdBy || 'HNN',
   };
@@ -193,6 +233,44 @@ async function listSends(campaignId, limit = 1000) {
 }
 
 /**
+ * One-off send to a single contact — the "individually" counterpart to a
+ * group blast (createCampaign). Unlike a campaign, there's exactly one
+ * message to deliver, so this runs synchronously and returns the outcome
+ * directly rather than kicking off a background job. A do-not-contact
+ * contact (see setContactSuppressed) is refused outright with 422 rather
+ * than silently skipped, since a one-off send is already a single
+ * deliberate click naming that one number.
+ *
+ * Recorded through the same campaignSends table as a blast (with
+ * campaignId: null) so this phone counts as "a past campaign recipient" for
+ * handleInboundReply() below just as a blast recipient would — someone who
+ * only ever got a one-off invite can still text YES and get the
+ * registration link back.
+ */
+async function sendIndividual({ contactId, body, channel, createdBy }) {
+  if (!['sms', 'whatsapp'].includes(channel)) { const e = new Error('invalid_channel'); e.status = 422; throw e; }
+  const text = String(body || '').trim();
+  if (!text) { const e = new Error('body_required'); e.status = 422; throw e; }
+  const contact = await store.campaignContacts.get(contactId);
+  if (!contact) { const e = new Error('contact_not_found'); e.status = 404; throw e; }
+  if (contact.suppressed) { const e = new Error('contact_suppressed'); e.status = 422; throw e; }
+
+  const r = await messaging.send({ channel, to: contact.phone, body: text, tenant: null });
+  await store.campaignSends.insert({
+    id: `cs_${rand()}`, campaignId: null, contactId: contact.id,
+    phone: contact.phone, phoneNormalized: contact.phoneNormalized,
+    channel, status: r.ok ? 'sent' : 'failed',
+    providerMessageId: r.providerMessageId || null, error: r.error || null,
+    sandbox: !!r.sandbox, createdBy: createdBy || 'HNN', createdAt: new Date().toISOString(),
+  });
+  contact.lastSentAt = new Date().toISOString();
+  contact.lastSentStatus = r.ok ? 'sent' : 'failed';
+  contact.lastSentChannel = channel;
+  await store.campaignContacts.update(contact);
+  return { ok: r.ok, error: r.error || null, sandbox: !!r.sandbox, contact: contactView(contact) };
+}
+
+/**
  * Inbound "YES" reply handler — see routes/webhooks.js for where this slots
  * into the clinicalLinks -> campaigns -> verification chain. Deliberately
  * defers (returns null) whenever the phone has a pending BILL verification,
@@ -225,7 +303,7 @@ async function handleInboundReply({ from, text, channel }) {
 
 module.exports = {
   SEED_GROUP_ID, SMS_ADVISORY_LIMIT, toE164Ghana,
-  ensureSeedGroup, listGroups, getGroup, createGroup, listContacts,
-  createCampaign, listCampaigns, getCampaign, listSends,
+  ensureSeedGroup, listGroups, getGroup, createGroup, listContacts, setContactSuppressed,
+  createCampaign, listCampaigns, getCampaign, listSends, sendIndividual,
   handleInboundReply,
 };

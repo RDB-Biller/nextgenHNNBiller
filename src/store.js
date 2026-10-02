@@ -328,8 +328,10 @@ function pgRepo(exec) {
       save: (g) => exec(upsert('campaign_groups', []), [g.id, g]),
     },
     campaignContacts: {
+      get: (id) => one('SELECT data FROM campaign_contacts WHERE id=$1', [id]),
       listByGroup: (groupId) => many('SELECT data FROM campaign_contacts WHERE group_id=$1 ORDER BY created_at', [groupId]),
       insert: (c) => exec(upsert('campaign_contacts', ['group_id']), [c.id, c.groupId, c]),
+      update: (c) => exec(upsert('campaign_contacts', ['group_id']), [c.id, c.groupId, c]),
       countByGroup: async (groupId) => {
         const r = await exec('SELECT count(*)::int AS n FROM campaign_contacts WHERE group_id=$1', [groupId]);
         return r.rows[0]?.n || 0;
@@ -573,8 +575,10 @@ function memRepo(M) {
       save: async (g) => M.campaignGroups.set(g.id, g),
     },
     campaignContacts: {
+      get: async (id) => M.campaignContacts.get(id) || null,
       listByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId),
       insert: async (c) => { M.campaignContacts.set(c.id, c); },
+      update: async (c) => { M.campaignContacts.set(c.id, c); },
       countByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId).length,
     },
     campaigns: {
