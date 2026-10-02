@@ -67,8 +67,13 @@ async function confirm(id, { via } = {}) {
  * useful once the hospital has corrected whatever they flagged. If SMS/WhatsApp
  * channels are on for this clinic, this also sends a FRESH code — the old one
  * stops working the moment this runs (see dispatchChannels).
+ *
+ * `opts` passes straight through to dispatchChannels — see its own comment.
+ * Omit it for the plain "resend" button (tenant's configured default
+ * channels, patient's phone on file); pass `{ channels, to }` for an explicit
+ * one-channel, admin-triggered send.
  */
-async function reissue(id) {
+async function reissue(id, opts = {}) {
   const v = await store.verifications.get(id);
   if (!v) { const e = new Error('verification_not_found'); e.status = 404; throw e; }
   if (v.status === 'verified') { const e = new Error('verification_not_pending: verified'); e.status = 409; throw e; }
@@ -80,7 +85,7 @@ async function reissue(id) {
   if (bill) {
     await notifyPatientVerification(v, bill);
     const tenant = bill.tenantId ? await store.tenants.get(bill.tenantId) : null;
-    if (tenant) await dispatchChannels(v, bill, tenant);
+    if (tenant || opts.channels) await dispatchChannels(v, bill, tenant, opts);
   }
   return v;
 }
@@ -159,13 +164,20 @@ function buildMessageBody(bill, v, { includeTreatmentDetail }) {
  * tenant has turned on, and records what went out. Best-effort: a messaging
  * failure never throws past this point (see messaging.send docstring) — the
  * link-based flow keeps working regardless.
+ *
+ * `opts.channels`, when given, overrides tenant.verificationChannels entirely
+ * — a staff member explicitly picking "send via WhatsApp" for one message
+ * should do exactly that, regardless of what the clinic has pre-configured as
+ * its default. `opts.to` likewise overrides the recipient for this one send
+ * only; it is never persisted onto the verification record.
  */
-async function dispatchChannels(v, bill, tenant) {
-  const channels = tenant?.verificationChannels || {};
+async function dispatchChannels(v, bill, tenant, opts = {}) {
+  const channels = opts.channels || tenant?.verificationChannels || {};
   const wantSms = !!channels.sms;
   const wantWhatsapp = !!channels.whatsapp;
   if (!wantSms && !wantWhatsapp) return v;
-  if (!v.phone) return v;
+  const phone = opts.to || v.phone;
+  if (!phone) return v;
 
   v.otpCode = messaging.genOtp();
   v.otpExpiresAt = new Date(Date.now() + config.messaging.otpTtlMinutes * 60000).toISOString();
@@ -176,13 +188,13 @@ async function dispatchChannels(v, bill, tenant) {
   v.lastMessageBody = body; // kept for support/audit ("what did we actually tell this patient?")
   const sent = [];
   if (wantSms) {
-    const r = await messaging.send({ channel: 'sms', to: v.phone, body, tenant });
-    if (r.ok) { sent.push('sms'); v.smsSentAt = r.sentAt; v.smsMessageId = r.providerMessageId; }
+    const r = await messaging.send({ channel: 'sms', to: phone, body, tenant });
+    if (r.ok) { sent.push('sms'); v.smsSentAt = r.sentAt; v.smsMessageId = r.providerMessageId; v.smsError = null; }
     else v.smsError = r.error || null;
   }
   if (wantWhatsapp) {
-    const r = await messaging.send({ channel: 'whatsapp', to: v.phone, body, tenant });
-    if (r.ok) { sent.push('whatsapp'); v.whatsappSentAt = r.sentAt; v.whatsappMessageId = r.providerMessageId; }
+    const r = await messaging.send({ channel: 'whatsapp', to: phone, body, tenant });
+    if (r.ok) { sent.push('whatsapp'); v.whatsappSentAt = r.sentAt; v.whatsappMessageId = r.providerMessageId; v.whatsappError = null; }
     else v.whatsappError = r.error || null;
   }
   v.channelsSent = sent;
