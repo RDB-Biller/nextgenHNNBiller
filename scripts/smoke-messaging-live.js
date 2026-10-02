@@ -107,6 +107,7 @@ async function resolveSenderAndSendChecks() {
       return { status: 201, body: JSON.stringify({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'ATXid_1' }] } }) };
     }
     if (url.startsWith('https://sms.hubtel.com/')) return { status: 200, body: JSON.stringify({ MessageId: 'HTid_1' }) };
+    if (url.startsWith('https://chat.africastalking.com/')) return { status: 200, body: JSON.stringify({ id: 'WAid_1', status: 'Sent' }) };
     return { status: 500, body: '{}' };
   });
 
@@ -139,9 +140,72 @@ async function resolveSenderAndSendChecks() {
   ok(calls[calls.length - 1].url.startsWith('https://api.sandbox.africastalking.com/'),
     'username "sandbox" resolves to Africa\'s Talking\'s own sandbox base URL');
 
+  // Without a configured WhatsApp sender number, africastalking + whatsapp
+  // fails cleanly rather than guessing one.
   r = await messaging.send({ channel: 'whatsapp', to: '0244000111', body: 'hi', tenant: atTenant });
-  ok(r.ok === false && r.error === 'provider_whatsapp_not_verified',
-    'africastalking + whatsapp returns an honest "not verified" error instead of guessing an endpoint');
+  ok(r.ok === false && r.error === 'provider_sender_not_configured',
+    'africastalking + whatsapp without a configured waNumber fails cleanly instead of guessing a sender');
+
+  // With waNumber configured, a plain string body sends as an ordinary
+  // WhatsApp text message through the confirmed chat.africastalking.com API.
+  const atWaTenant = { messagingCredentials: { useOwnCredentials: true, provider: 'africastalking',
+    encrypted: credentials.encrypt({ apiKey: 'at-key', username: 'myhospital', from: 'EURACARE', waNumber: '+254711000111' }) } };
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222', body: 'your bill is ready', tenant: atWaTenant });
+  ok(r.ok === true && r.providerMessageId === 'WAid_1',
+    'africastalking + whatsapp with waNumber configured sends a plain-text body for real');
+  ok(calls[calls.length - 1].url === 'https://chat.africastalking.com/whatsapp/message/send',
+    'whatsapp text send targets the confirmed chat.africastalking.com endpoint');
+  ok(calls[calls.length - 1].opts.headers.apikey === 'at-key', 'whatsapp send authenticates with the apikey header, not Authorization');
+  let sentBody = JSON.parse(calls[calls.length - 1].opts.body);
+  ok(sentBody.waNumber === '+254711000111' && sentBody.phoneNumber === '0244000222'
+    && sentBody.body.message === 'your bill is ready',
+    'whatsapp text send JSON body matches the documented {username, waNumber, phoneNumber, body:{message}} shape');
+
+  // Rich message types -- image, template, interactive buttons, interactive
+  // list -- all map onto the documented request shapes.
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222',
+    body: { mediaType: 'Image', url: 'https://example.com/pic.jpg', caption: 'Receipt' }, tenant: atWaTenant });
+  ok(r.ok === true, 'an image message sends through the same adapter');
+  sentBody = JSON.parse(calls[calls.length - 1].opts.body);
+  ok(sentBody.body.mediaType === 'Image' && sentBody.body.url === 'https://example.com/pic.jpg' && sentBody.body.caption === 'Receipt',
+    'image message body matches the documented {url, caption, mediaType} shape');
+
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222',
+    body: { templateId: 'my_template_id', headerValue: 'June', bodyValues: ['Jumba', '238156'] }, tenant: atWaTenant });
+  ok(r.ok === true, 'a template message sends through the same adapter');
+  sentBody = JSON.parse(calls[calls.length - 1].opts.body);
+  ok(sentBody.body.templateId === 'my_template_id' && sentBody.body.headerValue === 'June'
+    && sentBody.body.bodyValues.length === 2,
+    'template message body matches the documented {templateId, headerValue, bodyValues} shape');
+
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222',
+    body: { buttons: [{ id: 'Id1', title: 'Id1 Title' }, { id: 'Id2', title: 'Id2 Title' }], text: 'This is a body', header: 'This is a header' },
+    tenant: atWaTenant });
+  ok(r.ok === true, 'an interactive-buttons message sends through the same adapter');
+  sentBody = JSON.parse(calls[calls.length - 1].opts.body);
+  ok(sentBody.body.action.buttons.length === 2 && sentBody.body.body.text === 'This is a body'
+    && sentBody.body.header.text === 'This is a header',
+    'interactive-buttons body matches the documented {action:{buttons}, body:{text}, header:{text}} shape');
+
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222',
+    body: { list: { button: 'List Button', sections: [{ title: 'Section 1', rows: [{ id: 'Id1', title: 'Id1 Title', description: 'description_1' }] }] },
+      text: 'This is a body', footer: 'This is a footer' },
+    tenant: atWaTenant });
+  ok(r.ok === true, 'an interactive-list message sends through the same adapter');
+  sentBody = JSON.parse(calls[calls.length - 1].opts.body);
+  ok(sentBody.body.action.button === 'List Button' && sentBody.body.action.sections[0].rows[0].id === 'Id1'
+    && sentBody.body.footer.text === 'This is a footer',
+    'interactive-list body matches the documented {action:{button,sections}, body:{text}, footer:{text}} shape');
+
+  // A rich body makes no sense outside WhatsApp, and an unrecognized rich
+  // shape makes no sense even for WhatsApp -- both fail cleanly, before ever
+  // reaching a provider.
+  r = await messaging.send({ channel: 'sms', to: '0244000222', body: { mediaType: 'Image', url: 'x' }, tenant: atWaTenant });
+  ok(r.ok === false && r.error === 'rich_body_requires_whatsapp',
+    'a rich body on an sms send is rejected before it ever reaches a provider');
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000222', body: { nonsense: true }, tenant: atWaTenant });
+  ok(r.ok === false && r.error === 'invalid_whatsapp_body',
+    'a whatsapp body matching none of the documented shapes fails cleanly instead of sending garbage');
 
   const hubtelTenant = { messagingCredentials: { useOwnCredentials: true, provider: 'hubtel',
     encrypted: credentials.encrypt({ clientId: 'cid', clientSecret: 'csecret', from: 'EURACARE' }) } };
@@ -150,6 +214,9 @@ async function resolveSenderAndSendChecks() {
   r = await messaging.send({ channel: 'whatsapp', to: '0244000111', body: 'hi', tenant: hubtelTenant });
   ok(r.ok === false && r.error === 'provider_whatsapp_not_supported',
     'hubtel + whatsapp returns "not supported", since Hubtel has no WhatsApp product');
+  r = await messaging.send({ channel: 'whatsapp', to: '0244000111', body: { mediaType: 'Image', url: 'x' }, tenant: hubtelTenant });
+  ok(r.ok === false && r.error === 'rich_whatsapp_body_not_supported_by_provider',
+    'a rich whatsapp body against a non-africastalking provider is rejected before reaching that provider\'s own adapter');
 
   // A tenant that has NOT turned useOwnCredentials on must still fall back to
   // the (active) platform test account rather than being left unconfigured.

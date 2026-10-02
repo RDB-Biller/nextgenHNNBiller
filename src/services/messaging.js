@@ -32,6 +32,12 @@ const operatingMode = require('./operatingMode');
  * so none of the three has been exercised against a real account from here.
  * Adding a fourth provider only means adding one function and a line in
  * ADAPTERS; nothing else in the codebase changes.
+ *
+ * `body` is a plain string for an ordinary text message — every caller in
+ * this codebase today. Africa's Talking's WhatsApp adapter additionally
+ * accepts a handful of richer shapes (media, template, interactive buttons/
+ * list) for whenever a caller wants them — see sendViaAfricasTalking's own
+ * comment below for the exact shapes.
  */
 async function isSandbox() { return operatingMode.isMessagingSandbox(); }
 
@@ -127,23 +133,42 @@ async function sendViaTwilio(creds, { channel, to, body }) {
 }
 
 /**
- * Africa's Talking — SMS is high confidence (confirmed against the official
- * Python SDK's own source: POST {base}/version1/messaging, header
- * `apiKey: <key>`, form body username/to/message/from, sandbox app ->
- * api.sandbox.africastalking.com, else api.africastalking.com). creds:
- * { apiKey, username, from? }.
+ * Africa's Talking — SMS and WhatsApp.
  *
- * WhatsApp is NOT implemented. Africa's Talking does offer a WhatsApp
- * product, but this codebase could not confirm its request shape from
- * public documentation (it reads as newer/less stable than their SMS API,
- * and may need separate product activation on the account). Rather than
- * guess an endpoint that would silently fail against a real account, this
- * returns a clear, honest error instead — see README.
+ * SMS is high confidence (confirmed against the official Python SDK's own
+ * source: POST {base}/version1/messaging, header `apiKey: <key>`, form body
+ * username/to/message/from, sandbox app -> api.sandbox.africastalking.com,
+ * else api.africastalking.com). creds: { apiKey, username, from?, waNumber? }.
+ *
+ * WhatsApp is now implemented, confirmed against Africa's Talking's own
+ * WhatsApp API reference (supplied directly rather than guessed — the gap
+ * the comment here used to flag): POST
+ * https://chat.africastalking.com/whatsapp/message/send, header
+ * `apikey: <key>`, JSON body { username, waNumber, phoneNumber, body }.
+ * waNumber is the account's own WhatsApp-enabled sender number, set once in
+ * Master Control — separate from the SMS `from` sender ID, since the two
+ * products use different sender identities. `body` on send() stays a plain
+ * string for an ordinary text message, matching every existing caller.
+ * Pass an object instead to reach the richer message types the API also
+ * offers (nothing in this codebase uses these yet, but the shapes are
+ * confirmed and ready for whenever something does):
+ *   { mediaType: 'Image' | 'Video', url, caption? }            - media message
+ *   { templateId, headerValue?, bodyValues?: [...] }           - template message
+ *   { buttons: [{ id, title }, ...], text, header?, footer? }  - interactive buttons
+ *   { list: { button, sections: [...] }, text, header?, footer? } - interactive list
+ * The supplied API reference shows request shapes only, no example success
+ * response body, so sendAfricasTalkingWhatsApp (below) trusts the HTTP
+ * status for ok/fail and extracts a message id on a best-effort basis, the
+ * same posture sendViaHubtel already takes for the same reason. And like
+ * Hubtel, this environment's egress is allowlisted to package registries and
+ * GitHub only, so this has been built and tested against the documented
+ * request shape but not exercised against a real AT account from here — see
+ * README "SMS / WhatsApp verification".
  */
 async function sendViaAfricasTalking(creds, { channel, to, body }) {
-  if (channel === 'whatsapp') return { ok: false, error: 'provider_whatsapp_not_verified' };
-  const { apiKey, username, from } = creds || {};
+  const { apiKey, username, from, waNumber } = creds || {};
   if (!apiKey || !username) return { ok: false, error: 'provider_credentials_incomplete' };
+  if (channel === 'whatsapp') return sendAfricasTalkingWhatsApp({ apiKey, username, waNumber }, { to, body });
   const sandboxAccount = String(username).toLowerCase() === 'sandbox';
   const base = sandboxAccount ? 'https://api.sandbox.africastalking.com' : 'https://api.africastalking.com';
   const params = { username, to, message: body };
@@ -169,6 +194,73 @@ async function sendViaAfricasTalking(creds, { channel, to, body }) {
     return { ok: true, providerMessageId: recipient.messageId, sentAt: new Date().toISOString() };
   }
   return { ok: false, error: (recipient && recipient.status) || parsed?.SMSMessageData?.Message || `africastalking_http_${res.status}` };
+}
+
+/**
+ * Maps this codebase's generic `body` (a plain string, or one of the rich
+ * shapes documented on sendViaAfricasTalking above) onto the exact `body`
+ * object Africa's Talking's WhatsApp API expects for each message kind.
+ * Returns null for a shape that matches none of the documented variants, so
+ * the caller fails cleanly instead of sending something the API would
+ * reject.
+ */
+function mapWhatsAppBody(body) {
+  if (typeof body === 'string') return { message: body };
+  if (!body || typeof body !== 'object') return null;
+  if (body.mediaType) {
+    if (!body.url) return null;
+    return { url: body.url, mediaType: body.mediaType, ...(body.caption ? { caption: body.caption } : {}) };
+  }
+  if (body.templateId) {
+    return {
+      templateId: body.templateId,
+      ...(body.headerValue !== undefined ? { headerValue: body.headerValue } : {}),
+      ...(body.bodyValues ? { bodyValues: body.bodyValues } : {}),
+    };
+  }
+  if (body.buttons) {
+    return {
+      action: { buttons: body.buttons },
+      body: { text: body.text },
+      ...(body.header ? { header: { text: body.header } } : {}),
+      ...(body.footer ? { footer: { text: body.footer } } : {}),
+    };
+  }
+  if (body.list) {
+    return {
+      action: body.list,
+      body: { text: body.text },
+      ...(body.header ? { header: { text: body.header } } : {}),
+      ...(body.footer ? { footer: { text: body.footer } } : {}),
+    };
+  }
+  return null;
+}
+
+/** See sendViaAfricasTalking's own comment above for the confirmed request shape. */
+async function sendAfricasTalkingWhatsApp({ apiKey, username, waNumber }, { to, body }) {
+  if (!waNumber) return { ok: false, error: 'provider_sender_not_configured' };
+  const mapped = mapWhatsAppBody(body);
+  if (!mapped) return { ok: false, error: 'invalid_whatsapp_body' };
+  const json = JSON.stringify({ username, waNumber, phoneNumber: to, body: mapped });
+  let res;
+  try {
+    res = await _request('https://chat.africastalking.com/whatsapp/message/send', {
+      method: 'POST',
+      headers: {
+        apikey: apiKey,
+        'content-type': 'application/json',
+        'Content-Length': Buffer.byteLength(json),
+      },
+      body: json,
+    });
+  } catch (e) { return { ok: false, error: e.message || 'network_error' }; }
+  let parsed = {};
+  try { parsed = JSON.parse(res.body || '{}'); } catch (_e) { /* non-JSON error page */ }
+  if (res.status >= 200 && res.status < 300) {
+    return { ok: true, providerMessageId: parsed.id || parsed.messageId || null, sentAt: new Date().toISOString() };
+  }
+  return { ok: false, error: parsed.message || parsed.error || parsed.description || `africastalking_whatsapp_http_${res.status}` };
 }
 
 /**
@@ -216,10 +308,13 @@ const PROVIDER_NAMES = Object.keys(ADAPTERS);
  * Drives both the credential-entry form (Master Control) and an honest
  * confidence/availability label per provider+channel — see each sendVia*
  * function's own comment for why. `whatsapp` is one of:
- *   'supported'   — implemented, confirmed against stable public docs (Twilio)
+ *   'supported'   — implemented, confirmed against stable public docs
+ *                   (Twilio; Africa's Talking, once its own WhatsApp API
+ *                   reference was supplied directly)
  *   'unverified'  — the provider offers it, but this codebase couldn't confirm
  *                   the request shape from public docs; sending returns a
- *                   clear error rather than guessing (Africa's Talking)
+ *                   clear error rather than guessing (no provider wired in
+ *                   today needs this label, but it's here for the next one)
  *   'unsupported' — the provider doesn't offer WhatsApp at all (Hubtel)
  */
 const PROVIDER_META = {
@@ -233,11 +328,12 @@ const PROVIDER_META = {
     ],
   },
   africastalking: {
-    label: "Africa's Talking", whatsapp: 'unverified',
+    label: "Africa's Talking", whatsapp: 'supported',
     fields: [
       { name: 'username', label: 'Username ("sandbox" for a trial app)', secret: false },
       { name: 'apiKey', label: 'API Key', secret: true },
-      { name: 'from', label: 'Sender ID (optional)', secret: false, optional: true },
+      { name: 'from', label: 'SMS sender ID (optional)', secret: false, optional: true },
+      { name: 'waNumber', label: 'WhatsApp sender number, e.g. +254711XXXYYY (optional — only needed for WhatsApp sends)', secret: false, optional: true },
     ],
   },
   hubtel: {
@@ -273,11 +369,19 @@ async function resolveSender(tenant) {
  */
 async function send({ channel, to, body, tenant } = {}) {
   if (!to) return { ok: false, error: 'no_recipient' };
+  // A rich (object) body only means anything to the WhatsApp adapters that
+  // document one (Africa's Talking — see its own comment above); catching a
+  // mismatched shape here, before dispatch, means a caller mistake fails
+  // clearly in every mode (sandbox or live) instead of silently stringifying
+  // an object into a provider's plain-text field.
+  const richBody = body !== null && typeof body === 'object';
+  const bodyForLog = () => (richBody ? JSON.stringify(body) : body);
+  if (richBody && channel !== 'whatsapp') return { ok: false, error: 'rich_body_requires_whatsapp' };
   if (await isSandbox()) {
     const providerMessageId = `SBX-MSG-${crypto.randomBytes(6).toString('hex')}`;
     const sentAt = new Date().toISOString();
     // eslint-disable-next-line no-console
-    console.log(`[messaging:sandbox] ${channel} -> ${to}: ${body}`);
+    console.log(`[messaging:sandbox] ${channel} -> ${to}: ${bodyForLog()}`);
     return { ok: true, sandbox: true, channel, providerMessageId, sentAt };
   }
   const resolved = await resolveSender(tenant);
@@ -287,11 +391,14 @@ async function send({ channel, to, body, tenant } = {}) {
     // account) — log it the same way sandbox does so nothing downstream
     // breaks, but say plainly that nothing actually went out.
     // eslint-disable-next-line no-console
-    console.log(`[messaging:unconfigured] ${channel} -> ${to}: ${body}`);
+    console.log(`[messaging:unconfigured] ${channel} -> ${to}: ${bodyForLog()}`);
     return { ok: false, sandbox: false, channel, error: 'messaging_provider_not_configured' };
   }
   const adapter = ADAPTERS[resolved.provider];
   if (!adapter) return { ok: false, sandbox: false, channel, error: 'unknown_provider' };
+  if (richBody && resolved.provider !== 'africastalking') {
+    return { ok: false, sandbox: false, channel, error: 'rich_whatsapp_body_not_supported_by_provider' };
+  }
   try {
     const r = await adapter(resolved.creds, { channel, to, body });
     return { ...r, channel, sandbox: false, source: resolved.source };

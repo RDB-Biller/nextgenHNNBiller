@@ -234,7 +234,7 @@ table as what to double-check first once it's live:
 | Provider | SMS | WhatsApp |
 | --- | --- | --- |
 | **Twilio** | High confidence — the Messages resource is Twilio's oldest, most stable API | Supported — same endpoint, `whatsapp:` prefix on From/To |
-| **Africa's Talking** | High confidence — confirmed against the official Python SDK's own source | Not implemented — AT offers a WhatsApp product, but its request shape couldn't be confirmed from public docs; sending returns `provider_whatsapp_not_verified` rather than guessing |
+| **Africa's Talking** | High confidence — confirmed against the official Python SDK's own source | Supported — confirmed against Africa's Talking's own WhatsApp API reference (`chat.africastalking.com`, supplied directly rather than guessed): text, image/video, template, and interactive buttons/list messages. Needs a separate `waNumber` (the account's WhatsApp-enabled sender) alongside the usual `apiKey`/`username` |
 | **Hubtel** | Medium-high confidence — Basic Auth scheme and JSON request shape confirmed from Hubtel's own docs; the domain (`sms.hubtel.com`) is well triangulated but not independently confirmed from this environment | Not offered — Hubtel publishes no WhatsApp product; returns `provider_whatsapp_not_supported` |
 
 Adding a fourth provider (e.g. Meta's WhatsApp Cloud API) means adding one function and
@@ -934,10 +934,12 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 
 - FHIR adapter for EHRs that prefer `Invoice`/`ChargeItem`.
 - Payer-specific validation / pre-authorisation rules before authorise.
-- Confirm Africa's Talking WhatsApp and Hubtel's exact API domain against real,
+- Exercise Africa's Talking WhatsApp and Hubtel's exact SMS domain against real,
   live accounts once deployed (see the confidence table under **SMS / WhatsApp
-  verification** above) — both are a reasonable-effort implementation from public
-  docs only, not yet exercised against the real network. A fourth provider, e.g. Meta's
-  WhatsApp Cloud API, is a one-function addition to `messaging.js` once needed. Email
-  delivery status is still unbuilt.
+  verification** above). Africa's Talking WhatsApp is now built against its own
+  confirmed API reference (text, media, template, interactive buttons/list), but
+  like Hubtel, hasn't been exercised against a real account from this environment —
+  this environment's egress is allowlisted to package registries and GitHub only.
+  A fourth provider, e.g. Meta's WhatsApp Cloud API, is a one-function addition to
+  `messaging.js` once needed. Email delivery status is still unbuilt.
 - Payer remittance statements and clinic payout reports.
