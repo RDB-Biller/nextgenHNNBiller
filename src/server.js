@@ -29,6 +29,8 @@ const clinicalRoutes = require('./routes/clinical');
 const clinicalPortalRoutes = require('./routes/clinicalPortal');
 const registerPortalRoutes = require('./routes/registerPortal');
 const campaigns = require('./services/campaigns');
+const claimExpiry = require('./services/claimExpiry');
+const settlementBatches = require('./services/settlementBatches');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -107,6 +109,21 @@ if (require.main === module) {
     console.log(`  IT-lead console : http://localhost:${config.port}/app/admin.html`);
     console.log(`  Master control  : http://localhost:${config.port}/app/platform.html`);
     console.log(`  Clinical check-in: http://localhost:${config.port}/clinical/`);
+
+    // Background sweeps: claim expiry/revert-to-RX and consolidated settlement
+    // batches (daily/biweekly cycles). Both are explicitly designed to be safe
+    // to call as often as you like -- a claim/group that isn't due yet is just
+    // skipped, never double-processed (see their own header comments) -- and
+    // each is guarded independently so one failing never stops the other or
+    // the server itself. Master Control can also trigger either manually
+    // (POST /claim-expiry/run, POST /settlement-batches/run-due) between sweeps.
+    const SWEEP_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+    const runSweeps = () => {
+      claimExpiry.runExpiryPass().catch((e) => console.error('[claimExpiry] sweep failed:', e));
+      settlementBatches.runDue().catch((e) => console.error('[settlementBatches] sweep failed:', e));
+    };
+    setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
+    setInterval(runSweeps, SWEEP_INTERVAL_MS);
   })).catch((e) => { console.error('Startup failed:', e); process.exit(1); });
 }
 module.exports = app;

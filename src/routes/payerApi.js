@@ -167,12 +167,21 @@ router.get('/network', async (req, res, next) => {
       payer: req.payer.name,
       networkMode: req.payer.networkMode || 'open',
       outOfNetworkPolicy: req.payer.outOfNetworkPolicy || 'standard',
+      // Configurable settlement cycle (gap: beyond immediate) -- set via the
+      // same PUT /network/posture and PUT /network/providers/:tenantId below,
+      // just with a settlementCycle/defaultSettlementCycle field in the body.
+      // See services/networks.js#resolveCycle. settlementRail is HNN's own
+      // integration choice (Master Control), shown here read-only for context.
+      defaultSettlementCycle: req.payer.defaultSettlementCycle || 'immediate',
+      settlementRail: req.payer.settlementRail || 'stanbic',
+      settlementCycles: networks.SETTLEMENT_CYCLES,
       caps: { feeRate: networks.MAX_FEE_RATE, promptPaymentDiscount: networks.MAX_PROMPT_DISCOUNT },
       providers: terms.map((t) => ({
         tenantId: t.tenantId, providerName: t.providerName, status: t.status,
         settlement: t.settlement, feeRate: t.feeRate, chargeTo: t.chargeTo,
         promptPaymentDiscountPercent: t.promptPaymentDiscountPercent,
         maxClaimAmount: t.maxClaimAmount, effectiveFrom: t.effectiveFrom, effectiveTo: t.effectiveTo,
+        settlementCycle: t.settlementCycle || 'immediate',
         active: networks.isActive(t), updatedAt: t.updatedAt,
       })),
     });

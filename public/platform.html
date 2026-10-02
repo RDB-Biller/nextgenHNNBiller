@@ -38,6 +38,9 @@
     <button onclick="tab('emr',this)">EMR/EHR partners</button>
     <button onclick="tab('lic',this)">Licences</button>
     <button onclick="tab('policy',this)">Licensing policy</button>
+    <button onclick="tab('automation',this)">Automation</button>
+    <button onclick="tab('settlement',this)">Settlement</button>
+    <button onclick="tab('reports',this)">Reports</button>
   </div>
 
   <div class="panel on" id="p-clients">
@@ -434,6 +437,112 @@
     </div>
     <div class="card"><h2>Licences</h2><div id="lics"></div></div>
   </div>
+
+  <div class="panel" id="p-automation">
+    <div class="card" style="margin-bottom:14px">
+      <h2>Auto-adjudication — master switch</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Lets a qualifying claim clear without a human clicking approve on every one — an amount under a payer's own threshold, or a match on one of the structured rules below. Off here overrides every payer's own opt-in at once.</p>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ca_master" onchange="saveAutomationMaster()"/> Auto-adjudication enabled platform-wide</label>
+      <p class="muted" id="ca_master_meta" style="font-size:12px;margin:8px 0 0"></p>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Structured rules <span class="muted" style="font-size:12px;font-weight:400">— e.g. uncomplicated malaria + Coartem</span></h2>
+      <div class="row">
+        <div class="field"><label>Diagnosis keyword</label><input id="ca_dx" placeholder="malaria"/></div>
+        <div class="field"><label>Required item(s)</label><input id="ca_items" placeholder="Coartem"/></div>
+        <div class="field"><label>Max amount (GHS)</label><input id="ca_max" type="number" placeholder="250"/></div>
+        <div class="field"><label>Note</label><input id="ca_note" placeholder="optional"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addAutomationRule()">Add rule</button></div>
+      </div>
+      <div id="ca_rules" style="margin-top:10px"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Per-payer opt-in</h2>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="ca_payer" onchange="loadPayerAutomation()"><option value="">Select payer…</option></select></div>
+        <div class="field"><label>Amount threshold (GHS)</label><input id="ca_threshold" type="number" placeholder="e.g. 50 — blank disables"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="ca_rules_on"/> Use structured rules</label></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="ca_enabled"/> Enabled for this payer</label></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="savePayerAutomation()">Save</button></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Claim expiry / revert-to-RX</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">An expedited claim HNN hasn't been able to close (or whose patient verification stays disputed) falls back to standard processing through the payer's normal RX queue after this window.</p>
+      <div class="row">
+        <div class="field" style="display:flex;align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="ce_enabled"/> Enabled</label></div>
+        <div class="field"><label>Window (days)</label><input id="ce_window" type="number" placeholder="14"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="saveExpiryPolicy()">Save policy</button></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="ghost" style="width:100%" onclick="runExpiryNow()">Run sweep now</button></div>
+      </div>
+    </div>
+    <div class="card"><h2>Recently expired to standard</h2><div id="ce_list"></div></div>
+  </div>
+
+  <div class="panel" id="p-settlement">
+    <div class="card" style="margin-bottom:14px">
+      <h2>Settlement rail <span class="muted" style="font-size:12px;font-weight:400">— per payer, beyond Stanbic</span></h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Hubtel and MoMo are named choices from the call; HNN has no real payout credentials for either yet, so both always simulate (references prefixed <code>STUB-</code>) regardless of the live/sandbox switch above.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="sr_payer" onchange="loadPayerRail()"><option value="">Select payer…</option></select></div>
+        <div class="field"><label>Rail</label><select id="sr_rail"><option value="stanbic">Stanbic (real, sandbox-aware)</option><option value="hubtel">Hubtel (simulated)</option><option value="momo">MoMo (simulated)</option></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="savePayerRail()">Save</button></div>
+      </div>
+      <p class="muted" style="margin-top:0;font-size:13px">Settlement <b>cycle</b> (immediate / daily / biweekly) is the payer's own narrow-network setting — set from the payer's own Network API/portal (NNEST), not here.</p>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Consolidated settlement batches <span class="muted" style="font-size:12px;font-weight:400">— daily/biweekly, one transfer per provider</span></h2>
+      <div class="row"><div class="field" style="display:flex;align-items:flex-end"><button class="ghost" onclick="loadBatchQueue()">Refresh queue</button></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" onclick="runBatchesDue()">Sweep every due group now</button></div></div>
+      <div id="sb_queue" style="margin-top:10px"></div>
+    </div>
+    <div class="card"><h2>Recent batches</h2><div id="sb_list"></div></div>
+  </div>
+
+  <div class="panel" id="p-reports">
+    <div class="card" style="margin-bottom:14px">
+      <h2>TPA / multi-funder disbursement <span class="muted" style="font-size:12px;font-weight:400">— e.g. Ghana Medical Trust Fund</span></h2>
+      <div class="row">
+        <div class="field"><label>Fund name</label><input id="fn_name" placeholder="Ghana Medical Trust Fund"/></div>
+        <div class="field"><label>Kind</label><select id="fn_kind"><option value="trust_fund">Trust fund</option><option value="corporate">Corporate</option><option value="ngo">NGO</option><option value="government">Government</option><option value="other">Other</option></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addFunder()">Add fund</button></div>
+      </div>
+      <div id="fn_list" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label>Fund's own account (optional)</label><select id="fn_sel"><option value="">Select fund…</option></select></div>
+        <div class="field"><label>Rail</label><select id="fn_rail"><option value="">None — payer's own account pays (attribution only)</option><option value="stanbic">Stanbic</option><option value="hubtel">Hubtel (simulated)</option><option value="momo">MoMo (simulated)</option></select></div>
+        <div class="field"><label>Username (Stanbic only)</label><input id="fn_user"/></div>
+        <div class="field"><label>Password (Stanbic only)</label><input id="fn_pass" type="password"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="ghost" style="width:100%" onclick="saveFunderAccount()">Save account</button></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label>Payer</label><select id="fn_payer"><option value="">Select payer…</option></select></div>
+        <div class="field"><label>Administers claims on behalf of</label><select id="fn_payer_fund"><option value="">None</option></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="linkPayerFunder()">Link</button></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Cross-pharmacy price comparison</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Built from HNN's own real billing history at tenants classified as a pharmacy (set a client's facility type on the Clients tab) — never an invented price.</p>
+      <div class="row">
+        <div class="field"><label>Medicine (code or name)</label><input id="pp_item" placeholder="Coartem"/></div>
+        <div class="field"><label>Since (days)</label><input id="pp_days" type="number" placeholder="90"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="comparePharmacyPrices()">Compare</button></div>
+      </div>
+      <div id="pp_out" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>HNN-settlement reconciliation <span class="muted" style="font-size:12px;font-weight:400">— vs. the regular RX report</span></h2>
+      <div class="row">
+        <div class="field"><label>Client</label><select id="rc_tenant"><option value="">Select client…</option></select></div>
+        <div class="field"><label>Since</label><input id="rc_since" type="date"/></div>
+        <div class="field"><label>Until</label><input id="rc_until" type="date"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="runReconciliation()">Run report</button></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="ghost" style="width:100%" onclick="downloadReconciliationCsv()">Download CSV</button></div>
+      </div>
+      <div id="rc_out" style="margin-top:10px"></div>
+    </div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -584,9 +693,12 @@ async function saveClientCredentials(){
 
 async function loadClients(){
   const r=await (await fetch('/api/platform/clients',{headers:H()})).json(); CLIENTS=r.data||[];
-  $('clients').innerHTML=`<table><thead><tr><th>Client</th><th>Edition</th><th>Tenant API key</th><th>Actions</th></tr></thead><tbody>`+
+  $('clients').innerHTML=`<table><thead><tr><th>Client</th><th>Edition</th><th>Facility type</th><th>Tenant API key</th><th>Actions</th></tr></thead><tbody>`+
     CLIENTS.map(c=>`<tr><td>${esc(c.name)}<br><span class="muted" style="font-size:11px">${esc(c.id)}</span></td>
       <td><span class="ed ${esc(c.edition)}">${esc(c.edition.replace('_',' '))}</span></td>
+      <td><select class="mini" onchange="setFacilityType('${esc(c.id)}',this.value)">
+        ${['clinic','hospital','pharmacy','other'].map(ft=>`<option value="${ft}" ${c.facilityType===ft?'selected':''}>${ft}</option>`).join('')}
+      </select></td>
       <td><span class="key">${esc(c.apiKey||'')}</span></td>
       <td>${c.edition==='commercial'
         ? `<button class="ghost mini" onclick="setEd('${esc(c.id)}','non_commercial')">Downgrade</button>`
@@ -595,7 +707,13 @@ async function loadClients(){
   const opts=CLIENTS.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('l_org').innerHTML='<option value="">Any client</option>'+opts;
   if($('vc_client'))$('vc_client').innerHTML='<option value="">Select client…</option>'+opts;
+  if($('rc_tenant'))$('rc_tenant').innerHTML='<option value="">Select client…</option>'+opts;
   renderPdProviders();
+}
+async function setFacilityType(id,facilityType){
+  const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/facility-type`,{method:'PUT',headers:H(),body:JSON.stringify({facilityType})});
+  if(r.ok){toast('Facility type saved');const c=(CLIENTS||[]).find(x=>x.id===id);if(c)c.facilityType=facilityType;}
+  else toast('Failed to save facility type');
 }
 function loadVerifChannels(){
   const id=$('vc_client').value;
@@ -682,6 +800,9 @@ async function loadPayers(){
   if($('pc_payer'))$('pc_payer').innerHTML=opts;
   if($('sc_payer'))$('sc_payer').innerHTML=opts;
   if($('pd_payer'))$('pd_payer').innerHTML=opts.replace('Select payer…','Select sponsoring payer…');
+  if($('ca_payer'))$('ca_payer').innerHTML=opts;
+  if($('sr_payer'))$('sr_payer').innerHTML=opts;
+  if($('fn_payer'))$('fn_payer').innerHTML=opts;
   loadTargets();
 }
 async function setPayerEd(id,edition){
@@ -1228,6 +1349,213 @@ async function setRegStatus(id,status){
 const _origBoot=boot;
 boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();
   loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();};
+
+// ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====
+// ===== cycles/rails/batches, TPA funders, pharmacy pricing, reconciliation =
+let AUTOMATION_POLICY=null, FUNDERS=[];
+
+async function loadAutomationPolicy(){
+  const r=await (await fetch('/api/platform/claims-automation',{headers:H()})).json().catch(()=>null);
+  if(!r)return; AUTOMATION_POLICY=r;
+  $('ca_master').checked=!!r.masterEnabled;
+  $('ca_master_meta').textContent=r.updatedAt?`Last changed ${new Date(r.updatedAt).toLocaleString()} by ${esc(r.updatedBy||'—')}.`:'Default: enabled.';
+  renderAutomationRules();
+}
+function renderAutomationRules(){
+  const rules=(AUTOMATION_POLICY&&AUTOMATION_POLICY.rules)||[];
+  $('ca_rules').innerHTML=rules.length?`<table><thead><tr><th>Diagnosis</th><th>Required item(s)</th><th>Max amount</th><th>Active</th><th>Note</th><th></th></tr></thead><tbody>`+
+    rules.map(r=>`<tr><td>${esc(r.diagnosisKeyword)}</td><td>${esc((r.requiredItemCodes||[]).join(', ')||'—')}</td>
+      <td>${r.maxAmount!=null?n2(r.maxAmount):'—'}</td>
+      <td><button class="${r.active?'accent':'ghost'} mini" onclick="toggleAutomationRule('${esc(r.id)}',${!r.active})">${r.active?'Active':'Inactive'}</button></td>
+      <td class="muted" style="font-size:12px">${esc(r.note||'—')}</td>
+      <td><button class="ghost mini" onclick="deleteAutomationRule('${esc(r.id)}')">Delete</button></td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">No rules yet.</p>';
+}
+async function saveAutomationMaster(){
+  const enabled=$('ca_master').checked;
+  const r=await fetch('/api/platform/claims-automation/master',{method:'PUT',headers:H(),body:JSON.stringify({enabled})});
+  if(r.ok){toast(enabled?'Auto-adjudication enabled platform-wide':'Auto-adjudication disabled platform-wide');loadAutomationPolicy();}
+  else{toast('Failed');loadAutomationPolicy();}
+}
+async function addAutomationRule(){
+  const diagnosisKeyword=$('ca_dx').value.trim(); if(!diagnosisKeyword)return toast('Diagnosis keyword required');
+  const body={diagnosisKeyword, requiredItemCodes:$('ca_items').value, maxAmount:$('ca_max').value||null, note:$('ca_note').value||null};
+  const r=await fetch('/api/platform/claims-automation/rules',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast('Rule added (inactive until you flip it on)');$('ca_dx').value='';$('ca_items').value='';$('ca_max').value='';$('ca_note').value='';loadAutomationPolicy();}
+  else toast('Failed: '+(o.message||o.error||r.status));
+}
+async function toggleAutomationRule(id,active){
+  const r=await fetch(`/api/platform/claims-automation/rules/${encodeURIComponent(id)}`,{method:'PUT',headers:H(),body:JSON.stringify({active})});
+  if(r.ok){toast(active?'Rule activated':'Rule deactivated');loadAutomationPolicy();} else toast('Failed');
+}
+async function deleteAutomationRule(id){
+  const r=await fetch(`/api/platform/claims-automation/rules/${encodeURIComponent(id)}`,{method:'DELETE',headers:H()});
+  if(r.ok){toast('Rule deleted');loadAutomationPolicy();} else toast('Failed');
+}
+function loadPayerAutomation(){
+  const id=$('ca_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  const ap=(payer&&payer.autoAdjudication)||{enabled:false,thresholdMaxAmount:null,useStructuredRules:false};
+  $('ca_enabled').checked=!!ap.enabled;
+  $('ca_threshold').value=ap.thresholdMaxAmount!=null?ap.thresholdMaxAmount:'';
+  $('ca_rules_on').checked=!!ap.useStructuredRules;
+}
+async function savePayerAutomation(){
+  const id=$('ca_payer').value; if(!id)return toast('Pick a payer');
+  const body={enabled:$('ca_enabled').checked,useStructuredRules:$('ca_rules_on').checked,
+    thresholdMaxAmount:$('ca_threshold').value===''?null:Number($('ca_threshold').value)};
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/auto-adjudication`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast('Payer auto-adjudication saved');await loadPayers();$('ca_payer').value=id;}
+  else toast('Failed: '+(o.message||o.error||r.status));
+}
+
+// ---- Claim expiry / revert-to-RX ----
+async function loadExpiryPolicy(){
+  const r=await (await fetch('/api/platform/claim-expiry/policy',{headers:H()})).json().catch(()=>null);
+  if(!r)return;
+  $('ce_enabled').checked=!!r.enabled; $('ce_window').value=r.windowDays;
+  loadExpiredList();
+}
+async function saveExpiryPolicy(){
+  const body={enabled:$('ce_enabled').checked,windowDays:Number($('ce_window').value)||14};
+  const r=await fetch('/api/platform/claim-expiry/policy',{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){toast('Claim-expiry policy saved');} else toast('Failed');
+}
+async function runExpiryNow(){
+  const r=await fetch('/api/platform/claim-expiry/run',{method:'POST',headers:H()});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast(`Checked ${o.checked}, expired ${o.expired}`);loadExpiredList();} else toast('Failed');
+}
+async function loadExpiredList(){
+  const r=await (await fetch('/api/platform/claim-expiry/expired?limit=50',{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  $('ce_list').innerHTML=rows.length?`<table><thead><tr><th>Claim</th><th>Bill</th><th>Reason</th><th>Expired at</th></tr></thead><tbody>`+
+    rows.map(c=>`<tr><td>${esc(c.id)}</td><td>${esc(c.billId)}</td><td>${esc(c.expiredReason||'—')}</td><td>${c.expiredAt?new Date(c.expiredAt).toLocaleString():'—'}</td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">None yet.</p>';
+}
+
+// ---- Settlement rail + consolidated batches ----
+function loadPayerRail(){
+  const id=$('sr_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  $('sr_rail').value=(payer&&payer.settlementRail)||'stanbic';
+}
+async function savePayerRail(){
+  const id=$('sr_payer').value; if(!id)return toast('Pick a payer');
+  const rail=$('sr_rail').value;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/settlement-rail`,{method:'PUT',headers:H(),body:JSON.stringify({rail})});
+  if(r.ok){toast(`Settlement rail set to ${rail}`);await loadPayers();$('sr_payer').value=id;} else toast('Failed');
+}
+async function loadBatchQueue(){
+  const r=await (await fetch('/api/platform/settlement-batches/queue',{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  $('sb_queue').innerHTML=rows.length?`<table><thead><tr><th>Client</th><th>Payer</th><th>Cycle</th><th>Claims</th><th>Amount</th><th>Due?</th><th></th></tr></thead><tbody>`+
+    rows.map(g=>`<tr><td>${esc(g.tenantName)}</td><td>${esc(g.payerName)}</td><td>${esc(g.cycle)}</td><td>${g.claimCount}</td><td>${n2(g.amount)}</td>
+      <td>${g.due?'<span class="pill settled">due</span>':'<span class="pill open">waiting</span>'}</td>
+      <td><button class="ghost mini" onclick="runBatchNow('${esc(g.tenantId)}','${esc(g.payerId)}','${esc(g.cycle)}')">Run now</button></td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">Nothing queued right now.</p>';
+  loadRecentBatches();
+}
+async function runBatchNow(tenantId,payerId,cycle){
+  const r=await fetch('/api/platform/settlement-batches/run',{method:'POST',headers:H(),body:JSON.stringify({tenantId,payerId,cycle})});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok)toast(`Batch ${o.status}: ${o.claimCount} claim(s), ${n2(o.amount)}`); else toast('Failed: '+(o.message||o.error||r.status));
+  loadBatchQueue();
+}
+async function runBatchesDue(){
+  const r=await fetch('/api/platform/settlement-batches/run-due',{method:'POST',headers:H()});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok)toast(`Swept ${o.groups} group(s): ${o.batched.length} settled, ${o.failed.length} failed, ${o.skipped.length} not due yet`);
+  else toast('Failed');
+  loadBatchQueue();
+}
+async function loadRecentBatches(){
+  const r=await (await fetch('/api/platform/settlement-batches?limit=30',{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  $('sb_list').innerHTML=rows.length?`<table><thead><tr><th>Batch</th><th>Cycle</th><th>Status</th><th>Claims</th><th>Amount</th><th>Created</th></tr></thead><tbody>`+
+    rows.map(b=>`<tr><td>${esc(b.id)}</td><td>${esc(b.cycle)}</td>
+      <td><span class="pill ${b.status==='settled'?'settled':'open'}">${esc(b.status)}</span>${b.error?` <span class="muted" style="font-size:11px">(${esc(b.error)})</span>`:''}</td>
+      <td>${b.claimCount}</td><td>${n2(b.amount)}</td><td>${new Date(b.createdAt).toLocaleString()}</td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">No batches yet.</p>';
+}
+
+// ---- Funders / TPA ----
+async function loadFunders(){
+  const r=await (await fetch('/api/platform/funders',{headers:H()})).json().catch(()=>null);
+  FUNDERS=(r&&r.data)||[];
+  $('fn_list').innerHTML=FUNDERS.length?`<table><thead><tr><th>Fund</th><th>Kind</th><th>Own account</th></tr></thead><tbody>`+
+    FUNDERS.map(f=>`<tr><td>${esc(f.name)}</td><td>${esc(f.kind)}</td><td>${f.hasOwnAccount?esc(f.settlementRail):'<span class="muted">none — attribution only</span>'}</td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">No funds added yet.</p>';
+  $('fn_sel').innerHTML='<option value="">Select fund…</option>'+FUNDERS.map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('');
+  $('fn_payer_fund').innerHTML='<option value="">None</option>'+FUNDERS.map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('');
+}
+async function addFunder(){
+  const name=$('fn_name').value.trim(); if(!name)return toast('Fund name required');
+  const r=await fetch('/api/platform/funders',{method:'POST',headers:H(),body:JSON.stringify({name,kind:$('fn_kind').value})});
+  if(r.ok){toast('Fund added');$('fn_name').value='';loadFunders();} else toast('Failed');
+}
+async function saveFunderAccount(){
+  const id=$('fn_sel').value; if(!id)return toast('Pick a fund');
+  const rail=$('fn_rail').value||null;
+  const body={rail,username:$('fn_user').value||undefined,password:$('fn_pass').value||undefined};
+  const r=await fetch(`/api/platform/funders/${encodeURIComponent(id)}/account`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){toast(rail?`Account set to ${rail}`:'Own account cleared — attribution only');$('fn_user').value='';$('fn_pass').value='';loadFunders();}
+  else toast('Failed');
+}
+async function linkPayerFunder(){
+  const id=$('fn_payer').value; if(!id)return toast('Pick a payer');
+  const funderId=$('fn_payer_fund').value||null;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/funder`,{method:'PUT',headers:H(),body:JSON.stringify({funderId})});
+  if(r.ok){toast(funderId?'Payer linked as TPA':'Payer unlinked');await loadPayers();$('fn_payer').value=id;} else toast('Failed');
+}
+
+// ---- Cross-pharmacy price comparison ----
+async function comparePharmacyPrices(){
+  const item=$('pp_item').value.trim(); if(!item)return toast('Enter a medicine code or name');
+  const sinceDays=$('pp_days').value||90;
+  const r=await fetch(`/api/platform/pharmacy-pricing/compare?name=${encodeURIComponent(item)}&sinceDays=${encodeURIComponent(sinceDays)}`,{headers:H()});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok){$('pp_out').innerHTML='';return toast('Failed: '+(o.message||o.error||r.status));}
+  if(o.note==='no_pharmacy_tenants_classified'){$('pp_out').innerHTML='<p class="muted">No clients are classified as a pharmacy yet — set facility type on the Clients tab.</p>';return;}
+  const rows=o.pharmacies||[];
+  $('pp_out').innerHTML=(o.reference?`<p class="muted" style="font-size:12px">Catalog reference: ${esc(o.reference.name)} — ${n2(o.reference.price)} (${esc(o.reference.source)})</p>`:'')+
+    (rows.length?`<table><thead><tr><th>Pharmacy</th><th>Latest</th><th>Average</th><th>Lowest</th><th>Highest</th><th>Samples</th></tr></thead><tbody>`+
+      rows.map(p=>`<tr><td>${esc(p.tenantName)}</td><td>${n2(p.latestPrice)}</td><td>${n2(p.averagePrice)}</td><td>${n2(p.lowestPrice)}</td><td>${n2(p.highestPrice)}</td><td>${p.sampleCount}</td></tr>`).join('')+`</tbody></table>`
+      :'<p class="muted">No recent bills for this item at a classified pharmacy.</p>');
+}
+
+// ---- HNN-settlement reconciliation ----
+function reconciliationParams(){
+  const qs=new URLSearchParams();
+  if($('rc_since').value)qs.set('since',new Date($('rc_since').value).toISOString());
+  if($('rc_until').value)qs.set('until',new Date($('rc_until').value).toISOString());
+  return {tenantId:$('rc_tenant').value,qs};
+}
+async function runReconciliation(){
+  const {tenantId,qs}=reconciliationParams(); if(!tenantId)return toast('Pick a client');
+  const r=await fetch(`/api/platform/reconciliation/${encodeURIComponent(tenantId)}?${qs}`,{headers:H()});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok){$('rc_out').innerHTML='';return toast('Failed: '+(o.message||o.error||r.status));}
+  const row=(label,set)=>`<h3 style="margin:12px 0 6px;font-size:14px">${label} — ${set.count} claim(s), ${n2(set.total)}</h3>`+
+    (set.rows.length?`<table><thead><tr><th>Claim</th><th>Bill</th><th>Payer</th><th>Amount</th><th>${label.startsWith('HNN')?'Method':'Status'}</th></tr></thead><tbody>`+
+      set.rows.map(x=>`<tr><td>${esc(x.claimId)}</td><td>${esc(x.billId)}</td><td>${esc(x.payerName)}</td><td>${n2(x.amount)}</td><td>${esc(x.settlementMethod||x.status)}</td></tr>`).join('')+`</tbody></table>`
+      :'<p class="muted">None.</p>');
+  $('rc_out').innerHTML=row('HNN-settled',o.hnnSettled)+row('Still in RX queue',o.stillInRxQueue);
+}
+async function downloadReconciliationCsv(){
+  const {tenantId,qs}=reconciliationParams(); if(!tenantId)return toast('Pick a client');
+  const r=await fetch(`/api/platform/reconciliation/${encodeURIComponent(tenantId)}/export.csv?${qs}`,{headers:H()});
+  if(!r.ok)return toast('Failed to export');
+  const blob=await r.blob();
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`hnn-reconciliation-${tenantId}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+const _origBoot2=boot;
+boot=async function(){await _origBoot2();loadAutomationPolicy();loadExpiryPolicy();loadBatchQueue();loadFunders();};
 boot();
 </script>
 </body></html>

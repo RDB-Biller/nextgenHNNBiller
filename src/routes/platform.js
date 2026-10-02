@@ -29,6 +29,13 @@ const products = require('../services/products');
 const incentives = require('../services/incentives');
 const campaigns = require('../services/campaigns');
 const trialRegistrations = require('../services/trialRegistrations');
+const claimsAutomation = require('../services/claimsAutomation');
+const claimExpiry = require('../services/claimExpiry');
+const settlementBatches = require('../services/settlementBatches');
+const settlement = require('../services/settlement');
+const funders = require('../services/funders');
+const pharmacyPricing = require('../services/pharmacyPricing');
+const reconciliation = require('../services/reconciliation');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -113,19 +120,24 @@ router.get('/clients', async (req, res, next) => {
       receivingAccount: t.receivingAccount || null, contact: t.contact || null,
       verificationChannels: t.verificationChannels || { sms: false, whatsapp: false, includeTreatmentDetail: false },
       messagingCredentials: maskTenantCredentials(t.messagingCredentials),
+      // Cross-pharmacy price comparison (gap) reads only tenants classified
+      // this way -- see services/pharmacyPricing.js. Unset ('other') by
+      // default for every existing and newly-created tenant.
+      facilityType: t.facilityType || 'other',
     })) });
   } catch (e) { next(e); }
 });
 
 router.post('/clients', async (req, res, next) => {
   try {
-    const { name, edition = 'non_commercial', serviceRoutingCode, beneficiaryAccount, email, phone } = req.body || {};
+    const { name, edition = 'non_commercial', serviceRoutingCode, beneficiaryAccount, email, phone, facilityType } = req.body || {};
     if (!name) return res.status(422).json({ error: 'name_required' });
     const tenant = {
       id: `tenant_${slug(name)}`, apiKey: `emr_${slug(name)}_${rand()}`, name,
       edition: editions.EDITIONS.includes(edition) ? edition : 'non_commercial',
       receivingAccount: { serviceRoutingCode: serviceRoutingCode || null, beneficiaryAccount: beneficiaryAccount || null },
       contact: { email: email || null, phone: phone || null },
+      facilityType: FACILITY_TYPES.includes(facilityType) ? facilityType : 'other',
       createdAt: new Date().toISOString(),
     };
     await store.tenants.save(tenant);
@@ -296,6 +308,18 @@ router.get('/payers', async (req, res, next) => {
       // see services/settlement.js#clientForPayer().
       settlementCredentials: maskSettlementCredentials(p.settlementCredentials),
       legacySettlementCredentialsConfigured: !!(p.sbg?.username && p.sbg?.password),
+      // Pluggable settlement rail + configurable cycle (gap: beyond Stanbic,
+      // beyond immediate) -- see services/settlement.js / services/networks.js.
+      settlementRail: settlement.railOf(p),
+      defaultSettlementCycle: p.defaultSettlementCycle || 'immediate',
+      // Auto-adjudication opt-in (gap: authorization thresholds + structured
+      // rules) -- see services/claimsAutomation.js. The global rule library
+      // itself is platform-wide, not per payer; GET /claims-automation lists it.
+      autoAdjudication: claimsAutomation.payerPolicyOf(p),
+      // TPA / multi-funder disbursement (gap: Ghana Medical Trust Fund example)
+      // -- see services/funders.js. null unless this payer administers claims
+      // on behalf of a funder.
+      tpaForFunderId: p.tpaForFunderId || null,
     })) });
   } catch (e) { next(e); }
 });
@@ -391,6 +415,222 @@ router.delete('/payers/:id/settlement-credentials', async (req, res, next) => {
     payer.settlementCredentials = null;
     await store.payers.save(payer);
     res.json({ payerId: payer.id, settlementCredentials: maskSettlementCredentials(null) });
+  } catch (e) { next(e); }
+});
+
+// Classify a tenant for cross-pharmacy price comparison (services/pharmacyPricing.js).
+// 'pharmacy' is the only value that actually changes behaviour (opts this
+// tenant's bills into the comparison); everything else just labels it.
+const FACILITY_TYPES = ['clinic', 'hospital', 'pharmacy', 'other'];
+router.put('/clients/:id/facility-type', async (req, res, next) => {
+  try {
+    const tenant = await store.tenants.get(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'tenant_not_found' });
+    const facilityType = req.body?.facilityType;
+    if (!FACILITY_TYPES.includes(facilityType)) {
+      return res.status(422).json({ error: `invalid_facilityType (${FACILITY_TYPES.join(' | ')})` });
+    }
+    tenant.facilityType = facilityType;
+    await store.tenants.save(tenant);
+    res.json({ id: tenant.id, facilityType: tenant.facilityType });
+  } catch (e) { next(e); }
+});
+
+// ---- Claims automation: authorization thresholds + structured auto-adjudication ----
+// See services/claimsAutomation.js. masterEnabled is a platform-wide emergency
+// stop; the rule library is platform-wide too (HNN's own claims staff curate
+// it); each payer opts in independently (GET/PUT below and via GET /payers).
+
+router.get('/claims-automation', async (req, res, next) => {
+  try { res.json(await claimsAutomation.getPolicy()); }
+  catch (e) { next(e); }
+});
+
+router.put('/claims-automation/master', async (req, res, next) => {
+  try { res.json(await claimsAutomation.setMasterEnabled(req.body?.enabled !== false, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+router.post('/claims-automation/rules', async (req, res, next) => {
+  try { res.status(201).json(await claimsAutomation.addRule(req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+router.put('/claims-automation/rules/:id', async (req, res, next) => {
+  try { res.json(await claimsAutomation.updateRule(req.params.id, req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+router.delete('/claims-automation/rules/:id', async (req, res, next) => {
+  try { res.json(await claimsAutomation.removeRule(req.params.id, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// Body: { enabled?, thresholdMaxAmount?, useStructuredRules? } -- any omitted
+// field keeps its current value (see claimsAutomation.js#setPayerPolicy).
+router.put('/payers/:id/auto-adjudication', async (req, res, next) => {
+  try { res.json(await claimsAutomation.setPayerPolicy(req.params.id, req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// ---- Claim expiry / revert-to-RX ---------------------------------------------
+// See services/claimExpiry.js. Safe to default on: this only relabels a stuck
+// claim and notifies the provider, it never touches money.
+
+router.get('/claim-expiry/policy', async (req, res, next) => {
+  try { res.json(await claimExpiry.getPolicy()); }
+  catch (e) { next(e); }
+});
+
+router.put('/claim-expiry/policy', async (req, res, next) => {
+  try { res.json(await claimExpiry.setPolicy(req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// Manual "run now" (also runs automatically -- see server.js). Returns a summary.
+router.post('/claim-expiry/run', async (req, res, next) => {
+  try { res.json(await claimExpiry.runExpiryPass()); }
+  catch (e) { next(e); }
+});
+
+router.get('/claim-expiry/expired', async (req, res, next) => {
+  try { res.json({ data: await claimExpiry.listExpired(Number(req.query.limit) || 200) }); }
+  catch (e) { next(e); }
+});
+
+router.post('/claim-expiry/:claimId/expire-now', async (req, res, next) => {
+  try { res.json(await claimExpiry.expireNow(req.params.claimId, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// ---- Settlement cycles + pluggable settlement rail + consolidated batches ---
+// See services/networks.js (cycle is set on the PAYER's own API,
+// routes/payerApi.js's existing PUT /network/posture + /network/providers/:id
+// -- nothing new needed there) and services/settlementBatches.js (the sweep
+// that actually pays a cycle's queued claims as one consolidated transfer).
+// Rail choice is HNN's own integration decision, so it lives here rather than
+// on the payer's self-service API.
+
+// Body: { rail: 'stanbic' | 'hubtel' | 'momo' }. hubtel/momo always simulate
+// today (StubPayoutClient) -- see settlement.js's header comment.
+router.put('/payers/:id/settlement-rail', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    const { rail } = req.body || {};
+    if (!settlement.RAILS.includes(rail)) return res.status(422).json({ error: `invalid_rail (${settlement.RAILS.join(' | ')})` });
+    payer.settlementRail = rail;
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, settlementRail: payer.settlementRail });
+  } catch (e) { next(e); }
+});
+
+// What's queued for batch settlement right now, grouped by tenant+payer+cycle,
+// with each group's amount and whether it's due this sweep.
+router.get('/settlement-batches/queue', async (req, res, next) => {
+  try { res.json({ data: await settlementBatches.previewQueue() }); }
+  catch (e) { next(e); }
+});
+
+router.get('/settlement-batches', async (req, res, next) => {
+  try { res.json({ data: await settlementBatches.listBatches(req.query.tenantId || null, Number(req.query.limit) || 200) }); }
+  catch (e) { next(e); }
+});
+
+router.get('/settlement-batches/:id', async (req, res, next) => {
+  try {
+    const batch = await settlementBatches.getBatch(req.params.id);
+    if (!batch) return res.status(404).json({ error: 'batch_not_found' });
+    res.json(batch);
+  } catch (e) { next(e); }
+});
+
+// Sweep every due group right now (also runs automatically -- see server.js).
+router.post('/settlement-batches/run-due', async (req, res, next) => {
+  try { res.json(await settlementBatches.runDue()); }
+  catch (e) { next(e); }
+});
+
+// Force one tenant+payer+cycle group to settle right now, ignoring due-ness --
+// e.g. a provider asking to be paid out today instead of waiting for the cycle.
+router.post('/settlement-batches/run', async (req, res, next) => {
+  try {
+    const { tenantId, payerId, cycle } = req.body || {};
+    if (!tenantId || !payerId || !cycle) return res.status(422).json({ error: 'tenantId_payerId_cycle_required' });
+    res.json(await settlementBatches.runGroupNow(tenantId, payerId, cycle, req.principal?.id || 'HNN'));
+  } catch (e) { next(e); }
+});
+
+// ---- TPA-style multi-funder disbursement (Ghana Medical Trust Fund example) -
+// See services/funders.js. A funder is HNN-platform-wide (not per tenant);
+// linking it to a payer (payer.tpaForFunderId) marks that payer as a TPA
+// administering claims on that fund's behalf.
+
+router.get('/funders', async (req, res, next) => {
+  try { res.json({ data: await funders.list() }); }
+  catch (e) { next(e); }
+});
+
+router.post('/funders', async (req, res, next) => {
+  try { res.status(201).json(await funders.create(req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+router.put('/funders/:id', async (req, res, next) => {
+  try { res.json(await funders.update(req.params.id, req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// Body: { rail: 'stanbic'|'hubtel'|'momo'|null, username?, password? }. rail:
+// null clears the funder's own account (reverts any linked payer to settling
+// from its own account, with attribution-only tagging).
+router.put('/funders/:id/account', async (req, res, next) => {
+  try { res.json(await funders.setAccount(req.params.id, req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+router.get('/funders/:id/payers', async (req, res, next) => {
+  try { res.json({ data: await funders.payersFor(req.params.id) }); }
+  catch (e) { next(e); }
+});
+
+// Body: { funderId: string | null }. null unlinks the payer (reverts to settling from its own account, no funder tag).
+router.put('/payers/:id/funder', async (req, res, next) => {
+  try { res.json(await funders.linkPayer(req.params.id, req.body?.funderId || null, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// ---- Cross-pharmacy price comparison -----------------------------------------
+// See services/pharmacyPricing.js. Reads real billing history from tenants
+// classified facilityType:'pharmacy' (PUT /clients/:id/facility-type above).
+
+router.get('/pharmacy-pricing/compare', async (req, res, next) => {
+  try {
+    const { code, name, sinceDays } = req.query;
+    res.json(await pharmacyPricing.compareItem({ code, name, sinceDays: sinceDays ? Number(sinceDays) : undefined }));
+  } catch (e) { next(e); }
+});
+
+router.get('/pharmacy-pricing/overview', async (req, res, next) => {
+  try { res.json({ data: await pharmacyPricing.pharmacyOverview() }); }
+  catch (e) { next(e); }
+});
+
+// ---- HNN-settlement reconciliation (distinguishing HNN-settled items from --
+// ---- the regular RX report) --------------------------------------------------
+// See services/reconciliation.js. since/until default to "everything" / "now".
+
+router.get('/reconciliation/:tenantId', async (req, res, next) => {
+  try { res.json(await reconciliation.settledReport(req.params.tenantId, { since: req.query.since, until: req.query.until })); }
+  catch (e) { next(e); }
+});
+
+router.get('/reconciliation/:tenantId/export.csv', async (req, res, next) => {
+  try {
+    const csv = await reconciliation.settledCsv(req.params.tenantId, { since: req.query.since, until: req.query.until });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="hnn-reconciliation-${req.params.tenantId}.csv"`);
+    res.send(csv);
   } catch (e) { next(e); }
 });
 

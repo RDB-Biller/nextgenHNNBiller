@@ -13,6 +13,7 @@ const fees = require('./fees');
 /** Route a bill to a payer (insurer/employer): create a claim + secure token. */
 const split = require('./split');
 const priceList = require('./priceList');
+const claimsAutomation = require('./claimsAutomation');
 
 // Validate a payer is usable for this bill (exists, slot active if facility-scoped).
 async function assertPayer(bill, payerId) {
@@ -124,6 +125,38 @@ async function buildClaim(bill, payer, memberId, coveredGhs, meta = {}) {
   return claim;
 }
 
+/**
+ * After a claim is created, give claims automation a chance to auto-clear it
+ * (skip the manual Submissions/payer-portal click) when the payer has opted
+ * in and the claim qualifies -- see services/claimsAutomation.js#evaluate. A
+ * failed/thrown authorize() (patient_verification_pending, out_of_network, a
+ * transient transfer error, ...) just leaves the claim exactly where it would
+ * have landed anyway -- pending, for a human to review. Auto-clear is purely
+ * a fast path; it can never make a claim WORSE off than today's behaviour.
+ */
+async function maybeAutoClear(claim, bill) {
+  let decision;
+  try {
+    decision = await claimsAutomation.evaluate(claim, bill);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error(`[claims] auto-adjudication evaluation failed for ${claim.id}:`, e);
+    return;
+  }
+  if (!decision.autoClear) return;
+  try {
+    await authorize(claim.id);
+    const c = await store.claims.get(claim.id);
+    if (c) {
+      c.autoCleared = { method: decision.method, ruleId: decision.ruleId, clearedAt: new Date().toISOString() };
+      await store.claims.update(c);
+    }
+  } catch (e) {
+    // Swallow -- see header comment. Nothing to recover: the claim is still
+    // sitting exactly as a non-automated submission would leave it.
+  }
+}
+
 /** Route to a single payer (the whole payer share). */
 async function routeToPayer(bill, payerId) {
   const payer = await assertPayer(bill, payerId);
@@ -137,7 +170,12 @@ async function routeToPayer(bill, payerId) {
   await store.bills.update(bill);
 
   await notifyClaimOutcome(claim, bill, 'submitted');
-  return { claim, token: claim.token };
+  await maybeAutoClear(claim, bill);
+  // Re-read: maybeAutoClear may have just taken this claim all the way to
+  // 'settled' -- the caller (e.g. routes/bills.js's response) should see
+  // that, not the 'pending' snapshot from before auto-clear ran.
+  const finalClaim = (await store.claims.get(claim.id)) || claim;
+  return { claim: finalClaim, token: claim.token };
 }
 
 /**
@@ -175,7 +213,21 @@ async function routeToPayers(bill, splitInput) {
   bill.settlementMethod = 'payer_a2a_split';
   await store.bills.update(bill);
 
-  return { claims, split: alloc };
+  // Only attempt auto-clear once EVERY sibling claim in this split already
+  // exists in the store. finalizeSettled()'s "mark the bill settled once
+  // every sibling claim is settled" check reads siblings from the store at
+  // that instant -- auto-clearing one claim before the others in its own
+  // split are even inserted would let that check see an incomplete sibling
+  // set (vacuously "all settled") and close the bill early, before the
+  // remaining payers have been billed at all.
+  for (const claim of claims) {
+    await maybeAutoClear(claim, bill);
+  }
+
+  // Re-read each claim -- maybeAutoClear may have taken any of them straight
+  // to 'settled'; the caller should see that, not each 'pending' snapshot.
+  const finalClaims = await Promise.all(claims.map(async (c) => (await store.claims.get(c.id)) || c));
+  return { claims: finalClaims, split: alloc };
 }
 
 const getByToken = (token) => store.claims.byToken(token);
@@ -231,6 +283,26 @@ async function authorize(claimId) {
   };
   claim.settlementAmount = decision.settlementAmount;
 
+  // Settlement cycle: 'immediate' (the only option before this existed, and
+  // still the default for any payer/terms that never set one) transfers
+  // synchronously right here, exactly as always. A non-immediate cycle
+  // ('daily'/'biweekly', see services/networks.js#resolveCycle) instead PARKS
+  // the claim as 'authorized' -- decided/adjudicated, amount locked in, but
+  // not yet paid -- for services/settlementBatches.js to sweep up and pay as
+  // one consolidated transfer per tenant+payer on its cycle. Fees/ledger for
+  // a parked claim are posted when the batch actually transfers the money,
+  // not here (see settlementBatches.js), so nothing accrues on a claim that
+  // hasn't actually been paid yet.
+  const cycle = await networks.resolveCycle(payer, claim.tenantId);
+  if (cycle !== 'immediate') {
+    claim.status = 'authorized';
+    claim.settlementCycle = cycle;
+    claim.settlementQueuedAt = new Date().toISOString();
+    claim.authorizedAt = new Date().toISOString();
+    await store.claims.update(claim);
+    return claim;
+  }
+
   let transfer;
   try {
     transfer = await executePayerTransfer({ bill, payer, tenant, amount: decision.settlementAmount });
@@ -244,6 +316,8 @@ async function authorize(claimId) {
   claim.transferReference = transfer.reference;
   claim.beneficiaryName = transfer.beneficiaryName;
   claim.serviceCharge = transfer.serviceCharge;
+  claim.funderId = transfer.funderId || null;       // set only when a TPA payer settled via a funder's own account (services/funders.js)
+  claim.funderName = transfer.funderName || null;
   claim.status = transfer.status === 'SUCCESS' ? 'settled' : 'authorized';
   claim.authorizedAt = new Date().toISOString();
   await store.claims.update(claim);
@@ -314,4 +388,8 @@ async function finalizeSettled(claim, bill) {
   await notifyClaimOutcome(claim, bill, 'settled');
 }
 
-module.exports = { routeToPayer, routeToPayers, getByToken, authorize, reject, refresh };
+// finalizeSettled is exported for services/settlementBatches.js, which calls it
+// once per claim after a single consolidated bank transfer covers a whole
+// batch -- so a batch-settled claim gets exactly the same ledger entry, SaaS
+// fees, bill-settled check and notification an immediately-settled one does.
+module.exports = { routeToPayer, routeToPayers, getByToken, authorize, reject, refresh, finalizeSettled };

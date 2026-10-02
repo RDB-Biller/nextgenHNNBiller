@@ -89,6 +89,16 @@ CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claimit_tenant ON claimit(tenant_id);
+-- Claims automation / settlement-flexibility gaps (services/claimsAutomation.js,
+-- claimExpiry.js, settlementBatches.js, funders.js): funders are the lightweight
+-- "who this disbursement is really on behalf of" entities for TPA-style multi-
+-- funder settlement (e.g. a payer settling on behalf of a named trust fund);
+-- settlement_batches record one consolidated A2A transfer covering several
+-- claims for the same tenant+payer on a non-immediate settlement cycle.
+CREATE TABLE IF NOT EXISTS funders (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS settlement_batches (id text PRIMARY KEY, tenant_id text, payer_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_settlement_batches_tenant ON settlement_batches(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_settlement_batches_payer ON settlement_batches(payer_id);
 -- Prospecting campaigns (Master Control "Campaigns" tab, services/campaigns.js):
 -- a named group of contacts (e.g. the seeded Ghana health-provider list), the
 -- contacts in it, each bulk send run against a group, and the per-recipient
@@ -138,11 +148,26 @@ function pgRepo(exec) {
       get: (id) => one('SELECT data FROM financiers WHERE id=$1', [id]),
       save: (o) => exec(upsert('financiers', ['api_key']), [o.id, o.apiKey || null, o]),
     },
+    funders: {
+      get: (id) => one('SELECT data FROM funders WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM funders ORDER BY created_at', []),
+      save: (o) => exec(upsert('funders', []), [o.id, o]),
+    },
+    settlementBatches: {
+      get: (id) => one('SELECT data FROM settlement_batches WHERE id=$1', [id]),
+      insert: (b) => exec(upsert('settlement_batches', ['tenant_id', 'payer_id', 'status']), [b.id, b.tenantId, b.payerId, b.status, b]),
+      update: (b) => exec(upsert('settlement_batches', ['tenant_id', 'payer_id', 'status']), [b.id, b.tenantId, b.payerId, b.status, b]),
+      listByTenant: (t) => many('SELECT data FROM settlement_batches WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+      all: (limit = 500) => many('SELECT data FROM settlement_batches ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
     bills: {
       get: (id, o = {}) => one(`SELECT data FROM bills WHERE id=$1${o.forUpdate ? ' FOR UPDATE' : ''}`, [id]),
       insert: (b) => exec(upsert('bills', ['tenant_id', 'status']), [b.id, b.tenantId, b.status, b]),
       update: (b) => exec(upsert('bills', ['tenant_id', 'status']), [b.id, b.tenantId, b.status, b]),
       listByTenant: (t) => many('SELECT data FROM bills WHERE tenant_id=$1 ORDER BY created_at', [t]),
+      // Cross-tenant scan for services/pharmacyPricing.js (gap: cross-pharmacy price
+      // comparison) -- the only reader that needs bills from MORE than one tenant at once.
+      all: (limit = 3000) => many('SELECT data FROM bills ORDER BY created_at DESC LIMIT $1', [limit]),
     },
     claims: {
       get: (id, o = {}) => one(`SELECT data FROM claims WHERE id=$1${o.forUpdate ? ' FOR UPDATE' : ''}`, [id]),
@@ -412,11 +437,24 @@ function memRepo(M) {
       get: async (id) => M.financiers.get(id) || null,
       save: async (o) => M.financiers.set(o.id, o),
     },
+    funders: {
+      get: async (id) => M.funders.get(id) || null,
+      all: async () => [...M.funders.values()],
+      save: async (o) => M.funders.set(o.id, o),
+    },
+    settlementBatches: {
+      get: async (id) => M.settlementBatches.get(id) || null,
+      insert: async (b) => M.settlementBatches.set(b.id, b),
+      update: async (b) => M.settlementBatches.set(b.id, b),
+      listByTenant: async (t) => list(M.settlementBatches, (b) => b.tenantId === t).reverse(),
+      all: async (limit = 500) => [...M.settlementBatches.values()].reverse().slice(0, limit),
+    },
     bills: {
       get: async (id) => M.bills.get(id) || null,
       insert: async (b) => M.bills.set(b.id, b),
       update: async (b) => M.bills.set(b.id, b),
       listByTenant: async (t) => list(M.bills, (b) => b.tenantId === t),
+      all: async (limit = 3000) => [...M.bills.values()].reverse().slice(0, limit),
     },
     claims: {
       get: async (id) => M.claims.get(id) || null,
@@ -667,6 +705,7 @@ if (usePg) {
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
     campaignSends: new Map(), trialRegistrations: new Map(),
+    funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);
   const mutex = makeMutex();

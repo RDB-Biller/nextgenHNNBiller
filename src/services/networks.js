@@ -23,10 +23,24 @@ const store = require('../store');
  * A payer also has a network posture (held on the payer record):
  *   - networkMode: 'open' (default — anyone can be paid) or 'narrow' (terms drive behaviour)
  *   - outOfNetworkPolicy: 'standard' (settle, but not expedited) or 'block'
+ *   - defaultSettlementCycle: 'immediate' (default) | 'daily' | 'biweekly' —
+ *     see settlementCycle below; this is the payer-wide fallback when no
+ *     per-provider terms override it.
+ *
+ * settlementCycle is a SEPARATE, orthogonal field on the same per-payer x
+ * per-provider terms record: it controls WHEN money actually moves (now vs a
+ * consolidated batch -- see services/settlementBatches.js), while `settlement`
+ * above controls the expedited-settlement FEE and whether 'instant' treatment
+ * applies at all. The two were kept independent rather than folding cycle
+ * into `settlement`'s existing 'instant'/'standard' values, specifically so
+ * nothing already saved in a live `networks` record changes meaning: a terms
+ * record with no settlementCycle behaves EXACTLY as it did before this field
+ * existed (resolveCycle() below falls back to 'immediate').
  */
 
 const MAX_FEE_RATE = 0.15;          // mirrors the expedited_settlement cap
 const MAX_PROMPT_DISCOUNT = 0.15;   // guard rail on provider-side discount
+const SETTLEMENT_CYCLES = ['immediate', 'daily', 'biweekly'];
 
 const round = (n) => Math.round(Number(n) * 100) / 100;
 const pct = (v, max) => {
@@ -76,6 +90,9 @@ async function setTerms(payerId, tenantId, input = {}) {
     promptPaymentDiscountPercent: discount,
     maxClaimAmount: input.maxClaimAmount != null && input.maxClaimAmount !== ''
       ? Number(input.maxClaimAmount) : (existing?.maxClaimAmount ?? null),
+    settlementCycle: input.settlementCycle !== undefined
+      ? (SETTLEMENT_CYCLES.includes(input.settlementCycle) ? input.settlementCycle : 'immediate')
+      : (existing?.settlementCycle || 'immediate'),
     effectiveFrom: input.effectiveFrom || existing?.effectiveFrom || null,
     effectiveTo: input.effectiveTo || existing?.effectiveTo || null,
     note: input.note || existing?.note || null,
@@ -146,17 +163,34 @@ async function resolve(payer, tenantId, amount) {
   };
 }
 
-/** Payer posture (networkMode / outOfNetworkPolicy) lives on the payer record. */
-async function setPosture(payerId, { networkMode, outOfNetworkPolicy } = {}) {
+/** Payer posture (networkMode / outOfNetworkPolicy / defaultSettlementCycle) lives on the payer record. */
+async function setPosture(payerId, { networkMode, outOfNetworkPolicy, defaultSettlementCycle } = {}) {
   const payer = await store.payers.get(payerId);
   if (!payer) { const e = new Error('unknown_payer'); e.status = 404; throw e; }
   if (networkMode) payer.networkMode = networkMode === 'narrow' ? 'narrow' : 'open';
   if (outOfNetworkPolicy) payer.outOfNetworkPolicy = outOfNetworkPolicy === 'block' ? 'block' : 'standard';
+  if (defaultSettlementCycle) {
+    payer.defaultSettlementCycle = SETTLEMENT_CYCLES.includes(defaultSettlementCycle) ? defaultSettlementCycle : 'immediate';
+  }
   await store.payers.save(payer);
-  return { payerId, networkMode: payer.networkMode || 'open', outOfNetworkPolicy: payer.outOfNetworkPolicy || 'standard' };
+  return { payerId, networkMode: payer.networkMode || 'open', outOfNetworkPolicy: payer.outOfNetworkPolicy || 'standard',
+    defaultSettlementCycle: payer.defaultSettlementCycle || 'immediate' };
+}
+
+/**
+ * The effective settlement cycle for a payer x provider pair: an explicit
+ * per-provider term wins, then the payer's own default, then 'immediate' --
+ * so a payer/terms record that has never heard of this field settles exactly
+ * as it always has.
+ */
+async function resolveCycle(payer, tenantId) {
+  const terms = await store.networks.get(payer.id, tenantId);
+  if (terms && terms.settlementCycle && terms.settlementCycle !== 'immediate') return terms.settlementCycle;
+  if (payer?.defaultSettlementCycle && payer.defaultSettlementCycle !== 'immediate') return payer.defaultSettlementCycle;
+  return 'immediate';
 }
 
 module.exports = {
-  MAX_FEE_RATE, MAX_PROMPT_DISCOUNT,
-  setTerms, suspend, listByPayer, listByTenant, resolve, setPosture, isActive,
+  MAX_FEE_RATE, MAX_PROMPT_DISCOUNT, SETTLEMENT_CYCLES,
+  setTerms, suspend, listByPayer, listByTenant, resolve, setPosture, isActive, resolveCycle,
 };
