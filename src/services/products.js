@@ -179,8 +179,10 @@ async function get(id) {
   return p;
 }
 
-const all = () => store.products.all();
-const listByPayer = (payerId) => store.products.listByPayer(payerId);
+// The products repo may be absent from the active store backend; degrade to an
+// empty list rather than crashing read-only callers such as Master Control.
+const all = async () => (store.products ? store.products.all() : []);
+const listByPayer = async (payerId) => (store.products ? store.products.listByPayer(payerId) : []);
 
 module.exports = {
   TYPES, STATUSES,
