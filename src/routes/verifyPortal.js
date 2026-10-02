@@ -32,8 +32,36 @@ async function view(v) {
   };
 }
 
+// How long a patient must wait between self-service resends. This endpoint has
+// no login — just the bare token in the URL — so without a cooldown it would be
+// an easy way to run up the clinic's Twilio bill or spam the patient's own phone
+// (accidentally, via a stuck double-tap, or on purpose). It only ever sends to
+// the phone already on this verification record — never a caller-supplied
+// number — so at worst a patient re-messages themselves too often, never anyone
+// else.
+const RESEND_COOLDOWN_MS = 30 * 1000;
+
 router.get('/:token', async (req, res, next) => {
   try { const v = await load(req, res); if (v) res.json(await view(v)); } catch (e) { next(e); }
+});
+// Patient self-service: "I didn't get the text, try WhatsApp instead" (or
+// vice versa). Body: { channel: 'sms'|'whatsapp' }. Always resends to the
+// phone number already on file for this bill — there is no way to pass a
+// different destination in from here.
+router.post('/:token/resend', async (req, res, next) => {
+  try {
+    const v = await load(req, res); if (!v) return;
+    const { channel } = req.body || {};
+    if (!['sms', 'whatsapp'].includes(channel)) return res.status(422).json({ error: 'invalid_channel' });
+    if (!v.phone) return res.status(422).json({ error: 'no_phone_on_file' });
+    const sinceLast = v.lastRemindedAt ? Date.now() - new Date(v.lastRemindedAt).getTime() : Infinity;
+    if (sinceLast < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ error: 'too_soon', retryAfterMs: RESEND_COOLDOWN_MS - sinceLast });
+    }
+    const updated = await verification.reissue(v.id, { channels: { [channel]: true } });
+    const channelError = channel === 'whatsapp' ? updated.whatsappError : updated.smsError;
+    res.json({ ok: !channelError, channelsSent: updated.channelsSent || [], ...(channelError ? { error: channelError } : {}) });
+  } catch (e) { next(e); }
 });
 router.post('/:token/confirm', async (req, res, next) => {
   try {

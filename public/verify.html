@@ -57,7 +57,45 @@ function render(v){
       <button class="accent" id="conf" onclick="confirmBill()">Confirm — this is accurate</button>
       <button class="ghost" onclick="disputeBill()">Something's wrong</button>
     </div>
-    ${smsNote}`;
+    ${smsNote}
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+      <p class="muted" style="font-size:12px;margin:0 0 6px">Didn't get a text, or would rather have it on WhatsApp?</p>
+      <div class="row">
+        <button class="ghost mini" id="resendSms" onclick="resend('sms')">Resend by SMS</button>
+        <button class="ghost mini" id="resendWa" onclick="resend('whatsapp')">Resend by WhatsApp</button>
+      </div>
+      <p id="resendMsg" class="muted" style="font-size:12px;margin:6px 0 0"></p>
+    </div>`;
+}
+function setResendDisabled(disabled){
+  ['resendSms','resendWa'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=disabled;});
+}
+async function resend(channel){
+  const label=channel==='whatsapp'?'WhatsApp':'SMS';
+  const msgEl=document.getElementById('resendMsg');
+  setResendDisabled(true);
+  if(msgEl)msgEl.textContent='Sending…';
+  try{
+    const r=await fetch(`/verify/api/${encodeURIComponent(token)}/resend`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel})});
+    const o=await r.json().catch(()=>({}));
+    if(r.status===429){
+      toast('Please wait a moment before requesting another text');
+      if(msgEl)msgEl.textContent='You just requested a message — try again shortly.';
+      setTimeout(()=>setResendDisabled(false),o.retryAfterMs||30000);
+      return;
+    }
+    if(!r.ok||o.error){
+      toast('Could not send that right now');
+      if(msgEl)msgEl.textContent='Could not send that right now — you can still use this page directly.';
+    }else{
+      toast(label+' sent — check your phone');
+      if(msgEl)msgEl.textContent='Sent. You can request another in about 30 seconds if needed.';
+    }
+  }catch(e){
+    toast('Could not send that right now');
+    if(msgEl)msgEl.textContent='Could not send that right now.';
+  }
+  setTimeout(()=>setResendDisabled(false),30000);
 }
 async function confirmBill(){
   const b=document.getElementById('conf'); b.disabled=true; b.textContent='Confirming…';
