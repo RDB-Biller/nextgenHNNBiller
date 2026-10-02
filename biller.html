@@ -105,6 +105,25 @@
           <a class="api" style="text-decoration:none;text-align:center" href="https://payangel.com" target="_blank">Remittance</a>
         </div>
       </div>
+      <div class="card"><h2>VBC check-in <span class="muted" style="font-weight:400;font-size:12px">clinical indicators, by hand</span></h2>
+        <p class="muted" style="margin-top:0;font-size:13px">For a payer's Value-Based-Care program — an alternative to an EMR feed. Uses the Member/Policy ID and payer above if you've already filled those in for a bill.</p>
+        <div class="row"><div class="field"><label>Insurer / payer ID</label><input id="vbcPayerId" placeholder="e.g. pay_acacia"/></div>
+        <div class="field"><label>Condition <span class="muted" style="font-weight:400">(only for Complication/Follow-up)</span></label>
+          <select id="vbcCondition"><option value="">—</option><option value="hypertension">Hypertension</option><option value="diabetes">Diabetes</option><option value="dyslipidemia">Dyslipidemia</option></select></div></div>
+        <div class="field"><label>Type</label><select id="vbcType" onchange="onVbcTypeChange()">
+          <option value="blood_pressure">Blood pressure</option><option value="hba1c">HbA1c</option><option value="ldl">LDL cholesterol</option>
+          <option value="complication">Complication</option><option value="followup_visit">Completed follow-up visit</option>
+          <option value="screening_completed">Completed screening</option><option value="wellness_visit">Wellness visit</option></select></div>
+        <div class="row" id="vbcBpFields"><div class="field"><label>Systolic</label><input id="vbcSystolic" type="number" placeholder="130"/></div>
+          <div class="field"><label>Diastolic</label><input id="vbcDiastolic" type="number" placeholder="85"/></div></div>
+        <div class="field" id="vbcValueField" style="display:none"><label id="vbcValueLabel">Value</label><input id="vbcValue" type="number" step="0.1"/></div>
+        <button onclick="saveVbcObservation()">Save reading</button>
+        <p class="muted" id="vbcMsg" style="font-size:12px;margin-top:8px"></p>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <p class="muted" style="margin:0 0 6px;font-size:12px">Or set the patient up to log their own readings by text/WhatsApp — they still confirm the code themselves:</p>
+          <div class="row"><button class="ghost mini" onclick="startPatientCheckin()">Text the patient a check-in code</button></div>
+        </div>
+      </div>
       <div class="card"><h2>Connection</h2><div class="field"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123"/></div></div>
     </div>
   </div>
@@ -423,6 +442,40 @@ $('apikey').addEventListener('change',loadPayers);
 loadPayers();
 finUI();
 preview();
+
+// ---- VBC check-in: manual clinical-indicator entry (routes/clinical.js) ----
+function onVbcTypeChange(){
+  const t=$('vbcType').value;
+  $('vbcBpFields').style.display = t==='blood_pressure' ? '' : 'none';
+  $('vbcValueField').style.display = (t==='hba1c'||t==='ldl') ? '' : 'none';
+  $('vbcValueLabel').textContent = t==='hba1c' ? 'HbA1c (%)' : 'LDL (mg/dL)';
+}
+async function saveVbcObservation(){
+  const payerId=$('vbcPayerId').value.trim();
+  const memberId=$('member').value.trim();
+  if(!payerId||!memberId){ $('vbcMsg').textContent='Insurer ID and the Member/Policy ID (above, in Patient) are both required.'; return; }
+  const type=$('vbcType').value;
+  const body={payerId,memberId,type,condition:$('vbcCondition').value||undefined};
+  if(type==='blood_pressure'){ body.systolic=parseFloat($('vbcSystolic').value)||undefined; body.diastolic=parseFloat($('vbcDiastolic').value)||undefined; }
+  if(type==='hba1c'||type==='ldl'){ body.value=parseFloat($('vbcValue').value); }
+  try{
+    const r=await fetch('/api/v1/clinical-observations',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
+    const data=await r.json();
+    if(!r.ok){ $('vbcMsg').textContent = data.message || data.error || 'Could not save.'; return; }
+    $('vbcMsg').textContent='Saved.'; toast('Clinical reading saved');
+  }catch(e){ $('vbcMsg').textContent='Could not reach the server.'; }
+}
+async function startPatientCheckin(){
+  const payerId=$('vbcPayerId').value.trim(), memberId=$('member').value.trim(), phone=$('pphone').value.trim();
+  if(!payerId||!memberId||!phone){ $('vbcMsg').textContent='Insurer ID, Member/Policy ID and the patient\'s phone (above, in Patient) are all required.'; return; }
+  try{
+    const r=await fetch('/api/v1/clinical-observations/link',{method:'POST',headers:hdr(),
+      body:JSON.stringify({payerId,memberId,phone,condition:$('vbcCondition').value||undefined})});
+    const data=await r.json();
+    if(!r.ok){ $('vbcMsg').textContent = data.message || data.error || 'Could not start check-in.'; return; }
+    $('vbcMsg').textContent='Code texted to the patient — they confirm it themselves at /clinical/.'; toast('Check-in code sent');
+  }catch(e){ $('vbcMsg').textContent='Could not reach the server.'; }
+}
 
 // Master Control is a convenience shortcut for whoever's at this terminal, not
 // a credential boundary (platform.html still needs its own platform key) — but

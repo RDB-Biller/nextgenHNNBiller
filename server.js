@@ -25,6 +25,8 @@ const { authPlatform, requireFeature } = require('./middleware/access');
 const claimitRoutes = require('./routes/claimit');
 const reportPortalRoutes = require('./routes/reportPortal');
 const emrRoutes = require('./routes/emr');
+const clinicalRoutes = require('./routes/clinical');
+const clinicalPortalRoutes = require('./routes/clinicalPortal');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -50,6 +52,10 @@ app.use('/claim/api', claimPortalRoutes);
 app.use('/claim', express.static(PUBLIC, { index: 'claim.html' }));
 app.use('/verify/api', verifyPortalRoutes);
 app.use('/verify', express.static(PUBLIC, { index: 'verify.html' }));
+// Patient self-service clinical check-in (Product Development Environment /
+// VBC) — OTP-verified by phone, not a tenant/payer key; see routes/clinicalPortal.js.
+app.use('/clinical/api', clinicalPortalRoutes);
+app.use('/clinical', express.static(PUBLIC, { index: 'clinical.html' }));
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 app.use('/app', express.static(PUBLIC));
@@ -75,6 +81,8 @@ app.use('/api/v1/claims', claimsRoutes);
 app.use('/api/v1/financing', requireFeature('financing'), financingRoutes);
 app.use('/api/v1/ledger', requireFeature('ledger'), ledgerRoutes);
 app.use('/api/v1/claimit', requireFeature('claimit'), claimitRoutes);
+// Hospital-side manual entry of clinical indicators — see routes/clinical.js.
+app.use('/api/v1/clinical-observations', clinicalRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1', institutionsRoutes);
 
@@ -91,6 +99,7 @@ if (require.main === module) {
     console.log(`  Payer inbox     : http://localhost:${config.port}/app/payers.html`);
     console.log(`  IT-lead console : http://localhost:${config.port}/app/admin.html`);
     console.log(`  Master control  : http://localhost:${config.port}/app/platform.html`);
+    console.log(`  Clinical check-in: http://localhost:${config.port}/clinical/`);
   })).catch((e) => { console.error('Startup failed:', e); process.exit(1); });
 }
 module.exports = app;

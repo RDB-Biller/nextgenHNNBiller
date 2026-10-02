@@ -1,0 +1,59 @@
+:root{
+  --paper:#F4F6F4; --ink:#14241E; --brand:#0E5C4A; --brand-soft:#DCEAE3;
+  --accent:#E8612C; --line:#D6DDD7; --muted:#5E6F66; --ok:#0E5C4A; --warn:#B45309; --bad:#9A2A14;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  background:var(--paper); color:var(--ink); line-height:1.45;
+}
+a{color:var(--brand)}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 20px 60px}
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.brandmark{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:26px;letter-spacing:-.01em}
+.brandmark .dot{color:var(--accent)}
+.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:600;margin:0 0 8px}
+.muted{color:var(--muted)}
+.nav a{margin-left:16px;font-size:14px;text-decoration:none;font-weight:500}
+.grid{display:grid;gap:16px}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:760px){.cols-2,.cols-3{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 18px}
+.card h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
+label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+input,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff;color:var(--ink)}
+input:focus-visible,select:focus-visible{outline:2px solid var(--brand);outline-offset:1px;border-color:var(--brand)}
+.field{margin:0 0 12px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1;min-width:120px}
+button{padding:11px 14px;border:0;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;background:var(--brand-soft);color:var(--brand)}
+button:hover{filter:brightness(.98)}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button.primary{background:var(--brand);color:#fff}
+button.accent{background:var(--accent);color:#fff}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+button:disabled{opacity:.55;cursor:default}
+.bignum{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:34px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}
+.kpi .l{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:8px 8px;border-bottom:1px solid var(--line)}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.pill{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;padding:3px 9px;border-radius:999px;text-transform:uppercase}
+.pill.open{background:#eef2f0;color:var(--muted)}
+.pill.awaiting_insurer{background:#FFF3E6;color:var(--warn)}
+.pill.settled,.pill.SUCCESS{background:var(--brand-soft);color:var(--brand)}
+.pill.rejected,.pill.failed{background:#FBE6E1;color:var(--bad)}
+.pill.pending{background:#FFF3E6;color:var(--warn)}
+.ledger .line{display:flex;justify-content:space-between;gap:12px;padding:8px 0;font-size:15px}
+.ledger .line+.line{border-top:1px solid var(--line)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 8px 30px -10px rgba(0,0,0,.5);opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+.linkbox{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#0f172a;color:#a7f3d0;padding:10px 12px;border-radius:8px;word-break:break-all}
+@media(prefers-reduced-motion:reduce){button{transition:none}}
+.pill.on_credit,.pill.credit_extended,.pill.referred,.pill.submitted{background:#FFF3E6;color:var(--warn)}
+.api{font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:11px;color:var(--ink);background:#EFEDE2;border:1px solid var(--line);border-radius:6px;padding:6px 9px}

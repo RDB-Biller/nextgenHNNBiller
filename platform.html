@@ -366,6 +366,7 @@
     </div>
     <div class="card"><h2>EMR/EHR partners</h2><div id="emr"></div>
       <p class="muted" style="margin-top:10px;font-size:12px">Each partner's API key (shown below as it does everywhere else — created once, then masked) is also what it uses to push clinical observations for the <b>Product Lab</b>: <span class="key">POST /api/v1/emr/observations</span> with header <span class="key">x-api-key</span>.</p>
+      <p class="muted" style="margin-top:6px;font-size:12px">No EMR integration yet? A clinic can key a reading in by hand from its own terminal (<span class="key">POST /api/v1/clinical-observations</span>, tenant key), and a patient can self-report once their phone is linked — the public <span class="key">/clinical/</span> page, or texting things like <span class="key">BP 130/85</span>. Either path lands in the same observations feeding this tab.</p>
     </div>
   </div>
 

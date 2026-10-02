@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — Financing & Medical Reports API
+  version: 1.0.0
+  description: 'Finance the patient’s share — MoMo or bank medical loans, employer loans, grants, or hospital
+    credit (full, or part-payment now with the remainder on credit) — with an auto-generated medical report
+    for lender due diligence.
+
+
+    ### Editions
+
+    Every client runs on one of two editions in the **same deployment**:
+
+
+    | Edition | Includes |
+
+    |---|---|
+
+    | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports
+    |
+
+    | `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt
+    tracker, agnostic payer tabs, audit ledger |
+
+
+    Switching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on
+    downgrade**.
+
+    Commercial-only endpoints return **402 `upgrade_required`** when the caller''s client is non-commercial.
+
+    Check your own entitlement any time with `GET /api/v1/bills/edition`.
+
+
+    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+
+
+    _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
+    to the ledger as receivables._'
+servers:
+- url: https://nextgenhnnbiller-production.up.railway.app
+  description: Production
+- url: http://localhost:3000
+  description: Local
+tags:
+- name: Financing
+- name: Reports
+components:
+  securitySchemes:
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clinic/hospital (EMR) key
+paths:
+  /api/v1/financing/questions:
+    get:
+      tags:
+      - Reports
+      summary: Question set for a report
+      security:
+      - TenantKey: []
+      parameters:
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - micro
+          - detailed
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/financing/reports:
+    post:
+      tags:
+      - Reports
+      summary: Generate a medical report (accrues the configured flat report fee)
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                kind:
+                  type: string
+                  enum:
+                  - micro
+                  - detailed
+                diagnosis:
+                  type: string
+                qa:
+                  type: array
+                  items:
+                    type: object
+                amountRequested:
+                  type: number
+                loanType:
+                  type: string
+                clinicianName:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /api/v1/financing/reports/{id}:
+    get:
+      tags:
+      - Reports
+      summary: Get a report
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+  /report/api/{token}:
+    get:
+      tags:
+      - Reports
+      summary: Open a report by share link (sanitised)
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+  /api/v1/financing:
+    post:
+      tags:
+      - Financing
+      summary: Create financing for the patient share
+      security:
+      - TenantKey: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Retries with the same key replay the original response instead of executing again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              - type
+              properties:
+                billId:
+                  type: string
+                type:
+                  type: string
+                  enum:
+                  - momo_loan
+                  - bank_loan
+                  - employer_loan
+                  - grant
+                  - hospital_credit
+                financierId:
+                  type: string
+                employerId:
+                  type: string
+                amount:
+                  type: number
+                partPayment:
+                  type: number
+                  description: hospital_credit only — paid now, remainder on credit
+                reportId:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
+        '409':
+          description: request_in_progress
+  /api/v1/financing/{id}:
+    get:
+      tags:
+      - Financing
+      summary: Get a financing record
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ''
+      responses:
+        '200':
+          description: OK
+        '402':
+          description: upgrade_required — this feature needs the commercial edition
