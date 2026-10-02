@@ -258,11 +258,40 @@ const PROVIDER_META = {
  */
 async function resolveSender(tenant) {
   const own = tenant?.messagingCredentials;
+  // Never log secrets — only presence flags and the provider name.
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] resolveSender: tenant.messagingCredentials', {
+    tenantId: tenant?.id || null,
+    present: !!own,
+    useOwnCredentials: !!own?.useOwnCredentials,
+    hasEncrypted: !!own?.encrypted,
+    provider: own?.provider || null,
+  });
   if (own?.useOwnCredentials && own.encrypted && own.provider) {
-    return { provider: own.provider, creds: credentials.decrypt(own.encrypted), source: 'tenant' };
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] resolveSender: using tenant credentials', { provider: own.provider });
+    const creds = credentials.decrypt(own.encrypted);
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] resolveSender: returning', { provider: own.provider, source: 'tenant', hasCreds: !!creds });
+    return { provider: own.provider, creds, source: 'tenant' };
   }
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] resolveSender: tenant credentials not usable, falling back to platform test account', {
+    useOwnCredentialsOn: !!own?.useOwnCredentials,
+  });
   const platformAccount = await messagingAccount.resolve();
-  return platformAccount ? { ...platformAccount, source: 'platform_test_account' } : null;
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] resolveSender: messagingAccount.resolve() result', {
+    found: !!platformAccount,
+    provider: platformAccount?.provider || null,
+    hasCreds: !!platformAccount?.creds,
+  });
+  const result = platformAccount ? { ...platformAccount, source: 'platform_test_account' } : null;
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] resolveSender: returning', result
+    ? { provider: result.provider, source: result.source, hasCreds: !!result.creds }
+    : null);
+  return result;
 }
 
 /**
@@ -272,8 +301,15 @@ async function resolveSender(tenant) {
  * billing or verification.
  */
 async function send({ channel, to, body, tenant } = {}) {
-  if (!to) return { ok: false, error: 'no_recipient' };
-  if (await isSandbox()) {
+  const sandboxed = await isSandbox();
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] send() called', { channel, to, sandbox: sandboxed, tenantId: tenant?.id || null });
+  if (!to) {
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() error', { error: 'no_recipient' });
+    return { ok: false, error: 'no_recipient' };
+  }
+  if (sandboxed) {
     const providerMessageId = `SBX-MSG-${crypto.randomBytes(6).toString('hex')}`;
     const sentAt = new Date().toISOString();
     // eslint-disable-next-line no-console
@@ -281,6 +317,10 @@ async function send({ channel, to, body, tenant } = {}) {
     return { ok: true, sandbox: true, channel, providerMessageId, sentAt };
   }
   const resolved = await resolveSender(tenant);
+  // eslint-disable-next-line no-console
+  console.log('[messaging:debug] send() resolveSender result', resolved
+    ? { provider: resolved.provider, source: resolved.source, hasCreds: !!resolved.creds }
+    : null);
   if (!resolved) {
     // Real sending is allowed on this deployment, but nothing usable is
     // configured yet (no tenant credentials, no active platform test
@@ -288,15 +328,39 @@ async function send({ channel, to, body, tenant } = {}) {
     // breaks, but say plainly that nothing actually went out.
     // eslint-disable-next-line no-console
     console.log(`[messaging:unconfigured] ${channel} -> ${to}: ${body}`);
-    return { ok: false, sandbox: false, channel, error: 'messaging_provider_not_configured' };
+    const result = { ok: false, sandbox: false, channel, error: 'messaging_provider_not_configured' };
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() error', { error: result.error });
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() final result', result);
+    return result;
   }
   const adapter = ADAPTERS[resolved.provider];
-  if (!adapter) return { ok: false, sandbox: false, channel, error: 'unknown_provider' };
+  if (!adapter) {
+    const result = { ok: false, sandbox: false, channel, error: 'unknown_provider' };
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() error', { error: result.error, provider: resolved.provider });
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() final result', result);
+    return result;
+  }
   try {
     const r = await adapter(resolved.creds, { channel, to, body });
-    return { ...r, channel, sandbox: false, source: resolved.source };
+    const result = { ...r, channel, sandbox: false, source: resolved.source };
+    if (!result.ok) {
+      // eslint-disable-next-line no-console
+      console.log('[messaging:debug] send() error', { error: result.error });
+    }
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() final result', result);
+    return result;
   } catch (e) {
-    return { ok: false, sandbox: false, channel, error: e.message || 'provider_send_failed' };
+    const result = { ok: false, sandbox: false, channel, error: e.message || 'provider_send_failed' };
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() error (adapter threw)', { error: result.error });
+    // eslint-disable-next-line no-console
+    console.log('[messaging:debug] send() final result', result);
+    return result;
   }
 }
 
