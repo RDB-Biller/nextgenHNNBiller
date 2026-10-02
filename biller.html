@@ -222,6 +222,8 @@ function verifBlock(){
   const label=lastVerification.status==='disputed'?'Patient disputed the bill':(lastVerification.status==='verified'?'Patient verified':'Awaiting patient verification');
   const chans=lastVerification.channelsSent||[];
   const chanLine=chans.length?`<p style="margin:8px 0 0">Also sent by ${chans.map(c=>c==='whatsapp'?'WhatsApp':'SMS').join(' &amp; ')}${lastVerification.phone?' to '+esc(lastVerification.phone):''}.</p>`:'';
+  const errs=lastVerification.channelErrors||{};
+  const errLine=Object.keys(errs).length?`<p style="margin:8px 0 0;color:var(--bad)">${Object.entries(errs).map(([ch,msg])=>`${ch==='whatsapp'?'WhatsApp':'SMS'} failed: ${esc(msg)}`).join(' · ')}</p>`:'';
   const otp=lastVerification.otpCodeSandbox;
   // otpCodeSandbox only comes back from the API in sandbox mode (src/routes/bills.js) —
   // a real deployment never echoes the code back to the biller, only to the patient.
@@ -240,7 +242,7 @@ function verifBlock(){
     <div class="linkbox">${location.origin}${lastVerification.link}</div>
     <p style="margin:8px 0 0"><a href="${lastVerification.link}" target="_blank">Open patient page →</a>
     &nbsp;·&nbsp;<a href="#" onclick="resendVerification('${bid}',this);return false">Resend link to patient</a></p>
-    ${chanLine}${otpLine}${demo}
+    ${chanLine}${errLine}${otpLine}${demo}
   </div>`;
 }
 async function resendVerification(id,el){
@@ -253,6 +255,7 @@ async function resendVerification(id,el){
     if(lastVerification&&lastVerification.billId===id){
       lastVerification.status=v.status;
       lastVerification.channelsSent=v.channelsSent||[];
+      lastVerification.channelErrors=v.channelErrors||{};
       if('otpCodeSandbox' in v)lastVerification.otpCodeSandbox=v.otpCodeSandbox; else delete lastVerification.otpCodeSandbox;
       const wrap=document.getElementById('verifBlockWrap'); if(wrap)wrap.outerHTML=verifBlock();
     }

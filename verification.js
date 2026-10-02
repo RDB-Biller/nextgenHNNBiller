@@ -176,12 +176,14 @@ async function dispatchChannels(v, bill, tenant) {
   v.lastMessageBody = body; // kept for support/audit ("what did we actually tell this patient?")
   const sent = [];
   if (wantSms) {
-    const r = await messaging.send({ channel: 'sms', to: v.phone, body });
+    const r = await messaging.send({ channel: 'sms', to: v.phone, body, tenant });
     if (r.ok) { sent.push('sms'); v.smsSentAt = r.sentAt; v.smsMessageId = r.providerMessageId; }
+    else v.smsError = r.error || null;
   }
   if (wantWhatsapp) {
-    const r = await messaging.send({ channel: 'whatsapp', to: v.phone, body });
+    const r = await messaging.send({ channel: 'whatsapp', to: v.phone, body, tenant });
     if (r.ok) { sent.push('whatsapp'); v.whatsappSentAt = r.sentAt; v.whatsappMessageId = r.providerMessageId; }
+    else v.whatsappError = r.error || null;
   }
   v.channelsSent = sent;
   await store.verifications.update(v);

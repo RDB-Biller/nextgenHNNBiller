@@ -18,6 +18,9 @@ const revenue = require('../services/revenue');
 const licensing = require('../services/licensing');
 const targets = require('../services/targets');
 const priceList = require('../services/priceList');
+const messaging = require('../services/messaging');
+const messagingAccount = require('../services/messagingAccount');
+const credentials = require('../services/credentials');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -49,6 +52,20 @@ router.get('/overview', async (req, res, next) => {
 });
 
 // ---- clients (hospitals / clinics / pharmacies) ------------------------------
+// Never includes the encrypted blob or a decrypted secret — same shape as
+// messagingAccount.mask(), just read off a tenant record instead of the
+// platform settings singleton.
+function maskTenantCredentials(tc) {
+  const rec = tc || {};
+  return {
+    useOwnCredentials: rec.useOwnCredentials === true,
+    provider: rec.provider || null,
+    configured: !!rec.encrypted,
+    hint: rec.hint || null,
+    updatedAt: rec.updatedAt || null,
+  };
+}
+
 router.get('/clients', async (req, res, next) => {
   try {
     const rows = await store.tenants.all();
@@ -58,6 +75,7 @@ router.get('/clients', async (req, res, next) => {
       features: editions.featureList(t),
       receivingAccount: t.receivingAccount || null, contact: t.contact || null,
       verificationChannels: t.verificationChannels || { sms: false, whatsapp: false, includeTreatmentDetail: false },
+      messagingCredentials: maskTenantCredentials(t.messagingCredentials),
     })) });
   } catch (e) { next(e); }
 });
@@ -103,6 +121,115 @@ router.put('/clients/:id/verification-channels', async (req, res, next) => {
     await store.tenants.save(tenant);
     res.json({ id: tenant.id, verificationChannels: tenant.verificationChannels });
   } catch (e) { next(e); }
+});
+
+// ---- real SMS/WhatsApp sending: provider metadata, platform test account, ---
+// ---- and per-client "bring your own credentials" ----------------------------
+//
+// Three layers, resolved in this order by services/messaging.js#resolveSender
+// whenever MESSAGING_SANDBOX=false on this deployment (otherwise every send
+// just logs, full stop, regardless of anything below):
+//   1. A client's own provider account, if it has turned "useOwnCredentials"
+//      on and saved working credentials (PUT /clients/:id/messaging-credentials).
+//   2. The platform's own shared test account, if HNN has configured one AND
+//      switched it active (PUT /messaging/test-account) — meant to be flipped
+//      on for a live test and off again afterwards, no redeploy required.
+//   3. Sandbox (log only).
+// Every credential is encrypted at rest (CREDENTIAL_ENCRYPTION_KEY; see
+// services/credentials.js) and every GET below returns a masked projection —
+// provider, whether something is configured, a last-4 hint — never the secret.
+
+// Which providers are wired in, their required fields, and an honest
+// per-provider WhatsApp availability label (see messaging.js PROVIDER_META).
+router.get('/messaging/providers', (req, res) => {
+  res.json({ data: messaging.PROVIDER_META, encryptionConfigured: credentials.isConfigured() });
+});
+
+function validateProviderFields(provider, rawCreds) {
+  const meta = messaging.PROVIDER_META[provider];
+  if (!meta) return 'unknown_provider';
+  const missing = meta.fields.filter((f) => !f.optional && !String(rawCreds?.[f.name] || '').trim());
+  return missing.length ? `missing_fields: ${missing.map((f) => f.name).join(', ')}` : null;
+}
+
+router.get('/messaging/test-account', async (req, res, next) => {
+  try { res.json(messagingAccount.mask(await messagingAccount.get())); }
+  catch (e) { next(e); }
+});
+
+// Body: { provider?, credentials?: {...per PROVIDER_META[provider].fields}, active? }.
+// Omit `credentials` to flip `active` without resupplying the secret (the
+// "deactivate when testing is over" switch); include it to set or replace
+// what's stored. Rejects activating with nothing usable configured.
+router.put('/messaging/test-account', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    if (body.credentials) {
+      const effectiveProvider = 'provider' in body ? body.provider : (await messagingAccount.get()).provider;
+      const err = validateProviderFields(effectiveProvider, body.credentials);
+      if (err) return res.status(422).json({ error: err });
+    }
+    // Build the patch from only the keys actually sent — messagingAccount.set()
+    // uses `'key' in patch` to tell "leave this alone" apart from "set this to
+    // undefined/false", so e.g. a credentials-only save must not include an
+    // `active` key at all, or it would read as "turn active off".
+    const patch = {};
+    if ('provider' in body) patch.provider = body.provider;
+    if (body.credentials) patch.credentials = body.credentials;
+    if ('active' in body) patch.active = body.active;
+    const rec = await messagingAccount.set(patch, req.principal?.id || 'HNN');
+    res.json(messagingAccount.mask(rec));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Body: { useOwnCredentials?, provider?, credentials?: {...} }. A client
+// turns this on to send through its own Twilio/Africa's Talking/Hubtel
+// account instead of (or as well as configured — it always wins when on)
+// the platform's shared test account. Master Control is where this is
+// entered on the client's behalf today; nothing stops a future facility-
+// scoped console (admin.html) from exposing the same endpoint to a client's
+// own IT lead instead, since the storage and sending logic don't care who
+// called it.
+router.put('/clients/:id/messaging-credentials', async (req, res, next) => {
+  try {
+    const tenant = await store.tenants.get(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'client_not_found' });
+    const body = req.body || {};
+    const current = tenant.messagingCredentials || {};
+    const provider = 'provider' in body ? (body.provider || null) : current.provider;
+    if (body.credentials) {
+      const err = validateProviderFields(provider, body.credentials);
+      if (err) return res.status(422).json({ error: err });
+    }
+    const next_ = { ...current, updatedAt: new Date().toISOString(), updatedBy: req.principal?.id || 'HNN' };
+    if ('provider' in body) next_.provider = provider;
+    // Switching provider without new credentials in the same call would
+    // otherwise leave the OLD provider's encrypted blob stored under the NEW
+    // provider's name — safe (the adapter sees the wrong shape and fails
+    // cleanly) but misleading in the UI. Require re-entry instead.
+    if ('provider' in body && provider !== current.provider && !body.credentials) {
+      next_.encrypted = null;
+      next_.hint = null;
+    }
+    if (body.credentials && Object.keys(body.credentials).length) {
+      next_.encrypted = credentials.encrypt(body.credentials);
+      const secretFieldDef = (messaging.PROVIDER_META[provider]?.fields || []).find((f) => f.secret);
+      next_.hint = credentials.hint(secretFieldDef ? body.credentials[secretFieldDef.name] : '');
+    }
+    if ('useOwnCredentials' in body) next_.useOwnCredentials = body.useOwnCredentials === true;
+    if (next_.useOwnCredentials && (!next_.encrypted || !next_.provider)) {
+      return res.status(422).json({ error: 'no_credentials_configured' });
+    }
+    tenant.messagingCredentials = next_;
+    await store.tenants.save(tenant);
+    res.json({ id: tenant.id, messagingCredentials: maskTenantCredentials(tenant.messagingCredentials) });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
 });
 
 // ---- payers (insurers + corporate) ------------------------------------------

@@ -29,8 +29,15 @@ router.post('/', async (req, res, next) => {
     const v = await verification.createForBill(bill);
     res.status(201).json({ ...bill, patientVerification: {
       status: v.status, link: v.link, channelsSent: v.channelsSent || [],
-      // Sandbox-only convenience: with no real provider wired in, this is the
-      // only way to see the code at all while testing/demoing (see messaging.js).
+      // Per-channel send failures (e.g. provider_credentials_incomplete,
+      // provider_whatsapp_not_supported) so a wanted-but-missing channel is
+      // visibly explained rather than just absent from channelsSent.
+      ...((v.smsError || v.whatsappError) ? { channelErrors: {
+        ...(v.smsError ? { sms: v.smsError } : {}), ...(v.whatsappError ? { whatsapp: v.whatsappError } : {}),
+      } } : {}),
+      // Sandbox-only convenience: while MESSAGING_SANDBOX is on, nothing is
+      // ever sent for real, so this is the only way to see the code at all
+      // while testing/demoing (see messaging.js).
       ...(messaging.SANDBOX && v.otpCode ? { otpCodeSandbox: v.otpCode } : {}),
     } });
   } catch (e) { next(e); }
@@ -120,6 +127,9 @@ router.post('/:id/verification/reissue', async (req, res, next) => {
     const updated = await verification.reissue(v.id);
     res.json({ status: updated.status, link: updated.link, remindersSent: updated.remindersSent,
       channelsSent: updated.channelsSent || [],
+      ...((updated.smsError || updated.whatsappError) ? { channelErrors: {
+        ...(updated.smsError ? { sms: updated.smsError } : {}), ...(updated.whatsappError ? { whatsapp: updated.whatsappError } : {}),
+      } } : {}),
       ...(messaging.SANDBOX && updated.otpCode ? { otpCodeSandbox: updated.otpCode } : {}) });
   } catch (e) { next(e); }
 });

@@ -46,6 +46,24 @@
     </div>
     <div class="card" style="margin-bottom:14px"><h2>Clients</h2><div id="clients"></div></div>
 
+    <div class="card" style="margin-bottom:14px"><h2>Messaging test account (platform-wide)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test and deactivate again when done — used by any client below that hasn't set up its own. Nothing here is sent for real unless the server's <span class="key">MESSAGING_SANDBOX</span> is also set to <span class="key">false</span>; that's the one deployment-wide switch nothing on this page can override.</p>
+      <p class="muted" id="mta_enc_warn" style="display:none;font-size:13px;color:var(--bad)">The server has no <span class="key">CREDENTIAL_ENCRYPTION_KEY</span> set — saving credentials will fail until it does. Nothing is ever stored unencrypted.</p>
+      <div class="row">
+        <div class="field"><label>Provider</label><select id="mta_provider" onchange="renderProviderFields('mta')"></select></div>
+        <div id="mta_fields" class="row" style="flex:2;margin:0"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div class="field" style="display:flex;align-items:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;margin:0 0 11px">
+            <input type="checkbox" id="mta_active" style="width:auto"/> Active
+          </label>
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="saveTestAccount()">Save</button></div>
+      </div>
+      <p class="muted" id="mta_status" style="font-size:12px"></p>
+    </div>
+
     <div class="card"><h2>Patient verification by SMS/WhatsApp</h2>
       <p class="muted" style="margin-top:0;font-size:13px">When a channel is on, the patient verification link sent at billing time (and on resend) also goes out by SMS and/or WhatsApp, with a short code the patient can text back instead of opening the link. Off by default for every client; unrelated to the payer-side verification gate under Payers.</p>
       <div class="row">
@@ -64,6 +82,19 @@
         <input type="checkbox" id="vc_detail" style="width:auto"/>
         Also list the treatment / line items in the message (default off — no PHI over SMS/WhatsApp; the link always has full detail)
       </label>
+
+      <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 8px;font-size:13px"><b>Bring your own credentials</b> — this client sends through its own provider account instead of the shared test account above (always wins over it when turned on). Off by default.</p>
+        <div class="row">
+          <div class="field"><label>Provider</label><select id="vc_cred_provider" onchange="renderProviderFields('vc_cred')"></select></div>
+          <div id="vc_cred_fields" class="row" style="flex:2;margin:0"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500">
+          <input type="checkbox" id="vc_cred_use" style="width:auto"/> This client uses its own credentials
+        </label>
+        <button class="primary mini" style="margin-top:8px" onclick="saveClientCredentials()">Save credentials</button>
+        <p class="muted" id="vc_cred_status" style="font-size:12px"></p>
+      </div>
     </div>
   </div>
 
@@ -186,6 +217,7 @@ const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':
 const n2=(n)=>Number(n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
 let CLIENTS=[],PAYERS=[],EMR=[];
+let PROVIDERS_META={},ENCRYPTION_OK=false;
 
 function tab(n,el){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on'));
@@ -198,8 +230,83 @@ async function boot(){
     ['Payers',`${ov.insurers} insurers · ${ov.corporatePayers} corporate`],
     ['IT leads & partners',`${ov.itLeads} leads · ${ov.emrPartners} EMR`]]
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
-  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics()]);
+  await loadProviderMeta();
+  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics(),loadTestAccount()]);
   orgOptions();
+}
+
+// ---- real SMS/WhatsApp sending: provider metadata, platform test account, ---
+// ---- and per-client "bring your own credentials" ----------------------------
+async function loadProviderMeta(){
+  const r=await (await fetch('/api/platform/messaging/providers',{headers:H()})).json().catch(()=>null);
+  PROVIDERS_META=(r&&r.data)||{}; ENCRYPTION_OK=!!(r&&r.encryptionConfigured);
+  const opts='<option value="">— none —</option>'+Object.entries(PROVIDERS_META)
+    .map(([k,m])=>`<option value="${esc(k)}">${esc(m.label)}</option>`).join('');
+  if($('mta_provider'))$('mta_provider').innerHTML=opts;
+  if($('vc_cred_provider'))$('vc_cred_provider').innerHTML=opts;
+  if($('mta_enc_warn'))$('mta_enc_warn').style.display=ENCRYPTION_OK?'none':'block';
+}
+function waNote(status){
+  if(status==='supported')return '';
+  const label=status==='unverified'
+    ? "WhatsApp: this provider offers it, but we couldn't confirm the request shape from public docs — verify before relying on it"
+    : 'WhatsApp: not offered by this provider — SMS only';
+  return `<p class="muted" style="font-size:11px;margin:4px 0 0;flex:0 0 100%">${esc(label)}</p>`;
+}
+// prefix: 'mta' (platform test account) or 'vc_cred' (per-client). `configured`
+// shows a "leave blank to keep" placeholder on secret fields when something
+// is already saved — the actual secret is never sent back to fill it in.
+function renderProviderFields(prefix,configured){
+  const provider=$(prefix+'_provider').value;
+  const wrap=$(prefix+'_fields');
+  if(!wrap)return;
+  if(!provider||!PROVIDERS_META[provider]){wrap.innerHTML='';return;}
+  const meta=PROVIDERS_META[provider];
+  wrap.innerHTML=meta.fields.map((f)=>
+    `<div class="field"><label>${esc(f.label)}</label><input id="${prefix}_f_${esc(f.name)}" type="${f.secret?'password':'text'}" placeholder="${f.secret&&configured?'•••• (leave blank to keep)':''}"/></div>`
+  ).join('')+waNote(meta.whatsapp);
+}
+function readProviderFields(prefix){
+  const provider=$(prefix+'_provider').value;
+  if(!provider)return{provider:null,credentials:null};
+  const meta=PROVIDERS_META[provider]||{fields:[]};
+  const creds={};let any=false;
+  meta.fields.forEach((f)=>{
+    const el=$(prefix+'_f_'+f.name);const v=el&&el.value.trim();
+    if(v){creds[f.name]=v;any=true;}
+  });
+  return{provider,credentials:any?creds:null};
+}
+async function loadTestAccount(){
+  const r=await (await fetch('/api/platform/messaging/test-account',{headers:H()})).json().catch(()=>null);
+  if(!r)return;
+  if($('mta_provider'))$('mta_provider').value=r.provider||'';
+  renderProviderFields('mta',r.configured);
+  if($('mta_active'))$('mta_active').checked=!!r.active;
+  if($('mta_status'))$('mta_status').textContent=r.configured
+    ?`Configured (secret ${r.hint||'…'}) · ${r.active?'active':'inactive'}.`
+    :'Not configured yet.';
+}
+async function saveTestAccount(){
+  const{provider,credentials}=readProviderFields('mta');
+  const body={provider,active:$('mta_active').checked};
+  if(credentials)body.credentials=credentials;
+  const r=await fetch('/api/platform/messaging/test-account',{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast('Test account saved');loadTestAccount();}
+  else toast('Failed: '+(o.error||r.status));
+}
+async function saveClientCredentials(){
+  const id=$('vc_client').value; if(!id)return toast('Pick a client first');
+  const{provider,credentials}=readProviderFields('vc_cred');
+  const body={provider,useOwnCredentials:$('vc_cred_use').checked};
+  if(credentials)body.credentials=credentials;
+  const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/messaging-credentials`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast('Credentials saved');
+    const c=(CLIENTS||[]).find((x)=>x.id===id); if(c)c.messagingCredentials=o.messagingCredentials;
+    loadVerifChannels();}
+  else toast('Failed: '+(o.error||r.status));
 }
 
 async function loadClients(){
@@ -223,6 +330,11 @@ function loadVerifChannels(){
   if($('vc_sms'))$('vc_sms').checked=!!vc.sms;
   if($('vc_wa'))$('vc_wa').checked=!!vc.whatsapp;
   if($('vc_detail'))$('vc_detail').checked=!!vc.includeTreatmentDetail;
+  const mc=(c&&c.messagingCredentials)||{useOwnCredentials:false,provider:null,configured:false,hint:null};
+  if($('vc_cred_provider')){$('vc_cred_provider').value=mc.provider||'';renderProviderFields('vc_cred',mc.configured);}
+  if($('vc_cred_use'))$('vc_cred_use').checked=!!mc.useOwnCredentials;
+  if($('vc_cred_status'))$('vc_cred_status').textContent=mc.configured
+    ?`Configured (secret ${mc.hint||'…'}).`:'Not configured — falls back to the platform test account.';
 }
 async function saveVerifChannels(){
   const id=$('vc_client').value; if(!id)return toast('Pick a client');

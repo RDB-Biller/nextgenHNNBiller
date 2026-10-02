@@ -56,7 +56,12 @@ npm start
 Demo path: open `http://localhost:4000/app/biller.html`, build a bill with a member
 ID, tap a payer (insurer *or* employer), then open `/app/payers.html` (or the printed
 secure link) and **Authorise** — watch it settle on `/app/dashboard.html` with the
-notification fan-out. `npm run smoke` runs it over HTTP.
+notification fan-out. `npm run smoke` runs it over HTTP (needs `npm start` running
+first). Two more smoke suites run in-process, no server/network needed: `npm run
+smoke:verification` (patient verification, dashboard queue, reissue/override/prior
+approvals, SMS/WhatsApp OTP + 2-way reply) and `npm run smoke:messaging-live`
+(credential encryption, the platform test account, and all three provider adapters,
+against a mocked HTTP layer — see **SMS / WhatsApp verification** below).
 
 ## Clinic / EHR API (key `x-api-key: emr_demo_key_123`)
 
@@ -167,19 +172,61 @@ keeps the SMS/WhatsApp text to just the amount and the link — the no-PHI rule 
 stays true. Turning it on additionally lists the treatment/line items in the text
 itself, which is the one deliberate, opt-in exception to that rule.
 
-No real SMS/WhatsApp provider is wired in yet. `src/services/messaging.js` is a single
-swappable seam (`send()`); while `MESSAGING_SANDBOX` is unset or anything but `"false"`,
-it logs the message instead of sending it — the same sandbox-by-default pattern
-`SBG_SANDBOX` uses for the bank rail. In sandbox mode only, `POST /api/v1/bills` and the
-reissue endpoint also echo the one-time code back as `otpCodeSandbox`, and
-`biller.html`'s verification block adds a "simulate patient reply" control, so the
-whole loop — dispatch, OTP, 2-way reply, ambiguity, lockout — can be demoed end-to-end
-without a real phone or provider. Wiring in a real one (Twilio, Africa's Talking,
-Hubtel, Meta's WhatsApp Cloud API, …) later means filling in `send()` and setting
-`MESSAGING_SANDBOX=false`; nothing else in the flow changes. Configure with
-`MESSAGING_SANDBOX`, `MESSAGING_PROVIDER`, `MESSAGING_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`
-(used to build the link inside the SMS/WhatsApp text), `VERIFICATION_OTP_TTL_MINUTES`,
-`VERIFICATION_OTP_MAX_ATTEMPTS`.
+`src/services/messaging.js` wires in three real providers — **Twilio**, **Africa's
+Talking**, and **Hubtel** — each a thin adapter over its own HTTP API. `send()` is
+still the single seam every caller goes through; which credentials a given send
+actually uses is resolved per-tenant by `resolveSender(tenant)`:
+
+1. The client's **own** provider account, if it has turned on "bring your own
+   credentials" and saved working credentials — always wins when configured
+   (`PUT /api/platform/clients/:id/messaging-credentials`, the "Bring your own
+   credentials" sub-section under each client's verification settings in
+   `platform.html`).
+2. Otherwise, the **platform-wide shared test account** — one set of real credentials
+   HNN can activate for a live test and deactivate again when done, used by any client
+   that hasn't set up its own (`PUT /api/platform/messaging/test-account`, the
+   "Messaging test account" card in `platform.html`).
+3. Otherwise, **sandbox** — logs the message instead of sending it.
+
+All of that sits underneath `MESSAGING_SANDBOX` (default on, same sandbox-by-default
+pattern `SBG_SANDBOX` uses for the bank rail): while it's anything but `"false"`,
+nothing above is ever actually sent, no matter what's configured or activated — turning
+it off is a separate, deployment-wide decision from configuring either credential
+source. `GET /api/platform/messaging/providers` lists each provider's required
+credential fields plus `encryptionConfigured`.
+
+Provider credentials are the **one deliberate exception** to "secrets come from env
+only" elsewhere in this app (see **Before production** below): a client's own account
+can't be known at deploy time, so it has to be enterable at runtime. They're stored
+**encrypted at rest** (AES-256-GCM, key derived from `CREDENTIAL_ENCRYPTION_KEY`; see
+`src/services/credentials.js`) rather than in plaintext. Every API response shows only
+`{provider, configured, hint, active|useOwnCredentials, updatedAt}` — a last-4-chars
+hint, never the secret or the encrypted blob — and saving credentials fails with `422
+credential_encryption_not_configured` rather than ever falling back to storing them
+unencrypted if that env var isn't set.
+
+In sandbox mode, `POST /api/v1/bills` and the reissue endpoint also echo the one-time
+code back as `otpCodeSandbox`, and `biller.html`'s verification block adds a "simulate
+patient reply" control, so the whole loop — dispatch, OTP, 2-way reply, ambiguity,
+lockout — can still be demoed end-to-end without a real phone or provider. Configure
+with `MESSAGING_SANDBOX`, `CREDENTIAL_ENCRYPTION_KEY`, `MESSAGING_WEBHOOK_SECRET`,
+`PUBLIC_BASE_URL` (used to build the link inside the SMS/WhatsApp text),
+`VERIFICATION_OTP_TTL_MINUTES`, `VERIFICATION_OTP_MAX_ATTEMPTS`.
+
+**Honest per-provider confidence** — none of this could be exercised against a real
+account from inside the environment this was built in (outbound network access there
+is allowlisted to package registries and GitHub only; the adapters were instead tested
+against a mocked HTTP layer, `_setRequestImplForTests` in `messaging.js`), so treat this
+table as what to double-check first once it's live:
+
+| Provider | SMS | WhatsApp |
+| --- | --- | --- |
+| **Twilio** | High confidence — the Messages resource is Twilio's oldest, most stable API | Supported — same endpoint, `whatsapp:` prefix on From/To |
+| **Africa's Talking** | High confidence — confirmed against the official Python SDK's own source | Not implemented — AT offers a WhatsApp product, but its request shape couldn't be confirmed from public docs; sending returns `provider_whatsapp_not_verified` rather than guessing |
+| **Hubtel** | Medium-high confidence — Basic Auth scheme and JSON request shape confirmed from Hubtel's own docs; the domain (`sms.hubtel.com`) is well triangulated but not independently confirmed from this environment | Not offered — Hubtel publishes no WhatsApp product; returns `provider_whatsapp_not_supported` |
+
+Adding a fourth provider (e.g. Meta's WhatsApp Cloud API) means adding one function and
+a line in `messaging.js`'s `ADAPTERS`/`PROVIDER_META`; nothing else in the flow changes.
 
 ## Money split
 
@@ -590,7 +637,11 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 ## Before production
 
 1. **Rotate the leaked Stanbic credential** from the "public" Postman collection
-   (plaintext password for `sbg_transfer_api_tester`). Secrets come from env only here.
+   (plaintext password for `sbg_transfer_api_tester`). Secrets come from env only here
+   — the one deliberate exception is third-party SMS/WhatsApp provider credentials
+   (Twilio / Africa's Talking / Hubtel), which can't be known at deploy time and are
+   instead entered via Master Control and stored encrypted at rest; see **SMS /
+   WhatsApp verification** above.
 2. **Authenticate payer authorisation** — back the secure link / payer API with the
    payer's login + step-up (OTP / signed mandate) before any transfer.
 3. **No PHI over email/WhatsApp** — notifications carry references and links only.
@@ -607,9 +658,10 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 
 - FHIR adapter for EHRs that prefer `Invoice`/`ChargeItem`.
 - Payer-specific validation / pre-authorisation rules before authorise.
-- A real SMS/WhatsApp provider (Twilio, Africa's Talking, Hubtel, Meta's WhatsApp Cloud
-  API, …) wired into `src/services/messaging.js#send()` — the opt-in, OTP, 2-way-reply
-  and sandbox-demo plumbing around it is already built (see **SMS / WhatsApp
-  verification** above); only the provider call itself remains. Email delivery status
-  is still unbuilt.
+- Confirm Africa's Talking WhatsApp and Hubtel's exact API domain against real,
+  live accounts once deployed (see the confidence table under **SMS / WhatsApp
+  verification** above) — both are a reasonable-effort implementation from public
+  docs only, not yet exercised against the real network. A fourth provider, e.g. Meta's
+  WhatsApp Cloud API, is a one-function addition to `messaging.js` once needed. Email
+  delivery status is still unbuilt.
 - Payer remittance statements and clinic payout reports.

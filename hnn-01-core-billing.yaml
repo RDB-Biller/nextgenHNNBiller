@@ -191,13 +191,18 @@ paths:
         '201':
           description: 'Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable).
             A verification link is generated and sent to the patient automatically — the response
-            includes patientVerification:{status,link,channelsSent} as a one-time snapshot (not persisted onto the
-            bill; the live record is read at GET /verify/api/{token}). See the Payer & Claims API for
-            how a payer can require verification before authorising. If this client has SMS and/or WhatsApp
-            verification enabled (see the Master Control API''s /api/platform/clients/{id}/verification-channels),
-            the same message also goes out on those channels with a one-time reply code the patient can text
-            back instead of opening the link; in sandbox mode (no real provider configured) the response also
-            includes otpCodeSandbox so this can be demoed without a phone.'
+            includes patientVerification:{status,link,channelsSent,channelErrors?} as a one-time snapshot
+            (not persisted onto the bill; the live record is read at GET /verify/api/{token}). See the
+            Payer & Claims API for how a payer can require verification before authorising. If this client
+            has SMS and/or WhatsApp verification enabled (see the Master Control API''s /api/platform/clients/{id}/verification-channels),
+            the same message also goes out on those channels with a one-time reply code the patient can
+            text back instead of opening the link; channelErrors.sms / channelErrors.whatsapp report a
+            specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported)
+            for any enabled channel that did not go out, so a missing channel is explained rather than just
+            absent from channelsSent. While the server is in sandbox mode, nothing above is ever sent for
+            real and the response also includes otpCodeSandbox so this can be demoed without a phone — see
+            the Messaging endpoints on the Master Control API for how a real provider is configured and
+            activated.'
     get:
       tags:
       - Bills
@@ -281,9 +286,10 @@ paths:
         description: Bill id
       responses:
         '200':
-          description: '{ status, link, remindersSent, channelsSent }, plus otpCodeSandbox in sandbox mode —
-            reissuing re-sends on whichever channels are enabled and generates a fresh reply code, invalidating
-            any earlier one.'
+          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox
+            while the server is in sandbox mode — reissuing re-sends on whichever channels are enabled and
+            generates a fresh reply code, invalidating any earlier one. channelErrors.sms / channelErrors.whatsapp
+            report a specific failure code for any enabled channel that did not go out this time.'
         '404':
           description: bill_not_found / verification_not_found
         '409':

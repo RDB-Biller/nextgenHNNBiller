@@ -55,6 +55,7 @@ tags:
 - name: Targets
 - name: Price Lists
 - name: Patient Verification
+- name: Messaging
 components:
   securitySchemes:
     PlatformKey:
@@ -89,7 +90,10 @@ paths:
       - Clients
       summary: All clients with edition + feature map
       description: 'Each client''s verificationChannels ({ sms, whatsapp, includeTreatmentDetail }) is included
-        in the listing — all false unless set via PUT .../verification-channels below.'
+        in the listing — all false unless set via PUT .../verification-channels below. Each client''s
+        messagingCredentials (its own bring-your-own-credentials provider account, if any) is included
+        too, masked to { provider, configured, hint, useOwnCredentials, updatedAt } — see the Messaging
+        endpoints below.'
       security:
       - PlatformKey: []
       responses:
@@ -177,8 +181,12 @@ paths:
         webhook (/api/v1/webhooks/messaging-inbound). includeTreatmentDetail is a separate opt-in, off by
         default, for whether the message also lists the treatment/line items; left off, the message carries
         only the amount and the link, consistent with this platform's no-PHI-over-SMS/WhatsApp default.
-        No real provider is wired in yet (see the sandbox note on POST /api/v1/bills) — turning a channel on
-        here is safe to demo before one is chosen.
+        Real delivery now runs through Twilio, Africa's Talking, or Hubtel, resolved per send — this
+        client's own credentials if it has turned on bring-your-own-credentials, else the platform-wide
+        test account if HNN has activated one, else sandbox (log only) — see the Messaging endpoints
+        below. Turning a channel on here is safe before any provider is configured or activated — nothing
+        sends for real until the server also has MESSAGING_SANDBOX set to false and a usable provider
+        resolves for this client.
       security:
       - PlatformKey: []
       parameters:
@@ -208,6 +216,127 @@ paths:
           description: '{ id, verificationChannels: { sms, whatsapp, includeTreatmentDetail } }'
         '404':
           description: client_not_found
+  /api/platform/messaging/providers:
+    get:
+      tags:
+      - Messaging
+      summary: Wired-in SMS/WhatsApp providers, their required fields, and WhatsApp support
+      description: Twilio, Africa's Talking and Hubtel are all wired in; this lists each one's field
+        names for the credentials object used by the two endpoints below (e.g. Twilio needs accountSid,
+        authToken, from), plus an honest per-provider whatsapp status — supported, unverified (documented
+        behaviour not yet confirmed against a live account from this deployment), or unsupported (the
+        provider has no WhatsApp product at all, e.g. Hubtel). encryptionConfigured reports whether the
+        server has a CREDENTIAL_ENCRYPTION_KEY set; saving any credentials below fails with 422 until it
+        does.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: { twilio: {...}, africastalking: {...}, hubtel: {...} }, encryptionConfigured }'
+  /api/platform/messaging/test-account:
+    get:
+      tags:
+      - Messaging
+      summary: Current state of the platform-wide shared test account (masked)
+      description: One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test
+        and deactivate again when done, used by any client below that hasn't turned on its own bring-your-own-credentials.
+        Never returns the encrypted blob or the raw secret — only provider, configured, a last-4-chars
+        hint, active, and updatedAt.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ provider, configured, hint, active, updatedAt }'
+    put:
+      tags:
+      - Messaging
+      summary: Configure and/or activate or deactivate the platform-wide shared test account
+      description: 'Body { provider?, credentials?, active? }. provider is one of twilio, africastalking,
+        hubtel — see GET .../messaging/providers for each one''s field names. Omit credentials to change
+        only active (the deactivate-when-testing-is-over switch) without resupplying the secret; include
+        it to set or replace what''s stored — doing so for a provider other than the one already saved
+        clears the old encrypted blob first, so the UI never shows "configured" with a hint for a different
+        provider''s secret. Rejects (422 no_credentials_configured) any call that would leave active:true
+        with no usable provider+credentials pair, including a bare provider switch with no new credentials
+        while still active — send active:false (or the new credentials) explicitly instead. This sits
+        underneath the server''s own MESSAGING_SANDBOX switch — while that is true, nothing here is ever
+        actually sent, active account or not.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  enum:
+                  - twilio
+                  - africastalking
+                  - hubtel
+                credentials:
+                  type: object
+                  description: Raw provider fields (e.g. accountSid/authToken/from for twilio) — see GET
+                    .../messaging/providers. Stored encrypted; never echoed back.
+                  additionalProperties: true
+                active:
+                  type: boolean
+      responses:
+        '200':
+          description: '{ provider, configured, hint, active, updatedAt }'
+        '422':
+          description: no_credentials_configured / unknown_provider / missing_fields
+  /api/platform/clients/{id}/messaging-credentials:
+    put:
+      tags:
+      - Messaging
+      summary: Configure a client's own "bring your own credentials" provider account
+      description: 'Body { useOwnCredentials?, provider?, credentials? }. When useOwnCredentials is true
+        and a provider + credentials are saved, this client''s own Twilio/Africa''s Talking/Hubtel account
+        is used for every send instead of the platform''s shared test account above — it always wins when
+        on. Same provider list, field names, encryption, and masking as the platform test-account endpoint;
+        see GET .../messaging/providers. Switching provider without new credentials in the same call clears
+        the old encrypted blob rather than keeping it stored under the new provider''s name. Rejects (422
+        no_credentials_configured) turning useOwnCredentials on with no usable provider+credentials pair
+        saved. Master Control is where this is entered on the client''s behalf today; nothing about the
+        storage or sending logic is specific to who calls it.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Client (tenant) id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                useOwnCredentials:
+                  type: boolean
+                  default: false
+                provider:
+                  type: string
+                  enum:
+                  - twilio
+                  - africastalking
+                  - hubtel
+                credentials:
+                  type: object
+                  description: Raw provider fields — see GET .../messaging/providers. Stored encrypted;
+                    never echoed back.
+                  additionalProperties: true
+      responses:
+        '200':
+          description: '{ id, messagingCredentials: { provider, configured, hint, useOwnCredentials, updatedAt } }'
+        '404':
+          description: client_not_found
+        '422':
+          description: no_credentials_configured / unknown_provider / missing_fields
   /api/platform/payers:
     get:
       tags:
