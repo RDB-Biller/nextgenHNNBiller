@@ -25,6 +25,10 @@ async function view(v) {
     clinical: bill?.clinical || null,
     disputeReason: v.disputeReason || null,
     createdAt: v.createdAt, verifiedAt: v.verifiedAt || null, disputedAt: v.disputedAt || null,
+    // Which channels this went out on — lets the page mention the text/WhatsApp reply
+    // option when relevant. Never includes the OTP code, phone number, or attempt state;
+    // those stay server-side (see services/verification.js).
+    channelsSent: v.channelsSent || [],
   };
 }
 

@@ -7,7 +7,7 @@
 <div class="wrap">
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
-    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a></nav>
+    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a><a id="nav-mc" href="platform.html" target="_blank" rel="noopener" style="display:none">Master control</a></nav>
   </div>
   <div class="grid cols-2">
     <div class="grid" style="align-content:start">
@@ -103,6 +103,25 @@
           <a class="api" style="text-decoration:none;text-align:center" href="https://www.trimestersave.com" target="_blank">Savings</a>
           <a class="api" style="text-decoration:none;text-align:center" href="https://confirmu.com" target="_blank">Loans</a>
           <a class="api" style="text-decoration:none;text-align:center" href="https://payangel.com" target="_blank">Remittance</a>
+        </div>
+      </div>
+      <div class="card"><h2>VBC check-in <span class="muted" style="font-weight:400;font-size:12px">clinical indicators, by hand</span></h2>
+        <p class="muted" style="margin-top:0;font-size:13px">For a payer's Value-Based-Care program — an alternative to an EMR feed. Uses the Member/Policy ID and payer above if you've already filled those in for a bill.</p>
+        <div class="row"><div class="field"><label>Insurer / payer ID</label><input id="vbcPayerId" placeholder="e.g. pay_acacia"/></div>
+        <div class="field"><label>Condition <span class="muted" style="font-weight:400">(only for Complication/Follow-up)</span></label>
+          <select id="vbcCondition"><option value="">—</option><option value="hypertension">Hypertension</option><option value="diabetes">Diabetes</option><option value="dyslipidemia">Dyslipidemia</option></select></div></div>
+        <div class="field"><label>Type</label><select id="vbcType" onchange="onVbcTypeChange()">
+          <option value="blood_pressure">Blood pressure</option><option value="hba1c">HbA1c</option><option value="ldl">LDL cholesterol</option>
+          <option value="complication">Complication</option><option value="followup_visit">Completed follow-up visit</option>
+          <option value="screening_completed">Completed screening</option><option value="wellness_visit">Wellness visit</option></select></div>
+        <div class="row" id="vbcBpFields"><div class="field"><label>Systolic</label><input id="vbcSystolic" type="number" placeholder="130"/></div>
+          <div class="field"><label>Diastolic</label><input id="vbcDiastolic" type="number" placeholder="85"/></div></div>
+        <div class="field" id="vbcValueField" style="display:none"><label id="vbcValueLabel">Value</label><input id="vbcValue" type="number" step="0.1"/></div>
+        <button onclick="saveVbcObservation()">Save reading</button>
+        <p class="muted" id="vbcMsg" style="font-size:12px;margin-top:8px"></p>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <p class="muted" style="margin:0 0 6px;font-size:12px">Or set the patient up to log their own readings by text/WhatsApp — they still confirm the code themselves:</p>
+          <div class="row"><button class="ghost mini" onclick="startPatientCheckin()">Text the patient a check-in code</button></div>
         </div>
       </div>
       <div class="card"><h2>Connection</h2><div class="field"><label>API key (tenant)</label><input id="apikey" value="emr_demo_key_123"/></div></div>
@@ -209,7 +228,7 @@ async function ensureBill(){
   if(!r.ok){toast('Bill create failed');return null;}
   const bill=await r.json();
   billId=bill.id;
-  lastVerification=bill.patientVerification?{...bill.patientVerification,billId:bill.id}:null;
+  lastVerification=bill.patientVerification?{...bill.patientVerification,billId:bill.id,phone:body.patient.phone||null}:null;
   return billId;
 }
 // The link a patient uses to confirm (or dispute) this bill — sent automatically
@@ -220,12 +239,29 @@ function verifBlock(){
   const bid=esc(lastVerification.billId);
   const pill=lastVerification.status==='disputed'?'rejected':(lastVerification.status==='verified'?'settled':'awaiting_payer');
   const label=lastVerification.status==='disputed'?'Patient disputed the bill':(lastVerification.status==='verified'?'Patient verified':'Awaiting patient verification');
-  return `<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+  const chans=lastVerification.channelsSent||[];
+  const chanLine=chans.length?`<p style="margin:8px 0 0">Also sent by ${chans.map(c=>c==='whatsapp'?'WhatsApp':'SMS').join(' &amp; ')}${lastVerification.phone?' to '+esc(lastVerification.phone):''}.</p>`:'';
+  const errs=lastVerification.channelErrors||{};
+  const errLine=Object.keys(errs).length?`<p style="margin:8px 0 0;color:var(--bad)">${Object.entries(errs).map(([ch,msg])=>`${ch==='whatsapp'?'WhatsApp':'SMS'} failed: ${esc(msg)}`).join(' · ')}</p>`:'';
+  const otp=lastVerification.otpCodeSandbox;
+  // otpCodeSandbox only comes back from the API in sandbox mode (src/routes/bills.js) —
+  // a real deployment never echoes the code back to the biller, only to the patient.
+  const otpLine=otp?`<p style="margin:8px 0 0"><span class="pill open">sandbox</span> Patient's reply code: <span class="key">${esc(otp)}</span></p>`:'';
+  const demo=chans.length?`<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+      <p class="muted" style="margin:0 0 6px;font-size:12px">Simulate the patient's SMS/WhatsApp reply (sandbox only — no real message is sent):</p>
+      <div style="display:flex;gap:6px">
+        <input id="simReply_${bid}" placeholder="YES or ${esc(otp||'the code')}" style="flex:1"/>
+        <button class="ghost mini" onclick="simulateReply('${bid}',this)">Send</button>
+      </div>
+      <p id="simReplyOut_${bid}" class="muted" style="margin:6px 0 0;font-size:12px"></p>
+    </div>`:'';
+  return `<div id="verifBlockWrap" style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
     <span class="pill ${pill}">${label}</span>
     <p style="margin:8px 0 0">Patient verification link:</p>
     <div class="linkbox">${location.origin}${lastVerification.link}</div>
     <p style="margin:8px 0 0"><a href="${lastVerification.link}" target="_blank">Open patient page →</a>
     &nbsp;·&nbsp;<a href="#" onclick="resendVerification('${bid}',this);return false">Resend link to patient</a></p>
+    ${chanLine}${errLine}${otpLine}${demo}
   </div>`;
 }
 async function resendVerification(id,el){
@@ -235,10 +271,41 @@ async function resendVerification(id,el){
     const r=await fetch(`/api/v1/bills/${id}/verification/reissue`,{method:'POST',headers:hdr()});
     if(!r.ok){const e=await r.json().catch(()=>({}));toast('Resend failed: '+(e.error||r.status));el.textContent=original;return;}
     const v=await r.json();
-    if(lastVerification&&lastVerification.billId===id)lastVerification.status=v.status;
+    if(lastVerification&&lastVerification.billId===id){
+      lastVerification.status=v.status;
+      lastVerification.channelsSent=v.channelsSent||[];
+      lastVerification.channelErrors=v.channelErrors||{};
+      if('otpCodeSandbox' in v)lastVerification.otpCodeSandbox=v.otpCodeSandbox; else delete lastVerification.otpCodeSandbox;
+      const wrap=document.getElementById('verifBlockWrap'); if(wrap)wrap.outerHTML=verifBlock();
+    }
     toast('Verification link resent to patient'+(v.remindersSent?' (reminder #'+v.remindersSent+')':''));
-    el.textContent=original;
   }catch(e){toast('Resend failed');el.textContent=original;}
+}
+// Dev/demo helper only: posts to the same inbound webhook a real SMS/WhatsApp
+// provider would call, using the sandbox's default shared secret
+// (src/config.js messaging.webhookSecret). If MESSAGING_WEBHOOK_SECRET has been
+// changed from its dev default, update the literal below to match.
+async function simulateReply(bid,el){
+  const input=$('simReply_'+bid), out=$('simReplyOut_'+bid);
+  const text=(input&&input.value||'').trim(); if(!text)return;
+  if(!(lastVerification&&lastVerification.billId===bid&&lastVerification.phone)){
+    if(out)out.textContent='No patient phone recorded on this bill.'; return;
+  }
+  const original=el.textContent; el.textContent='Sending…'; el.disabled=true;
+  try{
+    const r=await fetch('/api/v1/webhooks/messaging-inbound',{method:'POST',
+      headers:{'Content-Type':'application/json','x-webhook-secret':'dev-secret'},
+      body:JSON.stringify({from:lastVerification.phone,text,channel:'sms'})});
+    const o=await r.json().catch(()=>({}));
+    if(out)out.textContent=r.ok?`Patient's end sees: "${o.outcome==='confirmed'?'Thanks — confirmed.':o.outcome==='ambiguous'?'Multiple bills pending — code needed.':o.outcome==='wrong_code'?'Wrong code.':o.outcome==='locked'?'Too many tries — use the link.':o.outcome==='no_match'?'Nothing pending for this number.':'Not understood.'}" (outcome: ${o.outcome||'?'})`
+      :'Failed: '+(o.error||r.status);
+    if(o.outcome==='confirmed'&&lastVerification&&lastVerification.billId===bid){
+      lastVerification.status='verified';
+      const wrap=document.getElementById('verifBlockWrap'); if(wrap)wrap.outerHTML=verifBlock();
+    }
+    if(input)input.value='';
+  }catch(e){if(out)out.textContent='Failed';}
+  el.textContent=original; el.disabled=false;
 }
 async function payNow(method){
   const id=await ensureBill();if(!id)return;
@@ -375,5 +442,57 @@ $('apikey').addEventListener('change',loadPayers);
 loadPayers();
 finUI();
 preview();
+
+// ---- VBC check-in: manual clinical-indicator entry (routes/clinical.js) ----
+function onVbcTypeChange(){
+  const t=$('vbcType').value;
+  $('vbcBpFields').style.display = t==='blood_pressure' ? '' : 'none';
+  $('vbcValueField').style.display = (t==='hba1c'||t==='ldl') ? '' : 'none';
+  $('vbcValueLabel').textContent = t==='hba1c' ? 'HbA1c (%)' : 'LDL (mg/dL)';
+}
+async function saveVbcObservation(){
+  const payerId=$('vbcPayerId').value.trim();
+  const memberId=$('member').value.trim();
+  if(!payerId||!memberId){ $('vbcMsg').textContent='Insurer ID and the Member/Policy ID (above, in Patient) are both required.'; return; }
+  const type=$('vbcType').value;
+  const body={payerId,memberId,type,condition:$('vbcCondition').value||undefined};
+  if(type==='blood_pressure'){ body.systolic=parseFloat($('vbcSystolic').value)||undefined; body.diastolic=parseFloat($('vbcDiastolic').value)||undefined; }
+  if(type==='hba1c'||type==='ldl'){ body.value=parseFloat($('vbcValue').value); }
+  try{
+    const r=await fetch('/api/v1/clinical-observations',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
+    const data=await r.json();
+    if(!r.ok){ $('vbcMsg').textContent = data.message || data.error || 'Could not save.'; return; }
+    $('vbcMsg').textContent='Saved.'; toast('Clinical reading saved');
+  }catch(e){ $('vbcMsg').textContent='Could not reach the server.'; }
+}
+async function startPatientCheckin(){
+  const payerId=$('vbcPayerId').value.trim(), memberId=$('member').value.trim(), phone=$('pphone').value.trim();
+  if(!payerId||!memberId||!phone){ $('vbcMsg').textContent='Insurer ID, Member/Policy ID and the patient\'s phone (above, in Patient) are all required.'; return; }
+  try{
+    const r=await fetch('/api/v1/clinical-observations/link',{method:'POST',headers:hdr(),
+      body:JSON.stringify({payerId,memberId,phone,condition:$('vbcCondition').value||undefined})});
+    const data=await r.json();
+    if(!r.ok){ $('vbcMsg').textContent = data.message || data.error || 'Could not start check-in.'; return; }
+    $('vbcMsg').textContent='Code texted to the patient — they confirm it themselves at /clinical/.'; toast('Check-in code sent');
+  }catch(e){ $('vbcMsg').textContent='Could not reach the server.'; }
+}
+
+// Master Control is a convenience shortcut for whoever's at this terminal, not
+// a credential boundary (platform.html still needs its own platform key) — but
+// a clinic terminal has no business one-click-linking to the admin board once
+// real settlement or real messaging is in play. /health needs no key and
+// reflects Master Control's live Operating Mode (see services/operatingMode.js),
+// so show the link only while the whole deployment is still fully sandboxed;
+// it disappears the moment either rail goes live.
+async function showMasterControlLinkIfSandbox(){
+  try{
+    const h=await (await fetch('/health')).json();
+    const m=h&&h.operatingMode;
+    if(m&&m.settlement&&m.messaging&&m.settlement.sandbox&&m.messaging.sandbox){
+      $('nav-mc').style.display='';
+    }
+  }catch(e){/* health check failing shouldn't block the billing terminal */}
+}
+showMasterControlLinkIfSandbox();
 </script>
 </body></html>

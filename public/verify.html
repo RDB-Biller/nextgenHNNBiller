@@ -46,6 +46,8 @@ function render(v){
       <span class="pill rejected">Disputed</span>`;
     return;
   }
+  const chans=v.channelsSent||[];
+  const smsNote=chans.length?`<p class="muted" style="font-size:12px;margin-top:10px">You may also have received this by ${chans.map(c=>c==='whatsapp'?'WhatsApp':'text message').join(' and ')}. Replying <b>YES</b> (or the code it included) confirms it the same as clicking below — you don't need to do both.</p>`:'';
   root.innerHTML=`
     <p class="eyebrow">Please verify your bill</p>
     <div class="bignum">GHS ${num(v.amount)}</div>
@@ -54,7 +56,8 @@ function render(v){
     <div class="row">
       <button class="accent" id="conf" onclick="confirmBill()">Confirm — this is accurate</button>
       <button class="ghost" onclick="disputeBill()">Something's wrong</button>
-    </div>`;
+    </div>
+    ${smsNote}`;
 }
 async function confirmBill(){
   const b=document.getElementById('conf'); b.disabled=true; b.textContent='Confirming…';

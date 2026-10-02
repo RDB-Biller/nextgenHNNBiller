@@ -24,6 +24,10 @@
     <div class="card"><h2>Revenue by type</h2><div id="byType"></div></div>
     <div class="card"><h2>Revenue by client</h2><div id="byClient"></div></div>
   </div>
+  <div class="card" style="margin-top:16px"><h2>Revenue by payer</h2>
+    <p class="muted" style="margin-top:0;font-size:12px">Expedited-settlement and per-claim commission fees, attributed to the payer that owes them. A fee with no payer attached (e.g. a patient-charged report fee) isn't counted here — see "by type" above for the full picture.</p>
+    <div id="byPayer"></div>
+  </div>
   <div class="card" style="margin-top:16px"><h2>Recent fee activity</h2><div id="recent"></div></div>
   <p class="muted" id="note" style="font-size:12px;margin-top:10px"></p>
 </div>
@@ -50,8 +54,14 @@ async function load(){
   const maxC=Math.max(1,...s.byClient.map(c=>c.total));
   $('byClient').innerHTML=s.byClient.length?s.byClient.map(c=>`
     <div class="rev-row"><span class="lbl">${esc(c.name)}</span>
-      <div class="barwrap"><span class="bar" style="width:${Math.round(c.total/maxC*100)}%;background:var(--coral)"></span></div>
+      <div class="barwrap"><span class="bar" style="width:${Math.round(c.total/maxC*100)}%;background:var(--accent)"></span></div>
       <span class="amt">GHS ${n2(c.total)}</span></div>`).join(''):'<p class="muted">No revenue yet.</p>';
+  const byPayer=s.byPayer||[];
+  const maxP=Math.max(1,...byPayer.map(p=>p.total));
+  $('byPayer').innerHTML=byPayer.length?byPayer.map(p=>`
+    <div class="rev-row"><span class="lbl">${esc(p.name)}</span>
+      <div class="barwrap"><span class="bar" style="width:${Math.round(p.total/maxP*100)}%;background:var(--warn)"></span></div>
+      <span class="amt">GHS ${n2(p.total)}</span></div>`).join(''):'<p class="muted">No payer-attributed revenue yet.</p>';
   $('note').textContent=s.note;
 
   const r=await (await fetch('/api/platform/revenue/recent?limit=40',{headers:H()})).json();

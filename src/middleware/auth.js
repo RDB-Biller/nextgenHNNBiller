@@ -14,6 +14,21 @@ async function authTenant(req, res, next) {
   } catch (e) { next(e); }
 }
 
+/** Authenticate an EMR/EHR partner by API key — the one source clinical
+ *  observations (Product Development Environment / VBC) are ever accepted
+ *  from. Separate from authTenant: an EMR partner isn't a clinic/hospital
+ *  tenant and has no bill/claims access, only this one feed. */
+async function authEmrPartner(req, res, next) {
+  try {
+    const key = req.header('x-api-key');
+    if (!key) return res.status(401).json({ error: 'missing_api_key' });
+    const partner = await store.emrPartners.byApiKey(key);
+    if (!partner) return res.status(401).json({ error: 'invalid_api_key' });
+    req.emrPartner = partner;
+    next();
+  } catch (e) { next(e); }
+}
+
 /**
  * Enforce the licensing policy. A no-op while the platform is non-commercial and
  * fee-free (the current default): it only blocks when HNN has switched the policy
@@ -43,4 +58,4 @@ function errorHandler(err, req, res, _next) {
   res.status(status).json(payload);
 }
 
-module.exports = { authTenant, requireLicense, errorHandler };
+module.exports = { authTenant, authEmrPartner, requireLicense, errorHandler };

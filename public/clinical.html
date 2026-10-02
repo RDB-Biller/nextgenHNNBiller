@@ -1,0 +1,215 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Clinical Check-in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap" style="max-width:560px">
+  <div class="top"><div class="brandmark">Check-in<span class="dot">.</span></div><span class="muted">Value-Based-Care</span></div>
+
+  <div class="card" id="step-link">
+    <h2>Set up text/WhatsApp check-ins</h2>
+    <p class="muted" style="margin-top:0">Enter your insurer, member ID and phone once. We'll text a code to confirm it's really you — after that you can log readings here, or just text them in any time.</p>
+    <div class="field"><label>Insurer / payer ID</label><input id="payerId" placeholder="e.g. pay_acacia"/></div>
+    <div class="row"><div class="field"><label>Member / Policy ID</label><input id="memberId" placeholder="ACA-00123"/></div>
+    <div class="field"><label>Phone</label><input id="phone" placeholder="0241234567"/></div></div>
+    <div class="field"><label>Condition <span class="muted" style="font-weight:400">(only needed for COMPLICATION/FOLLOW-UP texts — BP/HbA1c/LDL always work either way)</span></label>
+      <select id="condition"><option value="">—</option></select>
+    </div>
+    <button class="accent" id="sendCodeBtn" onclick="sendCode()">Send me a code</button>
+    <p class="muted" id="linkMsg" style="font-size:13px;margin-top:10px"></p>
+  </div>
+
+  <div class="card" id="step-confirm" style="display:none">
+    <h2>Enter the code</h2>
+    <p class="muted" style="margin-top:0" id="confirmSubtitle">We texted a 6-digit code to your phone.</p>
+    <div class="row"><input id="code" placeholder="123456" style="max-width:160px" inputmode="numeric"/>
+      <button class="accent" onclick="confirmCode()">Confirm</button>
+      <button class="ghost" onclick="resendCode()">Resend</button></div>
+    <p class="muted" id="confirmMsg" style="font-size:13px;margin-top:10px"></p>
+  </div>
+
+  <div class="card" id="step-active" style="display:none">
+    <p class="eyebrow">Confirmed</p>
+    <h2 style="margin-top:0">Log a reading</h2>
+    <p class="muted" id="activeWho" style="margin-top:0"></p>
+    <div class="field"><label>What are you logging?</label>
+      <select id="type" onchange="onTypeChange()">
+        <option value="blood_pressure">Blood pressure</option>
+        <option value="hba1c">HbA1c</option>
+        <option value="ldl">LDL cholesterol</option>
+        <option value="complication">A complication / hospital visit</option>
+        <option value="followup_visit">Completed follow-up visit</option>
+        <option value="screening_completed">Completed a screening (e.g. breast screening)</option>
+        <option value="wellness_visit">Wellness / spa visit</option>
+      </select>
+    </div>
+    <div class="row" id="bpFields"><div class="field"><label>Systolic</label><input id="systolic" type="number" placeholder="130"/></div>
+      <div class="field"><label>Diastolic</label><input id="diastolic" type="number" placeholder="85"/></div></div>
+    <div class="field" id="valueField" style="display:none"><label id="valueLabel">Value</label><input id="value" type="number" step="0.1" placeholder="6.8"/></div>
+    <div class="field"><label>Note (optional)</label><input id="note" placeholder="optional"/></div>
+    <button class="accent" onclick="submitReading()">Save reading</button>
+    <p class="muted" id="submitMsg" style="font-size:13px;margin-top:10px"></p>
+
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+      <h2 style="margin-bottom:6px">Prefer texting?</h2>
+      <p class="muted" style="font-size:13px;margin:0">Message the number your clinic gave you with things like:</p>
+      <p style="font-size:13px;margin:6px 0"><span class="key">BP 130/85</span> · <span class="key">HBA1C 6.8</span> · <span class="key">LDL 110</span> · <span class="key">COMPLICATION</span> · <span class="key">FOLLOWUP</span></p>
+      <p class="muted" style="font-size:13px;margin:0">Text <span class="key">STOP</span> any time to opt out, or <span class="key">HELP</span> for this list again.</p>
+    </div>
+
+    <div id="simWrap" style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);display:none">
+      <p class="muted" style="margin:0 0 6px;font-size:12px">Simulate your own text message (sandbox only — no real message is sent):</p>
+      <div class="row"><input id="simText" placeholder='e.g. BP 130/85'/><button class="ghost mini" onclick="simulateText()">Send</button></div>
+      <p class="muted" id="simOut" style="font-size:12px;margin-top:6px"></p>
+    </div>
+
+    <div style="margin-top:14px"><h2 style="margin-bottom:6px">Recent readings</h2><div id="recent" class="ledger"><p class="muted">Nothing logged yet.</p></div></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let session = null; // {id, token, payerId, memberId, phone}
+try { const saved = JSON.parse(localStorage.getItem('clinicalSession')||'null'); if (saved && saved.id) session = saved; } catch(e) {}
+
+async function loadConditions(){
+  try{
+    const r = await fetch('/clinical/api/conditions');
+    if(!r.ok) return;
+    const {conditions} = await r.json();
+    $('condition').innerHTML = '<option value="">—</option>' + conditions.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('');
+  }catch(e){}
+}
+
+function showStep(step){
+  ['step-link','step-confirm','step-active'].forEach(id=>$(id).style.display = (id===step ? '' : 'none'));
+}
+
+async function sendCode(){
+  const payerId=$('payerId').value.trim(), memberId=$('memberId').value.trim(), phone=$('phone').value.trim(), condition=$('condition').value||undefined;
+  if(!payerId||!memberId||!phone){ $('linkMsg').textContent='Insurer, member ID and phone are all required.'; return; }
+  const btn=$('sendCodeBtn'); btn.disabled=true; btn.textContent='Sending…';
+  try{
+    const r=await fetch('/clinical/api/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payerId,memberId,phone,condition})});
+    const data=await r.json();
+    if(!r.ok){ $('linkMsg').textContent = data.message || data.error || 'Could not send a code — check the details and try again.'; btn.disabled=false; btn.textContent='Send me a code'; return; }
+    session = { id: data.id, payerId: data.payerId, memberId: data.memberId, phone };
+    $('confirmSubtitle').textContent = `We texted a 6-digit code to ${phone}.`;
+    $('confirmMsg').textContent='';
+    showStep('step-confirm');
+  }catch(e){ $('linkMsg').textContent='Could not reach the server — try again.'; }
+  btn.disabled=false; btn.textContent='Send me a code';
+}
+
+async function confirmCode(){
+  if(!session){ toast('Start over — session lost'); showStep('step-link'); return; }
+  const code=$('code').value.trim();
+  if(!code){ return; }
+  try{
+    const r=await fetch(`/clinical/api/link/${encodeURIComponent(session.id)}/confirm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+    const data=await r.json();
+    if(!r.ok){ $('confirmMsg').textContent = data.message || data.error || 'That code did not work.'; return; }
+    session = { ...session, token: data.token, condition: data.condition };
+    try{ localStorage.setItem('clinicalSession', JSON.stringify(session)); }catch(e){}
+    enterActive();
+    toast('Confirmed — you can log or text readings now');
+  }catch(e){ $('confirmMsg').textContent='Could not reach the server — try again.'; }
+}
+
+async function resendCode(){
+  if(!session) return;
+  try{
+    await fetch(`/clinical/api/link/${encodeURIComponent(session.id)}/resend`,{method:'POST'});
+    toast('New code sent');
+  }catch(e){ toast('Could not resend'); }
+}
+
+function enterActive(){
+  $('activeWho').textContent = `${session.payerId} · ${session.memberId}${session.condition?' · '+session.condition:''}`;
+  showStep('step-active');
+  onTypeChange();
+  loadRecent();
+  // The simulate-SMS box is only useful in sandbox mode; harmless either way
+  // since it goes through the real signed webhook, but hide it by default
+  // noise in a live deployment.
+  fetch('/health').then(r=>r.json()).then(h=>{ if(h.operatingMode && h.operatingMode.messaging && h.operatingMode.messaging.sandbox) $('simWrap').style.display=''; }).catch(()=>{});
+}
+
+function onTypeChange(){
+  const t=$('type').value;
+  const isBp = t==='blood_pressure';
+  const needsValue = t==='hba1c' || t==='ldl';
+  $('bpFields').style.display = isBp ? '' : 'none';
+  $('valueField').style.display = needsValue ? '' : 'none';
+  $('valueLabel').textContent = t==='hba1c' ? 'HbA1c (%)' : 'LDL (mg/dL)';
+}
+
+async function submitReading(){
+  if(!session || !session.token){ toast('Please confirm your code first'); showStep('step-confirm'); return; }
+  const type=$('type').value;
+  const body={ type, note: $('note').value || undefined };
+  if(type==='blood_pressure'){ body.systolic=parseFloat($('systolic').value)||undefined; body.diastolic=parseFloat($('diastolic').value)||undefined; }
+  if(type==='hba1c'||type==='ldl'){ body.value=parseFloat($('value').value); }
+  try{
+    const r=await fetch(`/clinical/api/link/${encodeURIComponent(session.id)}/observations`,{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token}, body:JSON.stringify(body)});
+    const data=await r.json();
+    if(!r.ok){ $('submitMsg').textContent = data.message || data.error || 'Could not save that reading.'; return; }
+    $('submitMsg').textContent='Saved. Thank you.'; toast('Reading saved');
+    $('note').value=''; loadRecent();
+  }catch(e){ $('submitMsg').textContent='Could not reach the server — try again.'; }
+}
+
+function describeObs(o){
+  if(o.type==='blood_pressure') return `BP ${o.systolic}${o.diastolic!=null?'/'+o.diastolic:''}`;
+  if(o.type==='hba1c') return `HbA1c ${o.value}%`;
+  if(o.type==='ldl') return `LDL ${o.value}`;
+  if(o.type==='complication') return 'Complication';
+  if(o.type==='followup_visit') return 'Follow-up visit';
+  if(o.type==='screening_completed') return 'Screening completed';
+  if(o.type==='wellness_visit') return 'Wellness visit';
+  return o.type;
+}
+
+async function loadRecent(){
+  if(!session || !session.token) return;
+  try{
+    const r=await fetch(`/clinical/api/link/${encodeURIComponent(session.id)}/observations`,{headers:{'Authorization':'Bearer '+session.token}});
+    if(!r.ok) return;
+    const {data}=await r.json();
+    const rows=(data||[]).slice(-8).reverse().map(o=>{
+      const when=new Date(o.recordedAt).toLocaleDateString();
+      const src=o.source==='patient_sms'?' · by text':(o.source==='manual_hospital'?' · by clinic':'');
+      return `<div class="line"><span>${esc(describeObs(o))}${esc(src)}</span><span class="muted" style="font-size:12px">${esc(when)}</span></div>`;
+    }).join('');
+    $('recent').innerHTML = rows || '<p class="muted">Nothing logged yet.</p>';
+  }catch(e){}
+}
+
+// Dev/demo helper only: posts to the same inbound webhook a real SMS/WhatsApp
+// provider would call, using the sandbox's default shared secret
+// (src/config.js messaging.webhookSecret) — same pattern as biller.html's
+// "simulate the patient's reply" card.
+async function simulateText(){
+  if(!session) return;
+  const text=$('simText').value.trim(); if(!text) return;
+  try{
+    const r=await fetch('/api/v1/webhooks/messaging-inbound',{method:'POST',
+      headers:{'Content-Type':'application/json','x-webhook-secret':'dev-secret'},
+      body:JSON.stringify({from:session.phone,text,channel:'sms'})});
+    const o=await r.json().catch(()=>({}));
+    $('simOut').textContent = r.ok ? `Outcome: ${o.outcome||'?'}` : 'Failed: '+(o.error||r.status);
+    $('simText').value='';
+    loadRecent();
+  }catch(e){ $('simOut').textContent='Failed'; }
+}
+
+loadConditions();
+if(session && session.token){ enterActive(); }
+else if(session && session.id){ showStep('step-confirm'); }
+</script>
+</body></html>

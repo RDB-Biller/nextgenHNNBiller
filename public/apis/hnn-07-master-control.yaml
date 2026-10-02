@@ -46,6 +46,7 @@ tags:
 - name: Clients
 - name: Editions
 - name: Payers
+- name: Payer Commission
 - name: EMR partners
 - name: IT leads
 - name: Licences
@@ -55,6 +56,9 @@ tags:
 - name: Targets
 - name: Price Lists
 - name: Patient Verification
+- name: Messaging
+- name: Operating Mode
+- name: Product Lab
 components:
   securitySchemes:
     PlatformKey:
@@ -62,6 +66,13 @@ components:
       in: header
       name: x-platform-key
       description: SaaS owner master key
+    EmrPartnerKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: An EMR/EHR partner's own key (created via POST .../emr-partners above) — distinct
+        from a clinic/hospital tenant's key of the same header name on the core billing API. Only
+        used for POST /api/v1/emr/observations below; an EMR partner has no other access.
 paths:
   /api/platform/me:
     get:
@@ -88,6 +99,11 @@ paths:
       tags:
       - Clients
       summary: All clients with edition + feature map
+      description: 'Each client''s verificationChannels ({ sms, whatsapp, includeTreatmentDetail }) is included
+        in the listing — all false unless set via PUT .../verification-channels below. Each client''s
+        messagingCredentials (its own bring-your-own-credentials provider account, if any) is included
+        too, masked to { provider, configured, hint, useOwnCredentials, updatedAt } — see the Messaging
+        endpoints below.'
       security:
       - PlatformKey: []
       responses:
@@ -164,11 +180,364 @@ paths:
           description: client_not_found
         '422':
           description: unknown_edition
+  /api/platform/clients/{id}/verification-channels:
+    put:
+      tags:
+      - Patient Verification
+      summary: Turn on SMS and/or WhatsApp delivery of the patient verification message for this client
+      description: Off for every channel by default. When a channel is on, the same verification link sent
+        automatically at billing time (and on resend) also goes out on that channel, with a one-time reply
+        code the patient can text back instead of opening the link — see the Core Billing API's inbound
+        webhook (/api/v1/webhooks/messaging-inbound). includeTreatmentDetail is a separate opt-in, off by
+        default, for whether the message also lists the treatment/line items; left off, the message carries
+        only the amount and the link, consistent with this platform's no-PHI-over-SMS/WhatsApp default.
+        Real delivery now runs through Twilio, Africa's Talking, or Hubtel, resolved per send — this
+        client's own credentials if it has turned on bring-your-own-credentials, else the platform-wide
+        test account if HNN has activated one, else sandbox (log only) — see the Messaging endpoints
+        below. Turning a channel on here is safe before any provider is configured or activated — nothing
+        sends for real until the server also has MESSAGING_SANDBOX set to false and a usable provider
+        resolves for this client.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Client (tenant) id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sms:
+                  type: boolean
+                  default: false
+                whatsapp:
+                  type: boolean
+                  default: false
+                includeTreatmentDetail:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: '{ id, verificationChannels: { sms, whatsapp, includeTreatmentDetail } }'
+        '404':
+          description: client_not_found
+  /api/platform/messaging/providers:
+    get:
+      tags:
+      - Messaging
+      summary: Wired-in SMS/WhatsApp providers, their required fields, and WhatsApp support
+      description: Twilio, Africa's Talking and Hubtel are all wired in; this lists each one's field
+        names for the credentials object used by the two endpoints below (e.g. Twilio needs accountSid,
+        authToken, from), plus an honest per-provider whatsapp status — supported, unverified (documented
+        behaviour not yet confirmed against a live account from this deployment), or unsupported (the
+        provider has no WhatsApp product at all, e.g. Hubtel). encryptionConfigured reports whether the
+        server has a CREDENTIAL_ENCRYPTION_KEY set; saving any credentials below fails with 422 until it
+        does.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: { twilio: {...}, africastalking: {...}, hubtel: {...} }, encryptionConfigured }'
+  /api/platform/messaging/test-account:
+    get:
+      tags:
+      - Messaging
+      summary: Current state of the platform-wide shared test account (masked)
+      description: One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test
+        and deactivate again when done, used by any client below that hasn't turned on its own bring-your-own-credentials.
+        Never returns the encrypted blob or the raw secret — only provider, configured, a last-4-chars
+        hint, active, and updatedAt.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ provider, configured, hint, active, updatedAt }'
+    put:
+      tags:
+      - Messaging
+      summary: Configure and/or activate or deactivate the platform-wide shared test account
+      description: 'Body { provider?, credentials?, active? }. provider is one of twilio, africastalking,
+        hubtel — see GET .../messaging/providers for each one''s field names. Omit credentials to change
+        only active (the deactivate-when-testing-is-over switch) without resupplying the secret; include
+        it to set or replace what''s stored — doing so for a provider other than the one already saved
+        clears the old encrypted blob first, so the UI never shows "configured" with a hint for a different
+        provider''s secret. Rejects (422 no_credentials_configured) any call that would leave active:true
+        with no usable provider+credentials pair, including a bare provider switch with no new credentials
+        while still active — send active:false (or the new credentials) explicitly instead. This sits
+        underneath the server''s own MESSAGING_SANDBOX switch — while that is true, nothing here is ever
+        actually sent, active account or not.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  enum:
+                  - twilio
+                  - africastalking
+                  - hubtel
+                credentials:
+                  type: object
+                  description: Raw provider fields (e.g. accountSid/authToken/from for twilio) — see GET
+                    .../messaging/providers. Stored encrypted; never echoed back.
+                  additionalProperties: true
+                active:
+                  type: boolean
+      responses:
+        '200':
+          description: '{ provider, configured, hint, active, updatedAt }'
+        '422':
+          description: no_credentials_configured / unknown_provider / missing_fields
+  /api/platform/clients/{id}/messaging-credentials:
+    put:
+      tags:
+      - Messaging
+      summary: Configure a client's own "bring your own credentials" provider account
+      description: 'Body { useOwnCredentials?, provider?, credentials? }. When useOwnCredentials is true
+        and a provider + credentials are saved, this client''s own Twilio/Africa''s Talking/Hubtel account
+        is used for every send instead of the platform''s shared test account above — it always wins when
+        on. Same provider list, field names, encryption, and masking as the platform test-account endpoint;
+        see GET .../messaging/providers. Switching provider without new credentials in the same call clears
+        the old encrypted blob rather than keeping it stored under the new provider''s name. Rejects (422
+        no_credentials_configured) turning useOwnCredentials on with no usable provider+credentials pair
+        saved. Master Control is where this is entered on the client''s behalf today; nothing about the
+        storage or sending logic is specific to who calls it.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Client (tenant) id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                useOwnCredentials:
+                  type: boolean
+                  default: false
+                provider:
+                  type: string
+                  enum:
+                  - twilio
+                  - africastalking
+                  - hubtel
+                credentials:
+                  type: object
+                  description: Raw provider fields — see GET .../messaging/providers. Stored encrypted;
+                    never echoed back.
+                  additionalProperties: true
+      responses:
+        '200':
+          description: '{ id, messagingCredentials: { provider, configured, hint, useOwnCredentials, updatedAt } }'
+        '404':
+          description: client_not_found
+        '422':
+          description: no_credentials_configured / unknown_provider / missing_fields
+  /api/platform/operating-mode:
+    get:
+      tags:
+      - Operating Mode
+      summary: Live sandbox/live state of both rails (Settlement + Messaging)
+      description: 'The runtime-authoritative switch. SBG_SANDBOX/MESSAGING_SANDBOX only seed the
+        starting default the first time this is read with nothing saved yet (seededFromEnv: true
+        in the response). Once anything here has been saved via the PUT below, this record governs
+        at runtime, independent of those env vars, until a restart with an empty database. The two
+        rails are switched independently, which is what makes a hybrid deployment possible — e.g.
+        Messaging live while Settlement stays sandboxed for further testing, or vice versa.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ settlement: { sandbox }, messaging: { sandbox }, updatedAt, updatedBy, seededFromEnv }'
+    put:
+      tags:
+      - Operating Mode
+      summary: Switch Settlement and/or Messaging between sandbox and live
+      description: 'Body { settlement?: { sandbox }, messaging?: { sandbox }, confirm? }. Only the
+        rail(s) actually included are changed; the other keeps whatever it currently resolves to.
+        Switching settlement.sandbox to false (live) moves real money through Stanbic for every payer
+        with settlement credentials configured, so it requires confirm set to exactly "LIVE" (case-sensitive)
+        in the same call — otherwise this returns 422 confirmation_required and nothing is changed.
+        Messaging has no such requirement in either direction, since going live there only costs SMS/WhatsApp
+        send fees, not bank risk. Switching either rail back to sandbox never requires confirm.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settlement:
+                  type: object
+                  properties:
+                    sandbox:
+                      type: boolean
+                messaging:
+                  type: object
+                  properties:
+                    sandbox:
+                      type: boolean
+                confirm:
+                  type: string
+                  description: Must be exactly "LIVE" when switching settlement.sandbox to false; ignored
+                    otherwise
+      responses:
+        '200':
+          description: '{ settlement, messaging, updatedAt, updatedBy, seededFromEnv }'
+        '422':
+          description: confirmation_required — switching Settlement to live without confirm:"LIVE"
+  /api/platform/metrics-library:
+    get:
+      tags:
+      - Product Lab
+      summary: Pre-built metric definitions a VBC program is built from
+      description: 'Query params domain? (vbc|campaign|loyalty) and condition? (hypertension|diabetes|dyslipidemia)
+        narrow the list, e.g. ?domain=vbc&condition=diabetes to populate a condition-specific metric
+        picker. Each metric''s clinical/behavioural definition (what counts as "at target", etc) is
+        fixed here — a product manager building a program picks from this list and assigns a weight,
+        rather than inventing a metric from scratch. See services/metricsLibrary.js.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ conditions: [{id,label}], metrics: [{id,domain,condition,label,unit,higherIsBetter}] }'
+  /api/platform/products:
+    get:
+      tags:
+      - Product Lab
+      summary: List products (VBC programs, promotional campaigns, loyalty programs)
+      description: Query params payerId? and type? (vbc|campaign|loyalty) narrow the list.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: [Product] }'
+    post:
+      tags:
+      - Product Lab
+      summary: Build a new product, as a draft
+      description: 'Body { payerId, type: vbc|campaign|loyalty, name, description?, config }. config''s
+        required shape depends on type — see services/products.js#validateConfig: vbc needs condition
+        + metrics[{metricId,weight}] (+ optional metricParams, providerTiers, patientCashback); campaign
+        needs targetAction + startDate + endDate (+ optional patientReward, providerReward); loyalty
+        needs qualifyingAction + rewardPerAction (+ optional partnerCategory, capPerPeriod). providers
+        (an array of client ids) is accepted on every type. A fresh product always starts in draft —
+        see POST .../status to move it to sandbox, then live.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The created Product
+        '422':
+          description: invalid_type | invalid_condition | unknown_metric | metric_condition_mismatch
+            | at_least_one_metric_required | targetAction_required | rewardPerAction_required | ... —
+            see products.js#validateConfig for the complete list
+        '404':
+          description: unknown_payer
+  /api/platform/products/{id}:
+    get:
+      tags:
+      - Product Lab
+      summary: Get one product
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The Product
+        '404':
+          description: unknown_product
+    put:
+      tags:
+      - Product Lab
+      summary: Update a product's name, description, or config
+      description: Body { name?, description?, config? }. A partial config is merged onto the existing
+        one, then re-validated as a whole (so you can patch just e.g. providerTiers without resending
+        everything else).
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The updated Product
+  /api/platform/products/{id}/status:
+    post:
+      tags:
+      - Product Lab
+      summary: Move a product between draft, sandbox, and live
+      description: 'Body { status: draft|sandbox|live }. Only one step at a time, in order
+        (draft<->sandbox<->live) — draft can''t jump straight to live. live is stamped with publishedAt
+        the first time it''s reached. Right now every status computes and accrues identically (nothing
+        disburses automatically in any status — see Operating Mode-style gating note in incentives.js
+        for the obvious future seam); the status is about organisational readiness, not a money gate,
+        today.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The updated Product
+        '422':
+          description: invalid_transition
+  /api/platform/products/{id}/preview:
+    post:
+      tags:
+      - Product Lab
+      summary: Run the scoring/reward engine for a period WITHOUT writing anything
+      description: Body { from?, to? } (ISO dates, both optional/open-ended). Lets a product manager
+        see what a program would pay out before committing to it. Safe to call as often as you like.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ enrolledCount, providers: [{tenantId,score?,amount?,currency?,kind?,reason?}],
+            patients: [{memberId,score?,amount?,currency?,kind?,reason?}] }'
+  /api/platform/products/{id}/accrue:
+    post:
+      tags:
+      - Product Lab
+      summary: Run the same engine as /preview and WRITE one accrual row per rewarded/penalised party
+      description: Body { from?, to? }. Figures accrue for review only — nothing disburses automatically
+        (see services/incentives.js). Calling this twice for the same period double-counts; the UI
+        shows accrual history per product precisely so that's visible, not hidden.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ results: <same shape as /preview>, accrued: [IncentiveAccrual] }'
+  /api/platform/products/{id}/accruals:
+    get:
+      tags:
+      - Product Lab
+      summary: Accrual history for one product
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: [IncentiveAccrual] }'
   /api/platform/payers:
     get:
       tags:
       - Payers
-      summary: Global payers
+      summary: Global payers, with edition, commission and settlement-credentials state
+      description: 'Each payer''s commercial edition and licence state is included (edition, editionUpdatedAt,
+        licence — see the Editions endpoints), its per-claim commission masked to { enabled, rate,
+        cap, updatedAt } (see PUT .../commission), and its Stanbic/SBG settlement credentials masked
+        to { configured, hint, updatedAt, updatedBy } plus legacySettlementCredentialsConfigured, which
+        is true when an older plaintext payer.sbg credential is what''s actually in effect because
+        nothing''s been saved via PUT .../settlement-credentials yet.'
       security:
       - PlatformKey: []
       responses:
@@ -183,6 +552,177 @@ paths:
       responses:
         '201':
           description: Created
+  /api/platform/payers/{id}/edition:
+    put:
+      tags:
+      - Editions
+      summary: Transition a payer between editions (both directions)
+      description: Instant, reversible, non-destructive — mirrors PUT .../clients/{id}/edition. Unlike
+        a hospital client, a payer's edition does not gate its own feature access (NNEST, price lists,
+        targets, prior approvals keep working regardless of edition); it only gates whether the per-claim
+        commission below can be enabled.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - edition
+              properties:
+                edition:
+                  type: string
+                  enum:
+                  - non_commercial
+                  - commercial
+      responses:
+        '200':
+          description: '{ payerId, name, from, to }'
+        '404':
+          description: payer_not_found
+        '422':
+          description: unknown_edition
+  /api/platform/payers/{id}/commission:
+    put:
+      tags:
+      - Payer Commission
+      summary: Set a commercial payer's per-claim platform commission
+      description: 'Body { enabled?, rate? } — either alone leaves the other untouched. rate accepts
+        0..1 or 0..100 and is clamped to 15%. This commission is separate from, and additional to,
+        whatever expedited-settlement fee a hospital''s own pricing rules may already charge this same
+        payer (see the Core Billing API''s revenue rules) — both can accrue on the same settled claim.
+        Returns 402 upgrade_required if the payer is not currently commercial; upgrade it first via
+        PUT .../edition.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                rate:
+                  type: number
+                  description: 0..1 or 0..100; clamped to 15%
+      responses:
+        '200':
+          description: '{ payerId, commission: { enabled, rate, updatedAt, updatedBy }, cap }'
+        '402':
+          description: upgrade_required — payer is non_commercial
+        '404':
+          description: payer_not_found
+  /api/platform/payers/{id}/renew:
+    post:
+      tags:
+      - Licensing
+      summary: Renew a payer's licence for another term (default 6 months)
+      description: Mirrors POST .../clients/{id}/renew. Extends from the later of now or current expiry.
+        feeAmount records what was charged (0 while free).
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                termMonths:
+                  type: integer
+                  default: 6
+                feeAmount:
+                  type: number
+                  default: 0
+      responses:
+        '200':
+          description: '{ payerId, name, edition, expiresAt, termMonths, feeAmount, key }'
+        '404':
+          description: payer_not_found
+  /api/platform/payers/{id}/settlement-credentials:
+    put:
+      tags:
+      - Operating Mode
+      summary: Set a payer's Stanbic/SBG marketplace username/password (encrypted at rest)
+      description: 'Body { username, password }, both required. Used to authorise the A2A transfer
+        to a provider — see services/settlement.js#clientForPayer() in the Core Billing API. Stored
+        encrypted the same way SMS/WhatsApp provider credentials are (CREDENTIAL_ENCRYPTION_KEY must
+        be set on the server); never echoed back, only masked as { configured, hint, updatedAt, updatedBy
+        }. Falls back to a legacy plaintext credential already on the payer record whenever nothing''s
+        saved here — see legacySettlementCredentialsConfigured on GET .../payers.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - username
+              - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: '{ payerId, settlementCredentials: { configured, hint, updatedAt, updatedBy } }'
+        '404':
+          description: payer_not_found
+        '422':
+          description: username_and_password_required / credential_encryption_not_configured
+    delete:
+      tags:
+      - Operating Mode
+      summary: Clear a payer's encrypted settlement credentials
+      description: Reverts to whatever legacy plaintext payer.sbg credential exists on the record,
+        or none at all.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      responses:
+        '200':
+          description: '{ payerId, settlementCredentials }'
+        '404':
+          description: payer_not_found
   /api/platform/emr-partners:
     get:
       tags:
@@ -202,6 +742,68 @@ paths:
       responses:
         '201':
           description: Created
+  /api/v1/emr/observations:
+    post:
+      tags:
+      - EMR partners
+      - Product Lab
+      summary: Push clinical observations (one of four ways this data reaches the Product Lab)
+      description: 'Not under /api/platform — called directly by the partner itself, authenticated
+        with the key POST .../emr-partners issued it (header x-api-key, NOT a tenant''s key despite
+        the same header name — see the EmrPartnerKey security scheme). This is the automated feed;
+        it bills procedures/medicines, not diagnoses or vitals, everywhere else. Body is either one
+        observation object, or { observations: [ ...observation objects ] } for batch sync. Each
+        observation: { payerId, memberId, type, condition?, tenantId?, value?, systolic?, diastolic?,
+        unit?, recordedAt? }. type must be one of blood_pressure | hba1c | ldl | complication |
+        followup_visit | screening_completed | wellness_visit — see services/observations.js.
+
+
+        A clinic with no EMR integration can instead key a reading in by hand, tenant-authenticated,
+        at POST /api/v1/clinical-observations (Clinical tag, Core Billing API) — source:manual_hospital
+        on the stored row. A patient can self-report their own readings once their phone is linked to
+        a payer+member: the public web portal at /clinical/, or texting things like "BP 130/85" to
+        whichever number the clinic gave them (source:manual_patient / patient_sms respectively — see
+        services/clinicalLinks.js and the updated /api/v1/webhooks/messaging-inbound in the Core Billing
+        API). All four sources land in the same table with the same shape, distinguished only by `source`.'
+      security:
+      - EmrPartnerKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payerId:
+                  type: string
+                memberId:
+                  type: string
+                type:
+                  type: string
+                  enum: [blood_pressure, hba1c, ldl, complication, followup_visit, screening_completed, wellness_visit]
+                condition:
+                  type: string
+                  enum: [hypertension, diabetes, dyslipidemia]
+                tenantId:
+                  type: string
+                  description: Which participating provider this observation is attributed to, if known
+                value:
+                  type: number
+                systolic:
+                  type: number
+                diastolic:
+                  type: number
+                recordedAt:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: '{ ok: true, count, data: [ClinicalObservation] }'
+        '401':
+          description: missing_api_key | invalid_api_key
+        '422':
+          description: payerId_required | memberId_required | invalid_type
+        '404':
+          description: unknown_payer
   /api/platform/users:
     get:
       tags:
@@ -452,14 +1054,17 @@ paths:
     get:
       tags:
       - Revenue
-      summary: SaaS-wide accrued revenue (all clients), by type and by client
+      summary: SaaS-wide accrued revenue (all clients), by type, by client and by payer
       description: Aggregates platform_fee_* ledger entries across every tenant. All figures are accrued
-        receivables, not cash held.
+        receivables, not cash held. byPayer[] attributes expedited-settlement and per-claim commission
+        fees to the payer that owes them (derived from the fee's own refs, not from the bill's coverage,
+        which can be imprecise for a split bill); a fee type with no payer in its refs — e.g. a report
+        fee charged to the patient — is simply left out of byPayer, not dumped under an "unknown" bucket.
       security:
       - PlatformKey: []
       responses:
         '200':
-          description: '{ totalAccrued, byType[], byClient[] }'
+          description: '{ totalAccrued, byType[], byClient[], byPayer[] }'
   /api/platform/revenue/recent:
     get:
       tags:
