@@ -259,10 +259,48 @@ function verifBlock(){
     <span class="pill ${pill}">${label}</span>
     <p style="margin:8px 0 0">Patient verification link:</p>
     <div class="linkbox">${location.origin}${lastVerification.link}</div>
+    ${sendRow('bill',bid,lastVerification.phone)}
     <p style="margin:8px 0 0"><a href="${lastVerification.link}" target="_blank">Open patient page →</a>
     &nbsp;·&nbsp;<a href="#" onclick="resendVerification('${bid}',this);return false">Resend link to patient</a></p>
     ${chanLine}${errLine}${otpLine}${demo}
   </div>`;
+}
+// Two small "send now" tabs placed before a portal link (picture: payer link and
+// patient link on the billing screen) — SMS/WhatsApp buttons plus an editable
+// phone number, pre-filled when already known (the patient's, from the bill) and
+// blank when not (the payer's — nothing stores a payer phone yet). kind is
+// 'bill' (patient verification link; posts to /verification/reissue) or 'claim'
+// (payer link; posts to /share-link).
+function sendRow(kind,id,phone){
+  const iid=`to_${kind}_${id}`;
+  return `<div style="display:flex;gap:6px;align-items:center;margin:6px 0">
+    <button class="ghost mini" onclick="sendLink('${kind}','${id}','sms',this)">SMS</button>
+    <button class="ghost mini" onclick="sendLink('${kind}','${id}','whatsapp',this)">WhatsApp</button>
+    <input id="${iid}" placeholder="+233241234567" value="${esc(phone||'')}" style="flex:1;min-width:130px;padding:6px 8px;font-size:12px"/>
+  </div>`;
+}
+async function sendLink(kind,id,channel,el){
+  const input=$(`to_${kind}_${id}`);
+  const to=input?input.value.trim():'';
+  if(!to){toast('Enter a phone number first');if(input)input.focus();return;}
+  const label=channel==='whatsapp'?'WhatsApp':'SMS';
+  const original=el.textContent;el.disabled=true;el.textContent='…';
+  try{
+    const url=kind==='claim'?`/api/v1/claims/${id}/share-link`:`/api/v1/bills/${id}/verification/reissue`;
+    const r=await fetch(url,{method:'POST',headers:hdr(),body:JSON.stringify({channel,to})});
+    const o=await r.json().catch(()=>({}));
+    if(!r.ok){toast(label+' failed: '+(o.error||r.status));el.disabled=false;el.textContent=original;return;}
+    toast(label+' sent'+(o.sandbox?' (sandbox — no real message was sent)':''));
+    if(kind==='bill'&&lastVerification&&lastVerification.billId===id){
+      lastVerification.status=o.status||lastVerification.status;
+      lastVerification.channelsSent=o.channelsSent||[];
+      lastVerification.channelErrors=o.channelErrors||{};
+      if('otpCodeSandbox' in o)lastVerification.otpCodeSandbox=o.otpCodeSandbox;else delete lastVerification.otpCodeSandbox;
+      const wrap=document.getElementById('verifBlockWrap');if(wrap)wrap.outerHTML=verifBlock();
+      return;
+    }
+  }catch(e){toast(label+' failed');}
+  el.disabled=false;el.textContent=original;
 }
 async function resendVerification(id,el){
   const original=el.textContent;
@@ -325,7 +363,7 @@ async function routeSplit(){
   if(!r.ok){const e=await r.json().catch(()=>({}));toast('Split route failed: '+(e.error||r.status));return;}
   const {claims}=await r.json();
   $('result').innerHTML=`<span class="pill awaiting_payer">Split routed to ${claims.length} payers</span>`+
-    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div><a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
+    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div>${sendRow('claim',c.claimId,'')}<a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
   toast('Split routed to '+claims.length+' payers');reset();
 }
 async function routePayer(payerId){
@@ -337,6 +375,7 @@ async function routePayer(payerId){
   const {claim}=await r.json();
   $('result').innerHTML=`<span class="pill awaiting_payer">Awaiting ${esc(payerId)}</span> Claim ${esc(claim.id.slice(0,14))}… · GHS ${num(claim.amount)}
     <p style="margin:8px 0 0">Secure link delivered to payer:</p><div class="linkbox">${location.origin}${claim.link}</div>
+    ${sendRow('claim',claim.id,'')}
     <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`+verifBlock();
   if(payerId==='nhis-claimit'){
     const t=await fetch('/api/v1/claimit',{method:'POST',headers:hdr(),
