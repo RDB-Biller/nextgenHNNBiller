@@ -30,6 +30,7 @@
   <div class="tabs">
     <button class="on" onclick="tab('clients',this)">Clients</button>
     <button onclick="tab('messaging',this)">Messaging</button>
+    <button onclick="tab('campaigns',this)">Campaigns</button>
     <button onclick="tab('opmode',this)">Operating mode</button>
     <button onclick="tab('leads',this)">IT leads</button>
     <button onclick="tab('payers',this)">Payers</button>
@@ -102,6 +103,42 @@
         <button class="primary mini" style="margin-top:8px" onclick="saveClientCredentials()">Save credentials</button>
         <p class="muted" id="vc_cred_status" style="font-size:12px"></p>
       </div>
+    </div>
+  </div>
+
+  <div class="panel" id="p-campaigns">
+    <div class="card" style="margin-bottom:14px"><h2>Contact groups</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">A group is a list of phone numbers a campaign can message as one batch. <span id="cg_seed_note"></span></p>
+      <div id="cg_list"></div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 8px;font-size:13px"><b>New group</b> — paste numbers one per line or comma-separated (any of <span class="key">024…</span>, <span class="key">233…</span>, <span class="key">+233…</span> is fine).</p>
+        <div class="field"><label>Group name</label><input id="cg_name" placeholder="Trade fair leads, Oct 2026"/></div>
+        <div class="field"><label>Numbers</label><textarea id="cg_numbers" rows="4" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit" placeholder="0244123456&#10;024 555 1234, +233 50 111 2222"></textarea></div>
+        <button class="primary" onclick="createGroup()">Create group</button>
+        <p class="muted" id="cg_create_status" style="font-size:12px"></p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Compose &amp; send</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Sends a real message to every contact in the group through this deployment's Messaging rail (see <b>Operating mode</b> for sandbox/live, and the shared test account under <b>Messaging</b>). This is the one button on this page that reaches real phones — there's a confirmation step before anything goes out.</p>
+      <div class="row">
+        <div class="field"><label>Group</label><select id="cp_group"></select></div>
+        <div class="field"><label>Channel</label><select id="cp_channel" onchange="updateCharCount()"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option></select></div>
+      </div>
+      <div class="field">
+        <label>Message</label>
+        <textarea id="cp_body" rows="3" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit" oninput="updateCharCount()">Would you want to be able to claim insurance within 2 weeks? send YES for further information</textarea>
+      </div>
+      <p id="cp_count" class="muted" style="font-size:12px;margin:-6px 0 10px"></p>
+      <button class="primary" onclick="sendCampaign(this)">Send campaign…</button>
+      <p class="muted" id="cp_status" style="font-size:12px"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Sent campaigns</h2><div id="cp_list"></div></div>
+
+    <div class="card"><h2>Trial registrations</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Sign-ups from <span class="key">/register/</span> — whether from a campaign's "YES" reply or a direct visit. Approving here doesn't create a client by itself; do that from the <b>Clients</b> tab once you're ready.</p>
+      <div id="tr_list"></div>
     </div>
   </div>
 
@@ -1032,8 +1069,110 @@ async function loadAccrualHistory(){
     :'<p class="muted">No accruals recorded yet for this product.</p>';
 }
 
+// ---- Campaigns: contact groups, compose & send, sent history, trial sign-ups
+let CAMPAIGN_GROUPS=[];
+async function loadCampaignGroups(){
+  const r=await (await fetch('/api/platform/campaigns/groups',{headers:H()})).json().catch(()=>null);
+  CAMPAIGN_GROUPS=(r&&r.data)||[];
+  renderGroupsList(CAMPAIGN_GROUPS);
+  const sel=$('cp_group'); const prev=sel.value;
+  sel.innerHTML=CAMPAIGN_GROUPS.length
+    ?CAMPAIGN_GROUPS.map(g=>`<option value="${g.id}">${esc(g.name)} (${g.contactCount})</option>`).join('')
+    :'<option value="">No groups yet — create one on the left</option>';
+  if(prev&&CAMPAIGN_GROUPS.some(g=>g.id===prev))sel.value=prev;
+}
+function renderGroupsList(groups){
+  $('cg_list').innerHTML=groups.length?`<table><thead><tr><th>Name</th><th>Contacts</th><th>Source</th><th>Created</th></tr></thead><tbody>`+
+    groups.map(g=>`<tr><td>${esc(g.name)}</td><td>${g.contactCount}</td>
+      <td class="muted" style="font-size:12px">${esc(g.source||'')}</td>
+      <td class="muted" style="font-size:12px">${g.createdAt?new Date(g.createdAt).toLocaleDateString():'—'}</td></tr>`).join('')+
+    `</tbody></table>`:'<p class="muted">No groups yet.</p>';
+  const seed=groups.find(g=>g.id==='ghana-health-providers');
+  $('cg_seed_note').textContent=seed?`The initial "${seed.name}" list (${seed.contactCount} contacts) is ready to use below.`:'';
+}
+async function createGroup(){
+  const name=$('cg_name').value.trim(), numbers=$('cg_numbers').value;
+  if(!name)return toast('Name the group first');
+  if(!numbers.trim())return toast('Paste at least one number');
+  const r=await fetch('/api/platform/campaigns/groups',{method:'POST',headers:H(),body:JSON.stringify({name,numbers})});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok||o.error){$('cg_create_status').textContent='Failed: '+(o.error||r.status);return;}
+  $('cg_create_status').textContent=`Added ${o.added} contact(s).`+
+    (o.rejected&&o.rejected.length?` Could not read ${o.rejected.length}: ${o.rejected.slice(0,5).map(esc).join(', ')}${o.rejected.length>5?'…':''}`:'');
+  $('cg_name').value='';$('cg_numbers').value='';
+  loadCampaignGroups();
+  toast('Group created');
+}
+function updateCharCount(){
+  const len=$('cp_body').value.length, channel=$('cp_channel').value, el=$('cp_count');
+  if(channel==='sms'&&len>120){
+    el.innerHTML=`<b style="color:var(--bad)">${len} characters</b> — over 120. Consider sending this one as WhatsApp instead of SMS.`;
+  }else{
+    el.innerHTML=`${len} character${len===1?'':'s'}${channel==='sms'?' · 120 recommended max for SMS':''}`;
+  }
+}
+async function sendCampaign(btn){
+  const groupId=$('cp_group').value; if(!groupId)return toast('Pick (or create) a group first');
+  const channel=$('cp_channel').value;
+  const body=$('cp_body').value.trim(); if(!body)return toast('Write a message first');
+  const group=CAMPAIGN_GROUPS.find(g=>g.id===groupId);
+  const n=group?group.contactCount:'an unknown number of';
+  const typed=prompt(`This sends a real ${channel.toUpperCase()} message to ${n} phone number(s) in "${group?group.name:groupId}" right now. This cannot be undone.\n\nType SEND to confirm:`);
+  if(typed===null)return;
+  if(typed.trim().toUpperCase()!=='SEND'){toast('Not sent — type SEND exactly to confirm');return;}
+  btn.disabled=true;btn.textContent='Starting…';
+  const r=await fetch('/api/platform/campaigns',{method:'POST',headers:H(),body:JSON.stringify({groupId,channel,body})});
+  const o=await r.json().catch(()=>({}));
+  btn.disabled=false;btn.textContent='Send campaign…';
+  if(!r.ok||o.error){toast('Failed: '+(o.error||r.status));return;}
+  toast(`Sending to ${o.totalRecipients} recipient(s) — tracked below`);
+  loadCampaignsList();
+}
+let CAMPAIGN_POLL=null;
+async function loadCampaignsList(){
+  const r=await (await fetch('/api/platform/campaigns',{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  renderCampaignsList(rows);
+  clearTimeout(CAMPAIGN_POLL);
+  if(rows.some(c=>c.status==='sending'))CAMPAIGN_POLL=setTimeout(loadCampaignsList,4000);
+}
+function renderCampaignsList(rows){
+  $('cp_list').innerHTML=rows.length?`<table><thead><tr><th>When</th><th>Group</th><th>Channel</th><th>Message</th><th>Progress</th><th>Status</th></tr></thead><tbody>`+
+    rows.map(c=>`<tr>
+      <td class="muted" style="font-size:12px">${c.createdAt?new Date(c.createdAt).toLocaleString():'—'}</td>
+      <td>${esc(c.groupName||c.groupId)}</td>
+      <td>${esc(c.channel)}</td>
+      <td style="max-width:260px" class="muted"><span style="font-size:12px">${esc((c.body||'').slice(0,80))}${(c.body||'').length>80?'…':''}</span></td>
+      <td>${c.sentCount}/${c.totalRecipients}${c.failedCount?` <span style="color:var(--bad)">(${c.failedCount} failed)</span>`:''}</td>
+      <td><span class="pill ${c.status==='completed'?'settled':(c.status==='sending'?'pending':'open')}">${esc(c.status)}</span></td>
+    </tr>`).join('')+`</tbody></table>`:'<p class="muted">No campaigns sent yet.</p>';
+}
+async function loadTrialRegistrations(){
+  const r=await (await fetch('/api/platform/trial-registrations',{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  $('tr_list').innerHTML=rows.length?`<table><thead><tr><th>When</th><th>Organisation</th><th>Type</th><th>Contact</th><th>Phone</th><th>Email</th><th>Source</th><th>Status</th></tr></thead><tbody>`+
+    rows.map(x=>`<tr>
+      <td class="muted" style="font-size:12px">${x.createdAt?new Date(x.createdAt).toLocaleString():'—'}</td>
+      <td>${esc(x.orgName)}</td>
+      <td><span class="pill open">${esc(x.orgType)}</span></td>
+      <td>${esc(x.contactName)}</td>
+      <td>${esc(x.phone)}</td>
+      <td class="muted" style="font-size:12px">${esc(x.email||'—')}</td>
+      <td class="muted" style="font-size:12px">${esc(x.source)}</td>
+      <td><select onchange="setRegStatus('${x.id}',this.value)">
+        ${['new','contacted','approved','declined'].map(s=>`<option value="${s}" ${x.status===s?'selected':''}>${s}</option>`).join('')}
+      </select></td>
+    </tr>`).join('')+`</tbody></table>`:'<p class="muted">No registrations yet.</p>';
+}
+async function setRegStatus(id,status){
+  const r=await fetch(`/api/platform/trial-registrations/${encodeURIComponent(id)}/status`,{method:'PUT',headers:H(),body:JSON.stringify({status})});
+  if(!r.ok){toast('Failed to update status');loadTrialRegistrations();return;}
+  toast('Updated');
+}
+
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();};
+boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();
+  loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();};
 boot();
 </script>
 </body></html>

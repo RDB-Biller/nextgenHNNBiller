@@ -1,0 +1,84 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Register for an HNN Biller trial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/>
+<style>.orgtype{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.orgtype button{flex:1;min-width:110px}
+.orgtype button.on{background:var(--brand);color:#fff}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}</style>
+</head><body>
+<div class="wrap" style="max-width:560px">
+  <div class="top"><div class="brandmark">HNN Biller<span class="dot">.</span></div><span class="muted">Free trial</span></div>
+  <div class="card" id="root">
+    <p class="eyebrow">Register for a trial</p>
+    <h2 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--ink);margin:4px 0 14px">
+      Expedited claims, verified by your patients, settled faster.</h2>
+    <p class="muted" style="margin:0 0 16px;font-size:13px">Tell us a bit about your organisation and we'll set up a sandbox trial account — no cost, no commitment.</p>
+
+    <form id="form" onsubmit="return submitForm(event)">
+      <input class="hp" tabindex="-1" autocomplete="off" id="hp" name="hp"/>
+      <p class="muted" style="margin:0 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">You are registering as a</p>
+      <div class="orgtype">
+        <button type="button" class="ghost on" data-v="hospital" onclick="pickOrgType(this)">Hospital / Clinic</button>
+        <button type="button" class="ghost" data-v="pharmacy" onclick="pickOrgType(this)">Pharmacy</button>
+        <button type="button" class="ghost" data-v="other" onclick="pickOrgType(this)">Other</button>
+      </div>
+      <div class="field"><label>Organisation name</label><input id="orgName" placeholder="City Clinic" required/></div>
+      <div class="row">
+        <div class="field"><label>Your name</label><input id="contactName" placeholder="Ama Owusu" required/></div>
+        <div class="field"><label>Phone</label><input id="phone" placeholder="024 123 4567" required/></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Email <span class="muted" style="font-weight:400">(optional)</span></label><input id="email" type="email" placeholder="you@example.com"/></div>
+        <div class="field"><label>Region / city <span class="muted" style="font-weight:400">(optional)</span></label><input id="region" placeholder="Greater Accra"/></div>
+      </div>
+      <div class="field"><label>Anything else we should know? <span class="muted" style="font-weight:400">(optional)</span></label><input id="notes" placeholder="e.g. which payers you work with"/></div>
+      <button class="primary" type="submit" style="width:100%;margin-top:6px" id="submitBtn">Request my trial account</button>
+    </form>
+    <p id="formMsg" class="muted" style="font-size:12px;margin:10px 0 0"></p>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let ORG_TYPE='hospital';
+function pickOrgType(el){
+  document.querySelectorAll('.orgtype button').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on'); ORG_TYPE=el.dataset.v;
+}
+async function submitForm(ev){
+  ev.preventDefault();
+  const btn=$('submitBtn'); const orgName=$('orgName').value.trim(), contactName=$('contactName').value.trim(), phone=$('phone').value.trim();
+  if(!orgName||!contactName||!phone){toast('Please fill in the required fields');return false;}
+  btn.disabled=true; btn.textContent='Sending…';
+  try{
+    const body={
+      hp: $('hp').value,
+      orgType: ORG_TYPE, orgName, contactName, phone,
+      email: $('email').value.trim()||undefined,
+      region: $('region').value.trim()||undefined,
+      notes: $('notes').value.trim()||undefined,
+      source: new URLSearchParams(location.search).get('ref')==='campaign'?'campaign':'direct',
+    };
+    const r=await fetch('/register/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const o=await r.json().catch(()=>({}));
+    if(!r.ok||o.error){
+      toast('Could not submit: '+(o.error||r.status));
+      btn.disabled=false; btn.textContent='Request my trial account';
+      return false;
+    }
+    $('root').innerHTML=`<p class="eyebrow">Thank you</p>
+      <div class="bignum" style="font-size:22px;line-height:1.4">We've got your details — our team will reach out shortly to set up ${esc(orgName)}'s trial.</div>
+      <p class="muted" style="margin-top:10px">In the meantime, feel free to reply to the text you received, or just sit tight.</p>`;
+  }catch(e){
+    toast('Could not submit — check your connection and try again');
+    btn.disabled=false; btn.textContent='Request my trial account';
+  }
+  return false;
+}
+</script>
+</body></html>
