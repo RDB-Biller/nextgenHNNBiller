@@ -120,13 +120,24 @@ router.post('/:id/route', async (req, res, next) => {
 
 // Resend the patient verification link (same token) — for hospital staff to nudge a
 // patient who hasn't responded yet. A disputed record is reset to pending first.
+// Body is optional: {} (or no body) resends over whatever channels the clinic has
+// configured as default. { channel: 'sms'|'whatsapp', to? } forces exactly that one
+// channel regardless of the clinic's default — e.g. the "SMS" / "WhatsApp" tabs next
+// to the link on the billing screen, each a one-click, explicit send.
 router.post('/:id/verification/reissue', async (req, res, next) => {
   try {
     const bill = await ownBill(req);
     if (!bill) return res.status(404).json({ error: 'bill_not_found' });
     const v = await verification.forBill(bill.id);
     if (!v) return res.status(404).json({ error: 'verification_not_found' });
-    const updated = await verification.reissue(v.id);
+    const { channel, to } = req.body || {};
+    let opts = {};
+    if (channel) {
+      if (!['sms', 'whatsapp'].includes(channel)) return res.status(422).json({ error: 'invalid_channel' });
+      if (!(to || v.phone)) return res.status(422).json({ error: 'no_recipient_phone' });
+      opts = { channels: { [channel]: true }, ...(to ? { to } : {}) };
+    }
+    const updated = await verification.reissue(v.id, opts);
     const messagingSandbox = await messaging.isSandbox();
     res.json({ status: updated.status, link: updated.link, remindersSent: updated.remindersSent,
       channelsSent: updated.channelsSent || [],
