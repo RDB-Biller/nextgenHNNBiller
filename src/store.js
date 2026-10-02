@@ -89,6 +89,21 @@ CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claimit_tenant ON claimit(tenant_id);
+-- Prospecting campaigns (Master Control "Campaigns" tab, services/campaigns.js):
+-- a named group of contacts (e.g. the seeded Ghana health-provider list), the
+-- contacts in it, each bulk send run against a group, and the per-recipient
+-- outcome of that run. Phone matching for inbound "YES" replies uses the
+-- JSONB phoneNormalized field, same trade-off already made for verifications
+-- and clinical_links -- fine at this scale, no dedicated column/index.
+CREATE TABLE IF NOT EXISTS campaign_groups (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS campaign_contacts (id text PRIMARY KEY, group_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_campaign_contacts_group ON campaign_contacts(group_id);
+CREATE TABLE IF NOT EXISTS campaigns (id text PRIMARY KEY, group_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS campaign_sends (id text PRIMARY KEY, campaign_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_campaign_sends_campaign ON campaign_sends(campaign_id);
+-- Public trial sign-ups (register.html / routes/registerPortal.js), whether
+-- from the campaign "YES" reply link or a direct visit to /register/.
+CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 `;
 
 // Build a repo whose queries run through `exec` (the pool, or a tx client).
@@ -306,6 +321,40 @@ function pgRepo(exec) {
       listByPayer: (payerId, limit = 1000) => many(
         'SELECT data FROM incentive_accruals WHERE payer_id=$1 ORDER BY created_at DESC LIMIT $2', [payerId, limit]),
     },
+    // ---- Prospecting campaigns ----------------------------------------------
+    campaignGroups: {
+      get: (id) => one('SELECT data FROM campaign_groups WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM campaign_groups ORDER BY created_at', []),
+      save: (g) => exec(upsert('campaign_groups', []), [g.id, g]),
+    },
+    campaignContacts: {
+      listByGroup: (groupId) => many('SELECT data FROM campaign_contacts WHERE group_id=$1 ORDER BY created_at', [groupId]),
+      insert: (c) => exec(upsert('campaign_contacts', ['group_id']), [c.id, c.groupId, c]),
+      countByGroup: async (groupId) => {
+        const r = await exec('SELECT count(*)::int AS n FROM campaign_contacts WHERE group_id=$1', [groupId]);
+        return r.rows[0]?.n || 0;
+      },
+    },
+    campaigns: {
+      get: (id) => one('SELECT data FROM campaigns WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM campaigns ORDER BY created_at DESC', []),
+      insert: (c) => exec(upsert('campaigns', ['group_id', 'status']), [c.id, c.groupId, c.status, c]),
+      update: (c) => exec(upsert('campaigns', ['group_id', 'status']), [c.id, c.groupId, c.status, c]),
+    },
+    campaignSends: {
+      insert: (s) => exec(upsert('campaign_sends', ['campaign_id', 'status']), [s.id, s.campaignId, s.status, s]),
+      listByCampaign: (campaignId) => many('SELECT data FROM campaign_sends WHERE campaign_id=$1 ORDER BY created_at', [campaignId]),
+      listSentByPhone: (phoneNormalized) => many(
+        "SELECT data FROM campaign_sends WHERE status='sent' AND data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
+    },
+    trialRegistrations: {
+      get: (id) => one('SELECT data FROM trial_registrations WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM trial_registrations ORDER BY created_at DESC', []),
+      listByPhone: (phoneNormalized) => many(
+        "SELECT data FROM trial_registrations WHERE data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
+      insert: (r) => exec(upsert('trial_registrations', ['org_type', 'status']), [r.id, r.orgType, r.status, r]),
+      update: (r) => exec(upsert('trial_registrations', ['org_type', 'status']), [r.id, r.orgType, r.status, r]),
+    },
     idempotency: {
       begin: async (scope, key, hash) => {
         const ins = await exec(
@@ -517,6 +566,36 @@ function memRepo(M) {
       listByPayer: async (payerId, limit = 1000) =>
         M.accruals.filter((a) => a.payerId === payerId).slice(-limit).reverse(),
     },
+    // ---- Prospecting campaigns ----------------------------------------------
+    campaignGroups: {
+      get: async (id) => M.campaignGroups.get(id) || null,
+      all: async () => [...M.campaignGroups.values()],
+      save: async (g) => M.campaignGroups.set(g.id, g),
+    },
+    campaignContacts: {
+      listByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId),
+      insert: async (c) => { M.campaignContacts.set(c.id, c); },
+      countByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId).length,
+    },
+    campaigns: {
+      get: async (id) => M.campaigns.get(id) || null,
+      all: async () => [...M.campaigns.values()].reverse(),
+      insert: async (c) => M.campaigns.set(c.id, c),
+      update: async (c) => M.campaigns.set(c.id, c),
+    },
+    campaignSends: {
+      insert: async (s) => { M.campaignSends.set(s.id, s); },
+      listByCampaign: async (campaignId) => list(M.campaignSends, (s) => s.campaignId === campaignId),
+      listSentByPhone: async (phoneNormalized) =>
+        list(M.campaignSends, (s) => s.status === 'sent' && s.phoneNormalized === phoneNormalized).reverse(),
+    },
+    trialRegistrations: {
+      get: async (id) => M.trialRegistrations.get(id) || null,
+      all: async () => [...M.trialRegistrations.values()].reverse(),
+      listByPhone: async (phoneNormalized) => list(M.trialRegistrations, (r) => r.phoneNormalized === phoneNormalized).reverse(),
+      insert: async (r) => M.trialRegistrations.set(r.id, r),
+      update: async (r) => M.trialRegistrations.set(r.id, r),
+    },
     idempotency: {
       begin: async (scope, key, hash) => {
         const k = `${scope}\u0000${key}`;
@@ -582,6 +661,8 @@ if (usePg) {
     ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
+    campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(),
   };
   repo = memRepo(M);
   const mutex = makeMutex();

@@ -27,6 +27,8 @@ const fees = require('../services/fees');
 const metricsLibrary = require('../services/metricsLibrary');
 const products = require('../services/products');
 const incentives = require('../services/incentives');
+const campaigns = require('../services/campaigns');
+const trialRegistrations = require('../services/trialRegistrations');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -689,6 +691,90 @@ router.post('/products/:id/accrue', async (req, res, next) => {
 router.get('/products/:id/accruals', async (req, res, next) => {
   try { res.json({ data: await incentives.listAccrualsByProduct(req.params.id) }); }
   catch (e) { next(e); }
+});
+
+// ---- Prospecting campaigns ("Campaigns" tab) --------------------------------
+// Bulk SMS/WhatsApp to prospective clients -- see services/campaigns.js header
+// for how this differs from the Product Lab above (that's for existing
+// patients of an existing tenant; this is for people HNN hasn't signed up yet).
+
+router.get('/campaigns/groups', async (req, res, next) => {
+  try { res.json({ data: await campaigns.listGroups() }); } catch (e) { next(e); }
+});
+
+// Body: { name, numbers: "one per line or comma-separated" }. Each number is
+// normalized to +233E.164; anything that doesn't resolve is reported back in
+// `rejected` rather than silently dropped.
+router.post('/campaigns/groups', async (req, res, next) => {
+  try {
+    const { group, added, rejected } = await campaigns.createGroup(req.body || {});
+    res.status(201).json({ group, added, rejected });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+router.get('/campaigns/groups/:id/contacts', async (req, res, next) => {
+  try {
+    const group = await campaigns.getGroup(req.params.id);
+    if (!group) return res.status(404).json({ error: 'group_not_found' });
+    res.json({ group, data: await campaigns.listContacts(req.params.id, Math.min(parseInt(req.query.limit || '200', 10), 1000)) });
+  } catch (e) { next(e); }
+});
+
+router.get('/campaigns', async (req, res, next) => {
+  try { res.json({ data: await campaigns.listCampaigns(), smsAdvisoryLimit: campaigns.SMS_ADVISORY_LIMIT }); }
+  catch (e) { next(e); }
+});
+
+// Body: { groupId, body, channel: 'sms'|'whatsapp' }. Returns immediately with
+// status 'sending' -- the actual send runs in the background (see
+// services/campaigns.js#runSend); poll GET /campaigns/:id for progress. This
+// is the one action in this whole tab that actually dispatches real messages
+// to real third parties, so it is never triggered by anything other than this
+// direct call from a deliberate click in Master Control.
+router.post('/campaigns', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const campaign = await campaigns.createCampaign({
+      groupId: b.groupId, body: b.body, channel: b.channel, createdBy: req.principal?.id || 'HNN',
+    });
+    res.status(201).json(campaign);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+router.get('/campaigns/:id', async (req, res, next) => {
+  try {
+    const c = await campaigns.getCampaign(req.params.id);
+    if (!c) return res.status(404).json({ error: 'campaign_not_found' });
+    res.json(c);
+  } catch (e) { next(e); }
+});
+
+router.get('/campaigns/:id/sends', async (req, res, next) => {
+  try { res.json({ data: await campaigns.listSends(req.params.id) }); } catch (e) { next(e); }
+});
+
+// ---- Trial registrations (public /register/ sign-ups) -----------------------
+// Pure lead queue -- approving/declining here never provisions a tenant; see
+// services/trialRegistrations.js header for why that stays a separate,
+// deliberate step via the existing "Add a client" form in the Clients tab.
+
+router.get('/trial-registrations', async (req, res, next) => {
+  try { res.json({ data: await trialRegistrations.list(), orgTypes: trialRegistrations.ORG_TYPES }); }
+  catch (e) { next(e); }
+});
+
+router.put('/trial-registrations/:id/status', async (req, res, next) => {
+  try { res.json(await trialRegistrations.setStatus(req.params.id, req.body?.status, req.principal?.id || 'HNN')); }
+  catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
 });
 
 module.exports = router;

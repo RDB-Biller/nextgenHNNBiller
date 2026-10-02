@@ -27,6 +27,8 @@ const reportPortalRoutes = require('./routes/reportPortal');
 const emrRoutes = require('./routes/emr');
 const clinicalRoutes = require('./routes/clinical');
 const clinicalPortalRoutes = require('./routes/clinicalPortal');
+const registerPortalRoutes = require('./routes/registerPortal');
+const campaigns = require('./services/campaigns');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -58,6 +60,11 @@ app.use('/clinical/api', clinicalPortalRoutes);
 app.use('/clinical', express.static(PUBLIC, { index: 'clinical.html' }));
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
+// Public trial sign-up — the link a prospecting campaign's "YES" reply sends
+// back (see services/campaigns.js); also reachable directly. No auth, same
+// family as /verify and /clinical above.
+app.use('/register/api', registerPortalRoutes);
+app.use('/register', express.static(PUBLIC, { index: 'register.html' }));
 app.use('/app', express.static(PUBLIC));
 
 // Payer API (insurer RX / employer HR systems) — payer key
@@ -89,7 +96,7 @@ app.use('/api/v1', institutionsRoutes);
 app.use(errorHandler);
 
 if (require.main === module) {
-  store.init().then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
+  store.init().then(() => campaigns.ensureSeedGroup()).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
     const rail = (sandbox) => (sandbox ? 'sandbox' : 'LIVE');
     console.log(`Composite Billing Platform on :${config.port} `
       + `(settlement=${rail(mode.settlement.sandbox)}, messaging=${rail(mode.messaging.sandbox)}`
