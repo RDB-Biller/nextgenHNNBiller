@@ -5,6 +5,7 @@ const { markPaid } = require('./payments');
 const config = require('../config');
 const verification = require('../services/verification');
 const clinicalLinks = require('../services/clinicalLinks');
+const campaigns = require('../services/campaigns');
 const messaging = require('../services/messaging');
 
 const router = express.Router();
@@ -38,10 +39,14 @@ router.post('/collection', async (req, res, next) => {
  *
  * Clinical is tried first and only ever claims a message that is either
  * clearly clinical-shaped (a "BP 130/85"-style reading or STOP/HELP) or an
- * exact/unambiguous OTP-code match for a pending clinical link — anything
- * else returns null from it and falls straight through to bill verification
- * exactly as before this feature existed, so a phone that has never touched
- * clinical check-ins sees no change in behaviour at all.
+ * exact/unambiguous OTP-code match for a pending clinical link. Campaigns
+ * (services/campaigns.js) is tried next and only ever claims a bare "YES"
+ * from a phone that (a) has no bill verification currently pending and
+ * (b) was actually sent a prospecting campaign before — replying with the
+ * trial-registration link. Anything neither of those claims returns null
+ * and falls straight through to bill verification exactly as before either
+ * feature existed, so a phone that has never touched clinical check-ins or
+ * campaigns sees no change in behaviour at all.
  *
  * Secured the same way as /collection: a shared secret header, not a
  * provider-specific request signature, for the same "generic adapter" reason.
@@ -60,6 +65,7 @@ router.post('/messaging-inbound', async (req, res, next) => {
     if (!from || !text) return res.status(422).json({ error: 'missing_from_or_text' });
 
     const result = (await clinicalLinks.handleInboundReply({ from, text, channel }))
+      || (await campaigns.handleInboundReply({ from, text, channel }))
       || (await verification.handleInboundReply({ from, text, channel }));
     if (result.reply) await messaging.send({ channel, to: from, body: result.reply });
     res.json({
