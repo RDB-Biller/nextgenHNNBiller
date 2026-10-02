@@ -241,12 +241,30 @@ paths:
                         - prior_approval
                         description: Who satisfied the gate — the patient via their own link, this payer marking
                           it verified some other way, or a referenced prior approval. Null while still pending.
+                      verifiedVia:
+                        type: string
+                        nullable: true
+                        enum:
+                        - web
+                        - sms
+                        - whatsapp
+                        description: How the patient themselves confirmed, when verifiedBy is patient — the web
+                          link, or a text/WhatsApp reply (YES or the one-time code). Null otherwise.
                       disputeReason:
                         type: string
                         nullable: true
                       remindersSent:
                         type: integer
                         description: How many times the link has been reissued to the patient
+                      channelsSent:
+                        type: array
+                        items:
+                          type: string
+                          enum:
+                          - sms
+                          - whatsapp
+                        description: Which channels the verification message also went out on, in addition to
+                          the link (empty unless the client enabled them in Master Control).
                   matchingPriorApprovals:
                     type: array
                     description: This payer's own active prior approvals for the claim's member — reference one's

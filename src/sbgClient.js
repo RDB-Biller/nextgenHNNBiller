@@ -31,6 +31,15 @@ const config = require('./config');
 
 const SUCCESS_STATUS = '000';
 
+// Test-only transport seam (see scripts/smoke-*.js) — never used by a real code
+// path. Mirrors messaging.js's _setRequestImplForTests: a module-level function
+// reference that defaults to the real global fetch and can be swapped for a
+// fake in tests, so "live" calls can be smoke-tested without reaching the
+// actual Stanbic network.
+const _realFetch = (...args) => fetch(...args);
+let _fetchImpl = _realFetch;
+function _setFetchImplForTests(fn) { _fetchImpl = fn || _realFetch; }
+
 class SbgError extends Error {
   constructor(message, { httpStatus, statusCode, responseCode, responseMessage, body } = {}) {
     super(message);
@@ -61,7 +70,7 @@ class SbgClient {
     const headers = { 'Content-Type': 'application/json' };
     if (auth) headers.Authorization = `Bearer ${await this.token()}`;
 
-    const res = await fetch(this._url(path), {
+    const res = await _fetchImpl(this._url(path), {
       method, headers, body: body ? JSON.stringify(body) : undefined,
     });
 
@@ -179,4 +188,4 @@ class SbgClient {
 // Helpers to read the bank's envelope regardless of nesting.
 const sbgData = (res) => res?.responseBody?.data ?? res?.data ?? res;
 
-module.exports = { SbgClient, SbgError, sbgData, sbg: new SbgClient() };
+module.exports = { SbgClient, SbgError, sbgData, sbg: new SbgClient(), _setFetchImplForTests };

@@ -304,8 +304,10 @@ async function finalizeSettled(claim, bill) {
     }
   });
   // SaaS revenue: expedited-settlement fee (NNEST terms take precedence over the
-  // facility default), plus a discount fee if one applies.
+  // facility default), the payer's own commission if it's commercial, plus a
+  // discount fee if one applies.
   await fees.onClaimSettled(claim, bill);
+  await fees.onPayerCommission(claim, bill, payer);
   if (bill.totals?.discount > 0) {
     await fees.onDiscountApplied(bill, bill.adjustments?.discountKind || 'standard');
   }

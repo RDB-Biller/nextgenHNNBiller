@@ -32,7 +32,7 @@ async function view(c) {
     // Same verification-pending signal exposed to the payer console UI (payers.html)
     // via the Payer API; here for the secure-link claim page (claim.html).
     requirePatientVerification: payer?.requirePatientVerification === true,
-    patientVerification: v ? { status: v.status, verifiedAt: v.verifiedAt || null, verifiedBy: v.verifiedBy || null, disputeReason: v.disputeReason || null, remindersSent: v.remindersSent || 0 } : { status: 'not_sent' },
+    patientVerification: v ? { status: v.status, verifiedAt: v.verifiedAt || null, verifiedBy: v.verifiedBy || null, verifiedVia: v.verifiedVia || null, disputeReason: v.disputeReason || null, remindersSent: v.remindersSent || 0, channelsSent: v.channelsSent || [] } : { status: 'not_sent' },
     matchingPriorApprovals: matchingPriorApprovals.map((pa) => ({
       id: pa.id, description: pa.description, amountCap: pa.amountCap, expiresAt: pa.expiresAt, timesUsed: pa.timesUsed })),
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,

@@ -13,6 +13,7 @@
     "smoke:operating-mode": "node scripts/smoke-operating-mode.js",
     "smoke:payer-commercial": "node scripts/smoke-payer-commercial.js",
     "smoke:pde": "node scripts/smoke-pde.js",
+    "smoke:clinical-entry": "node scripts/smoke-clinical-entry.js",
     "provision": "node scripts/provision.js"
   },
   "engines": {

@@ -45,6 +45,7 @@ tags:
 - name: Payments
 - name: Dashboard
 - name: Editions
+- name: Clinical
 components:
   securitySchemes:
     TenantKey:
@@ -191,9 +192,18 @@ paths:
         '201':
           description: 'Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable).
             A verification link is generated and sent to the patient automatically — the response
-            includes patientVerification:{status,link} as a one-time snapshot (not persisted onto the
-            bill; the live record is read at GET /verify/api/{token}). See the Payer & Claims API for
-            how a payer can require verification before authorising.'
+            includes patientVerification:{status,link,channelsSent,channelErrors?} as a one-time snapshot
+            (not persisted onto the bill; the live record is read at GET /verify/api/{token}). See the
+            Payer & Claims API for how a payer can require verification before authorising. If this client
+            has SMS and/or WhatsApp verification enabled (see the Master Control API''s /api/platform/clients/{id}/verification-channels),
+            the same message also goes out on those channels with a one-time reply code the patient can
+            text back instead of opening the link; channelErrors.sms / channelErrors.whatsapp report a
+            specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported)
+            for any enabled channel that did not go out, so a missing channel is explained rather than just
+            absent from channelsSent. While the server is in sandbox mode, nothing above is ever sent for
+            real and the response also includes otpCodeSandbox so this can be demoed without a phone — see
+            the Messaging endpoints on the Master Control API for how a real provider is configured and
+            activated.'
     get:
       tags:
       - Bills
@@ -277,7 +287,10 @@ paths:
         description: Bill id
       responses:
         '200':
-          description: '{ status, link, remindersSent }'
+          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox
+            while the server is in sandbox mode — reissuing re-sends on whichever channels are enabled and
+            generates a fresh reply code, invalidating any earlier one. channelErrors.sms / channelErrors.whatsapp
+            report a specific failure code for any enabled channel that did not go out this time.'
         '404':
           description: bill_not_found / verification_not_found
         '409':
@@ -304,6 +317,142 @@ paths:
       responses:
         '200':
           description: '{ client, name, edition, features{}, licence{ active, expiresAt, daysLeft } }'
+  /api/v1/clinical-observations:
+    post:
+      tags:
+      - Clinical
+      summary: Manually record one clinical indicator for a patient (Value-Based-Care)
+      description: The tenant-authenticated counterpart to an EMR/EHR partner's own feed — for a clinic with no
+        EMR integration, or simply keying in today's reading by hand. Same validation and shape as the partner
+        feed; stored with source:manual_hospital. See the Product Lab tag in the Master Control API for the full
+        metric/condition list and how these feed Value-Based-Care scoring.
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - payerId
+              - memberId
+              - type
+              properties:
+                payerId:
+                  type: string
+                memberId:
+                  type: string
+                condition:
+                  type: string
+                  enum:
+                  - hypertension
+                  - diabetes
+                  - dyslipidemia
+                  description: Required if type is complication or followup_visit; blood_pressure/hba1c/ldl infer
+                    their condition automatically.
+                type:
+                  type: string
+                  enum:
+                  - blood_pressure
+                  - hba1c
+                  - ldl
+                  - complication
+                  - followup_visit
+                  - screening_completed
+                  - wellness_visit
+                value:
+                  type: number
+                  description: hba1c (%) or ldl (mg/dL)
+                systolic:
+                  type: number
+                diastolic:
+                  type: number
+                note:
+                  type: string
+                recordedAt:
+                  type: string
+                  description: Defaults to now
+      responses:
+        '201':
+          description: The stored observation
+        '404':
+          description: unknown_payer
+        '422':
+          description: payerId_required / memberId_required / invalid_type
+    get:
+      tags:
+      - Clinical
+      summary: This clinic's own manually-recorded observations for one member
+      description: Scoped to what THIS clinic recorded by hand (source:manual_hospital) — the EMR feed and other
+        clinics' entries for the same member aren't returned here.
+      security:
+      - TenantKey: []
+      parameters:
+      - name: payerId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: memberId
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: '{ ok: true, count, data: [observation] }'
+        '422':
+          description: payerId_and_memberId_required
+  /api/v1/clinical-observations/link:
+    post:
+      tags:
+      - Clinical
+      summary: Text a patient a code to set up their own check-ins by phone
+      description: 'Starts the same OTP phone<->member link a patient can self-initiate at the public /clinical/
+        portal — a clinic can kick it off during a visit, but the patient still has to confirm the code themselves
+        (reply with it, or enter it at /clinical/) before anything can be submitted from their side. Once active,
+        the patient can text in readings any time (e.g. "BP 130/85", "HBA1C 6.8", "LDL 110", "COMPLICATION",
+        "FOLLOWUP") or use the web page; STOP opts out immediately, from anyone.'
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - payerId
+              - memberId
+              - phone
+              properties:
+                payerId:
+                  type: string
+                memberId:
+                  type: string
+                phone:
+                  type: string
+                condition:
+                  type: string
+                  enum:
+                  - hypertension
+                  - diabetes
+                  - dyslipidemia
+                channel:
+                  type: string
+                  enum:
+                  - sms
+                  - whatsapp
+                  default: sms
+      responses:
+        '201':
+          description: '{ id, status: "pending", payerId, memberId, condition }. Never echoes the code — it only
+            goes to the patient''s phone.'
+        '404':
+          description: unknown_payer
+        '422':
+          description: payerId_required / memberId_required / phone_required / invalid_phone / invalid_condition
   /api/v1/payments/intents:
     post:
       tags:
@@ -399,6 +548,31 @@ paths:
       responses:
         '200':
           description: OK
+  /api/v1/webhooks/messaging-inbound:
+    post:
+      tags:
+      - Bills
+      summary: Inbound SMS/WhatsApp reply — bill verification, or a clinical check-in (x-webhook-secret)
+      description: 'Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
+        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. Tried as a clinical
+        check-in FIRST (see /api/v1/clinical-observations/link below and GET clinical-observations tag) — a
+        keyword-led reading (e.g. "BP 130/85"), STOP, or HELP, or a bare numeric code unambiguously matching a
+        pending clinical link. Anything that isn''t falls straight through to bill-verification handling, unchanged:
+        a bare YES/CONFIRM/OK confirms only when exactly one verification is pending for that phone; otherwise the
+        patient can send the numeric reply code from their message instead, matched only within that phone''s own
+        pending verifications. A phone that has never used the clinical check-in feature sees no behaviour change
+        at all. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a
+        provider-specific request signature.'
+      responses:
+        '200':
+          description: '{ ok: true, outcome, verificationId, clinicalLinkId }. Bill-verification outcomes: confirmed,
+            ambiguous, wrong_code, locked, no_match, unrecognized. Clinical outcomes: recorded, confirmed, revoked,
+            help, wrong_code, locked, expired, no_match. Exactly one of verificationId/clinicalLinkId is set,
+            depending on which flow handled the message.'
+        '401':
+          description: bad_signature
+        '422':
+          description: missing_from_or_text
   /pay/api/session/{intentId}:
     get:
       tags:

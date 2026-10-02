@@ -26,7 +26,7 @@ insurance but still settles for its people. Same A2A mechanism for both.
 | --- | --- | --- |
 | **Clinic / hospital** | `/api/v1/*` (their EHR/EMR) — key `x-api-key` | `/app/biller.html`, `/app/dashboard.html` |
 | **Payer** (insurer RX / employer HR) | `/api/payer/*` — key `x-payer-key` | `/app/payers.html`, or the secure link `/claim/?token=…` |
-| **Patient** | — | `/pay/?intent=…` |
+| **Patient** | — | `/pay/?intent=…`, `/verify/?token=…` (confirm a bill), `/clinical/` (Value-Based-Care check-in — self-initiated, no link needed) |
 
 Big institutions integrate API-to-API; small entities use the front ends. Same
 backend, same actions, either way.
@@ -57,7 +57,7 @@ Demo path: open `http://localhost:4000/app/biller.html`, build a bill with a mem
 ID, tap a payer (insurer *or* employer), then open `/app/payers.html` (or the printed
 secure link) and **Authorise** — watch it settle on `/app/dashboard.html` with the
 notification fan-out. `npm run smoke` runs it over HTTP (needs `npm start` running
-first). Five more smoke suites run in-process, no server/network needed: `npm run
+first). Six more smoke suites run in-process, no server/network needed: `npm run
 smoke:verification` (patient verification, dashboard queue, reissue/override/prior
 approvals, SMS/WhatsApp OTP + 2-way reply), `npm run smoke:messaging-live`
 (credential encryption, the platform test account, and all three provider adapters,
@@ -66,10 +66,14 @@ smoke:operating-mode` (the sandbox/live confirmation gate, hybrid independence o
 the two rails, and settlement credential resolution against a mocked Stanbic
 transport — see **Operating mode** below), `npm run smoke:payer-commercial`
 (payer edition/licence redemption and the per-claim commission's accrual + revenue
-attribution — see **Payer commercial edition & commission** below), and `npm run
+attribution — see **Payer commercial edition & commission** below), `npm run
 smoke:pde` (observation ingestion, product validation, and all three product
 types' scoring/reward math, including the null-vs-zero metric distinction and
-period-window clipping — see **Product Development Environment** below).
+period-window clipping — see **Product Development Environment** below), and `npm
+run smoke:clinical-entry` (manual hospital entry, the OTP phone-link lifecycle,
+every SMS/WhatsApp reading keyword and its condition auto-tagging, lockout/expiry,
+STOP/HELP, and the lost-token re-request flow — see **Product Development
+Environment** below).
 
 ## Clinic / EHR API (key `x-api-key: emr_demo_key_123`)
 
@@ -450,13 +454,13 @@ spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 
 | Spec | Covers | Auth | Edition |
 | --- | --- | --- | --- |
-| `hnn-01-core-billing` | Bills, patient payments, routing, dashboard, edition check, inbound SMS/WhatsApp replies | `x-api-key` | all |
+| `hnn-01-core-billing` | Bills, patient payments, routing, dashboard, edition check, inbound SMS/WhatsApp replies, manual clinical-indicator entry + patient check-in enrollment | `x-api-key` | all |
 | `hnn-02-payer-claims` | Claims, authorise A2A, secure links | `x-payer-key` | all |
 | `hnn-03-nhis-claimit` | NHIS tracking, refunds, cashback, bulk ingest | `x-api-key` | commercial |
 | `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
 | `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
 | `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
-| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels, **Product Lab** (VBC/campaign/loyalty products, metric library, preview/accrue) | `x-platform-key`; the one EMR-partner observation endpoint uses its own `x-api-key` instead | all |
+| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels, **Product Lab** (VBC/campaign/loyalty products, metric library, preview/accrue, and the four clinical-observation sources: EMR feed, manual hospital entry, patient web portal, patient SMS/WhatsApp) | `x-platform-key`; the one EMR-partner observation endpoint uses its own `x-api-key` instead | all |
 
 Every documented endpoint is verified against the app's mounted routes.
 
@@ -746,13 +750,22 @@ mode** above gates real settlement on the live rail.
 
 **Where the clinical data comes from**: this app bills procedures and
 medicines, not diagnoses or vitals, everywhere else — clinical observations
-are the one deliberate exception, and they only ever arrive from an EMR/EHR
-partner's own feed, never typed in by hand here. A partner pushes them to
-`POST /api/v1/emr/observations` (header `x-api-key`, the key issued when the
-partner was added under the **EMR/EHR partners** tab — a different principal
-from a clinic/hospital tenant's key of the same header name, see `src/
-middleware/auth.js#authEmrPartner`). Body is one observation or `{
-observations: [...] }` for batch sync:
+are the one deliberate exception. Every row lands in the same table with the
+same shape, distinguished only by `source`, and four things can write one:
+
+| `source` | Who | How |
+|---|---|---|
+| `emr` | An EMR/EHR partner's own system | `POST /api/v1/emr/observations` (below) |
+| `manual_hospital` | A clinic with no EMR integration | `POST /api/v1/clinical-observations`, tenant key |
+| `manual_patient` | The patient themselves | The `/clinical/` web portal, once their phone is linked |
+| `patient_sms` | The patient themselves | Texting a reading, once their phone is linked |
+
+**The automated feed.** A partner pushes to `POST /api/v1/emr/observations`
+(header `x-api-key`, the key issued when the partner was added under the
+**EMR/EHR partners** tab — a different principal from a clinic/hospital
+tenant's key of the same header name, see `src/middleware/
+auth.js#authEmrPartner`). Body is one observation or `{ observations: [...]
+}` for batch sync:
 
 ```json
 { "payerId": "pay_acacia", "memberId": "ACA-00123", "tenantId": "ten_euracare",
@@ -772,6 +785,80 @@ never scored as 0 — `GET /api/platform/metrics-library` (optionally
 `?domain=vbc&condition=diabetes`) lists what's available, and `src/services/
 metricsLibrary.js`'s header explains that rule in full, since it's the one
 easiest to get backwards when extending the library.
+
+**Manual entry — a clinic keying in a reading by hand.**
+`POST /api/v1/clinical-observations` (tenant key, `src/routes/clinical.js`)
+takes the exact same body shape as the EMR feed above, minus `tenantId`
+(taken from the key); `GET /api/v1/clinical-observations?payerId=&memberId=`
+lists what that clinic itself has recorded for a member (not the EMR feed or
+other clinics' entries — see the route's own comment for why it's scoped
+that way). `biller.html`'s **VBC check-in** card is the front end for this.
+
+**Manual entry — the patient's own self-report, web or SMS/WhatsApp.** This
+is the one place in the app that accepts clinical data over text — in direct
+tension with the "no PHI over SMS/WhatsApp" stance under **Before
+production** below. The gate is `src/services/clinicalLinks.js`: a phone
+number means nothing until its holder proves they hold it, via the exact
+same OTP primitives (`services/messaging.js#genOtp`) and the exact same
+lockout/expiry discipline `services/verification.js` already uses for bill
+verification — this feature's version of the explicit, conscious opt-in
+`includeTreatmentDetail` already is for treatment detail in a verification
+text.
+
+- A clinic can start this for a patient during a visit — `POST /api/v1/
+  clinical-observations/link` (tenant key) — or a patient can start it
+  themselves at the public **`/clinical/`** page. Either way, a code is
+  texted to the phone and the **patient** has to confirm it (reply with it,
+  or enter it on the page) before anything can be submitted from their side;
+  a clinic starting it on someone's behalf doesn't skip that.
+- Once confirmed, the patient can log a reading on the web page, or text one
+  in using a short, fixed, number-only grammar designed to be easy to learn
+  and unambiguous to parse: `BP 130/85`, `HBA1C 6.8`, `LDL 110`,
+  `COMPLICATION`, `FOLLOWUP`, `SCREENING`, `WELLNESS`. `STOP` opts out
+  immediately, from anyone, no confirmation needed; `HELP` repeats the list
+  (but only to a phone already enrolled — it doesn't advertise the feature
+  to one that isn't). `BP`/`HBA1C`/`LDL` always tag their own condition
+  (hypertension/diabetes/dyslipidemia respectively) regardless of what the
+  patient enrolled under; `COMPLICATION`/`FOLLOWUP` fall back to the
+  condition chosen at enrollment, since those two are meaningful per-program
+  rather than self-evident from the reading itself.
+- Requesting a link is idempotent and always (re-)issues a fresh code rather
+  than accumulating duplicate rows — the same one call covers first-time
+  enrollment, a lost/forgotten session, and a new device. A successful
+  confirmation mints a bearer token, returned exactly once (never echoed
+  back by any later `GET`); it's required on every write and read of the
+  patient's own data (`Authorization: Bearer …` or `x-clinical-token`), the
+  link id alone is not enough.
+- The inbound SMS/WhatsApp webhook (`POST /api/v1/webhooks/messaging-inbound`)
+  tries a clinical interpretation **first** and falls straight through to
+  the existing bill-verification handling, completely unchanged, for
+  anything that isn't clearly clinical or doesn't match a pending clinical
+  link — a phone that has never touched this feature sees no change in
+  behaviour at all.
+
+```bash
+# Patient (or a clinic on their behalf) requests a code
+curl -sX POST http://localhost:3000/clinical/api/link \
+  -H 'Content-Type: application/json' \
+  -d '{"payerId":"pay_acacia","memberId":"ACA-00123","phone":"0241234567","condition":"hypertension"}'
+# -> { id, status:"pending", ... } — code is sent to the phone, never in this response
+
+# Patient confirms (web page, or texting the same code back)
+curl -sX POST http://localhost:3000/clinical/api/link/clk_xxx/confirm \
+  -H 'Content-Type: application/json' -d '{"code":"123456"}'
+# -> { ..., status:"active", token:"…" } — the ONLY time the bearer token is returned
+
+# From then on, either the web page or a text message works:
+curl -sX POST http://localhost:3000/clinical/api/link/clk_xxx/observations \
+  -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' \
+  -d '{"type":"blood_pressure","systolic":130,"diastolic":85}'
+```
+
+Run `npm run smoke:clinical-entry` for the full suite against the in-memory
+store: enrollment validation, OTP confirm/lockout/expiry (web and
+SMS-bare-code paths), every reading keyword, condition auto-tagging,
+STOP/HELP, hospital-initiated enrollment, and the "lost token" re-request
+flow.
 
 ## Stanbic settlement (verified against the SBG Money Transfer API doc)
 
@@ -828,10 +915,16 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 2. **Authenticate payer authorisation** — back the secure link / payer API with the
    payer's login + step-up (OTP / signed mandate) before any transfer.
 3. **No PHI over email/WhatsApp** — notifications carry references and links only.
-   The one exception is opt-in and off by default: a client can turn on
-   `includeTreatmentDetail` (`PUT /api/platform/clients/:id/verification-channels`,
-   see **SMS / WhatsApp verification** below), which lists the treatment/line items in
-   the SMS/WhatsApp text itself. Leave it off to keep this rule strictly true.
+   There are two deliberate, consent-gated exceptions, both off unless someone
+   explicitly turns them on: a client can turn on `includeTreatmentDetail`
+   (`PUT /api/platform/clients/:id/verification-channels`, see **SMS / WhatsApp
+   verification** below), which lists the treatment/line items in the SMS/WhatsApp
+   text itself; and the Product Development Environment's clinical check-in (see
+   **Product Development Environment** above) does accept a patient's own clinical
+   readings by text, but only once that phone has proven it belongs to that patient
+   via OTP, and `STOP` always, immediately, opts it back out. Leave both off/unused
+   to keep the blanket rule strictly true; a production deployment turning either on
+   should make sure the consent language shown at enrollment reflects that choice.
 4. **Persistence** — the app uses **PostgreSQL when `DATABASE_URL` is set** (survives
    restarts, scales to many instances) and an in-memory store otherwise. Schema is
    auto-created and seeded on boot. Money paths use `SELECT … FOR UPDATE` transactions

@@ -3,6 +3,22 @@
 const store = require('../store');
 const ledger = require('./ledger');
 const pricing = require('./pricing');
+const payerEditions = require('./payerEditions');
+
+// Same 15% ceiling the other percent-based rules use (see pricing.js CAPS).
+// A single fixed cap is enough here since there's only one payer-side rule;
+// unlike pricing.js's per-tenant, per-type rules this isn't worth a shared
+// table keyed by payer id (payers aren't tenants, and overloading pricing_rules'
+// tenant_id column with a payer id would be a confusing data model).
+const MAX_PAYER_COMMISSION_RATE = 0.15;
+
+/** Accept 0..1 or 0..100, clamp to the cap — same convention as pricing.js. */
+function normalisePayerCommissionRate(v) {
+  const n = Number(v);
+  if (Number.isNaN(n) || n < 0) return 0;
+  const frac = n > 1 ? n / 100 : n;
+  return Math.min(frac, MAX_PAYER_COMMISSION_RATE);
+}
 
 /**
  * Accrue a computed SaaS fee to the ledger as a receivable owed by `chargeTo`.
@@ -61,9 +77,32 @@ async function onClaimSettled(claim, bill) {
   const basis = claim.settlementAmount != null ? claim.settlementAmount : claim.amount;
   const fee = pricing.compute(rule, basis, { event: 'claim_settled' });
   return accrue(fee, { bill, currency: bill.currency,
-    refs: { claimId: claim.id, reference: claim.transferReference,
+    refs: { claimId: claim.id, payerId: claim.payerId, reference: claim.transferReference,
       source: n && n.inNetwork && n.terms ? 'nnest_terms' : 'facility_rule',
       nnest: !!(n && n.inNetwork) } });
+}
+
+/**
+ * Platform commission charged directly to a COMMERCIAL payer on every claim it
+ * settles — separate from, and additional to, whatever expedited-settlement fee
+ * the hospital's own pricing rules may already charge the insurer above. That one
+ * is a fee the hospital configures and the platform merely relays; this one is
+ * the payer's own commercial relationship with the platform (set via Master
+ * Control, PUT /api/platform/payers/:id/commission), gated on the payer actually
+ * holding the commercial edition — see services/payerEditions.js. Non-commercial
+ * or disabled/zero-rate payers simply accrue nothing here, silently.
+ */
+async function onPayerCommission(claim, bill, payer) {
+  if (!payer || payerEditions.editionOf(payer) !== 'commercial') return null;
+  const rate = normalisePayerCommissionRate(payer.commission?.rate);
+  if (!payer.commission?.enabled || rate <= 0) return null;
+
+  const basis = claim.settlementAmount != null ? claim.settlementAmount : claim.amount;
+  const fee = { type: 'payer_commission', chargeTo: 'insurer', mode: 'percent', rate,
+    amount: Math.round(basis * rate * 100) / 100, basis };
+  if (!(fee.amount > 0)) return null;
+  return accrue(fee, { bill, currency: bill.currency,
+    refs: { claimId: claim.id, payerId: payer.id, rate } });
 }
 
 /**
@@ -105,4 +144,5 @@ async function onMedicalReport(report, ctx) {
     refs: { reportId: report.id, reportKind: report.kind, loanType: report.loanType } });
 }
 
-module.exports = { accrue, onClaimSettled, onDiscountApplied, onClaimitCashback, onMedicalReport };
+module.exports = { accrue, onClaimSettled, onPayerCommission, onDiscountApplied, onClaimitCashback, onMedicalReport,
+  MAX_PAYER_COMMISSION_RATE, normalisePayerCommissionRate };
