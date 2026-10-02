@@ -33,6 +33,7 @@
     <button onclick="tab('opmode',this)">Operating mode</button>
     <button onclick="tab('leads',this)">IT leads</button>
     <button onclick="tab('payers',this)">Payers</button>
+    <button onclick="tab('pde',this)">Product Lab</button>
     <button onclick="tab('emr',this)">EMR/EHR partners</button>
     <button onclick="tab('lic',this)">Licences</button>
     <button onclick="tab('policy',this)">Licensing policy</button>
@@ -248,6 +249,112 @@
     </div>
   </div>
 
+  <div class="panel" id="p-pde">
+    <p class="muted" style="margin:0 0 14px;font-size:13px">A payer's product team builds Value-Based-Care programs, promotional
+      campaigns, and loyalty/discount programs here — no coding required. Every product starts as a <b>draft</b>, moves to
+      <b>sandbox</b> to test against real observation data risk-free, then <b>live</b> once it's reviewed. Incentives, penalties
+      and cashback only ever <i>accrue</i> as figures to review here — nothing disburses automatically yet. Clinical indicators
+      (blood pressure, HbA1c, LDL, complications, follow-ups) come from an EMR/EHR partner's own feed — see the
+      <b>EMR/EHR partners</b> tab for the API key a partner pushes them with.</p>
+
+    <div class="card" style="margin-bottom:14px"><h2>Build a product</h2>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pd_payer"></select></div>
+        <div class="field"><label>Type</label><select id="pd_type" onchange="pdTypeChanged()">
+          <option value="vbc">Value-Based-Care program</option>
+          <option value="campaign">Promotional campaign</option>
+          <option value="loyalty">Loyalty / discount program</option>
+        </select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Name</label><input id="pd_name" placeholder="Hypertension VBC Pilot"/></div>
+        <div class="field"><label>Description <span class="muted" style="font-weight:400">optional</span></label><input id="pd_desc" placeholder="Narrow-network hypertension outcomes pilot"/></div>
+      </div>
+
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 8px;font-size:13px"><b>Participating providers</b> — the ecosystem this product reaches (hospitals, pharmacies, physio practices…). Leave none checked to include every provider with relevant data.</p>
+        <div id="pd_providers" style="max-height:140px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px"></div>
+      </div>
+
+      <div id="pd_vbc_fields" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <div class="row">
+          <div class="field"><label>Condition</label><select id="pd_condition" onchange="pdLoadMetrics()">
+            <option value="hypertension">Hypertension</option><option value="diabetes">Diabetes</option><option value="dyslipidemia">Dyslipidemia</option>
+          </select></div>
+        </div>
+        <p class="muted" style="margin:8px 0 6px;font-size:13px"><b>Metrics</b> — pick the ones this program is scored on and weight each one (any positive numbers; they're normalised automatically, so 1/1/1 and 50/30/20 behave the same relative to each other).</p>
+        <div id="pd_metrics"></div>
+        <p class="muted" style="margin:10px 0 6px;font-size:13px">Clinical targets used by the metrics above (defaults shown are standard primary-care benchmarks):</p>
+        <div class="row">
+          <div class="field"><label>Systolic target &lt;</label><input id="pd_sys" type="number" value="140"/></div>
+          <div class="field"><label>Diastolic target &lt;</label><input id="pd_dia" type="number" value="90"/></div>
+          <div class="field"><label>HbA1c target ≤%</label><input id="pd_hba1c" type="number" value="7.0" step="0.1"/></div>
+          <div class="field"><label>LDL target ≤mg/dL</label><input id="pd_ldl" type="number" value="100"/></div>
+          <div class="field"><label>Expected follow-ups/enrollee</label><input id="pd_expfollow" type="number" value="4"/></div>
+        </div>
+        <p class="muted" style="margin:10px 0 6px;font-size:13px"><b>Provider incentive &amp; penalty tiers</b> — scored 0–100; a provider's bonus or penalty depends on where their own outcome score lands.</p>
+        <div class="row">
+          <div class="field"><label>Bonus when score ≥</label><input id="pd_bonus_min" type="number" value="75"/></div>
+          <div class="field"><label>Bonus amount (GHS)</label><input id="pd_bonus_amt" type="number" value="500"/></div>
+          <div class="field"><label>Penalty when score ≤</label><input id="pd_penalty_max" type="number" value="40"/></div>
+          <div class="field"><label>Penalty amount (GHS)</label><input id="pd_penalty_amt" type="number" value="200"/></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500">
+          <input type="checkbox" id="pd_cashback_on" style="width:auto"/> Also pay the patient directly when THEIR OWN reading hits target
+        </label>
+        <div class="row" style="margin-top:6px">
+          <div class="field"><label>Patient qualifies at personal score ≥</label><input id="pd_cashback_min" type="number" value="80"/></div>
+          <div class="field"><label>Patient cashback (GHS)</label><input id="pd_cashback_amt" type="number" value="20"/></div>
+        </div>
+      </div>
+
+      <div id="pd_campaign_fields" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <div class="row">
+          <div class="field"><label>Target action</label><input id="pd_camp_action" value="screening_completed" placeholder="screening_completed"/></div>
+          <div class="field"><label>Starts</label><input id="pd_camp_start" type="date"/></div>
+          <div class="field"><label>Ends</label><input id="pd_camp_end" type="date"/></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Patient reward (GHS) <span class="muted" style="font-weight:400">optional</span></label><input id="pd_camp_patient_amt" type="number" placeholder="15"/></div>
+          <div class="field"><label>Provider reward per completion (GHS) <span class="muted" style="font-weight:400">optional</span></label><input id="pd_camp_provider_amt" type="number" placeholder="8"/></div>
+        </div>
+      </div>
+
+      <div id="pd_loyalty_fields" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <div class="row">
+          <div class="field"><label>Qualifying action</label><input id="pd_loy_action" value="wellness_visit" placeholder="wellness_visit"/></div>
+          <div class="field"><label>Partner category</label><input id="pd_loy_category" value="spa" placeholder="spa / gym / wellness"/></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Reward per action (GHS)</label><input id="pd_loy_amt" type="number" value="10"/></div>
+          <div class="field"><label>Cap per period (GHS) <span class="muted" style="font-weight:400">optional</span></label><input id="pd_loy_cap_amt" type="number" placeholder="25"/></div>
+          <div class="field"><label>Period (days)</label><input id="pd_loy_cap_days" type="number" value="30"/></div>
+        </div>
+      </div>
+
+      <button class="primary" style="margin-top:12px" onclick="createProduct()">Create as draft</button>
+      <p class="muted" id="pd_create_status" style="font-size:12px"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Products</h2><div id="pd_list"></div></div>
+
+    <div class="card"><h2>Preview &amp; accrue</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Preview runs the scoring/reward engine and shows what it <i>would</i> pay out for a period — nothing is saved. Accrue runs the same engine and writes those figures to the ledger below it. Run each period once; accrual history shows what's already been recorded.</p>
+      <div class="row">
+        <div class="field"><label>Product</label><select id="pd_measure_product" onchange="loadAccrualHistory()"></select></div>
+        <div class="field"><label>From</label><input id="pd_measure_from" type="date"/></div>
+        <div class="field"><label>To</label><input id="pd_measure_to" type="date"/></div>
+      </div>
+      <div class="row">
+        <div class="field" style="display:flex;align-items:flex-end"><button class="ghost" style="width:100%" onclick="previewProduct()">Preview</button></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="accrueProduct()">Accrue</button></div>
+      </div>
+      <div id="pd_measure_results" style="margin-top:10px"></div>
+      <p class="muted" style="margin:14px 0 6px;font-size:13px"><b>Accrual history</b></p>
+      <div id="pd_accrual_history"></div>
+    </div>
+  </div>
+
   <div class="panel" id="p-emr">
     <div class="card" style="margin-bottom:14px"><h2>Add an EMR/EHR partner</h2>
       <div class="row">
@@ -257,7 +364,9 @@
         <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addEmr()">Create</button></div>
       </div>
     </div>
-    <div class="card"><h2>EMR/EHR partners</h2><div id="emr"></div></div>
+    <div class="card"><h2>EMR/EHR partners</h2><div id="emr"></div>
+      <p class="muted" style="margin-top:10px;font-size:12px">Each partner's API key (shown below as it does everywhere else — created once, then masked) is also what it uses to push clinical observations for the <b>Product Lab</b>: <span class="key">POST /api/v1/emr/observations</span> with header <span class="key">x-api-key</span>.</p>
+    </div>
   </div>
 
   <div class="panel" id="p-policy">
@@ -442,6 +551,7 @@ async function loadClients(){
   const opts=CLIENTS.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('l_org').innerHTML='<option value="">Any client</option>'+opts;
   if($('vc_client'))$('vc_client').innerHTML='<option value="">Select client…</option>'+opts;
+  renderPdProviders();
 }
 function loadVerifChannels(){
   const id=$('vc_client').value;
@@ -527,6 +637,7 @@ async function loadPayers(){
   if($('pv_payer'))$('pv_payer').innerHTML=opts;
   if($('pc_payer'))$('pc_payer').innerHTML=opts;
   if($('sc_payer'))$('sc_payer').innerHTML=opts;
+  if($('pd_payer'))$('pd_payer').innerHTML=opts.replace('Select payer…','Select sponsoring payer…');
   loadTargets();
 }
 async function setPayerEd(id,edition){
@@ -766,8 +877,162 @@ async function renew(id){
   const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/renew`,{method:'POST',headers:H(),body:JSON.stringify({})});
   if(r.ok){const o=await r.json();toast(`Renewed to ${new Date(o.expiresAt).toLocaleDateString()}`);loadLicState();}else toast('Failed');
 }
+// ---- Product Development Environment ----------------------------------
+let PRODUCTS=[];
+
+function renderPdProviders(){
+  if(!$('pd_providers'))return;
+  $('pd_providers').innerHTML=(CLIENTS||[]).map(c=>
+    `<label style="display:flex;align-items:center;gap:8px;margin:4px 0;font-weight:400">
+      <input type="checkbox" class="pdProv" data-id="${esc(c.id)}" style="width:auto"/> ${esc(c.name)}</label>`).join('')
+    ||'<span class="muted">No providers yet — add clients under the Clients tab.</span>';
+}
+function pdSelectedProviders(){
+  return [...document.querySelectorAll('.pdProv')].filter(c=>c.checked).map(c=>c.dataset.id);
+}
+
+function pdTypeChanged(){
+  const t=$('pd_type').value;
+  $('pd_vbc_fields').style.display=t==='vbc'?'':'none';
+  $('pd_campaign_fields').style.display=t==='campaign'?'':'none';
+  $('pd_loyalty_fields').style.display=t==='loyalty'?'':'none';
+  if(t==='vbc')pdLoadMetrics();
+}
+
+async function pdLoadMetrics(){
+  const condition=$('pd_condition').value;
+  const r=await (await fetch(`/api/platform/metrics-library?domain=vbc&condition=${encodeURIComponent(condition)}`,{headers:H()})).json().catch(()=>null);
+  const metrics=(r&&r.metrics)||[];
+  $('pd_metrics').innerHTML=metrics.map(m=>
+    `<div class="row" style="margin:4px 0;align-items:center">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:400;flex:2;margin:0">
+        <input type="checkbox" class="pdMetric" data-id="${esc(m.id)}" checked style="width:auto"/> ${esc(m.label)}
+        <span class="muted" style="font-size:11px">(${m.higherIsBetter?'higher is better':'lower is better'})</span>
+      </label>
+      <input type="number" class="pdWeight" data-id="${esc(m.id)}" value="1" min="0" step="0.1" style="max-width:90px" placeholder="weight"/>
+    </div>`).join('')||'<p class="muted">No metrics for this condition.</p>';
+}
+function pdSelectedMetrics(){
+  return [...document.querySelectorAll('.pdMetric')].filter(c=>c.checked).map(c=>{
+    const w=document.querySelector(`.pdWeight[data-id="${c.dataset.id}"]`);
+    return {metricId:c.dataset.id, weight:parseFloat(w&&w.value)||1};
+  });
+}
+
+async function createProduct(){
+  const payerId=$('pd_payer').value; if(!payerId)return toast('Pick a sponsoring payer');
+  const type=$('pd_type').value;
+  const name=$('pd_name').value.trim(); if(!name)return toast('Name required');
+  const config={providers:pdSelectedProviders()};
+  if(type==='vbc'){
+    config.condition=$('pd_condition').value;
+    config.metrics=pdSelectedMetrics();
+    if(!config.metrics.length)return toast('Pick at least one metric');
+    config.metricParams={systolicTarget:parseFloat($('pd_sys').value)||140, diastolicTarget:parseFloat($('pd_dia').value)||90,
+      hba1cTarget:parseFloat($('pd_hba1c').value)||7.0, ldlTarget:parseFloat($('pd_ldl').value)||100,
+      expectedFollowupsPerEnrollee:parseFloat($('pd_expfollow').value)||4};
+    config.providerTiers=[
+      {kind:'bonus',minScore:parseFloat($('pd_bonus_min').value)||0,amount:parseFloat($('pd_bonus_amt').value)||0,currency:'GHS'},
+      {kind:'penalty',maxScore:parseFloat($('pd_penalty_max').value)||0,amount:parseFloat($('pd_penalty_amt').value)||0,currency:'GHS'},
+    ];
+    if($('pd_cashback_on').checked){
+      config.patientCashback={minScore:parseFloat($('pd_cashback_min').value)||0,amount:parseFloat($('pd_cashback_amt').value)||0,currency:'GHS'};
+    }
+  } else if(type==='campaign'){
+    config.targetAction=$('pd_camp_action').value.trim();
+    config.startDate=$('pd_camp_start').value; config.endDate=$('pd_camp_end').value;
+    if(!config.targetAction)return toast('Target action required');
+    if(!config.startDate||!config.endDate)return toast('Start and end date required');
+    const pAmt=parseFloat($('pd_camp_patient_amt').value); if(pAmt>0)config.patientReward={amount:pAmt,currency:'GHS'};
+    const prAmt=parseFloat($('pd_camp_provider_amt').value); if(prAmt>0)config.providerReward={amount:prAmt,currency:'GHS'};
+  } else if(type==='loyalty'){
+    config.qualifyingAction=$('pd_loy_action').value.trim();
+    config.partnerCategory=$('pd_loy_category').value.trim()||'wellness';
+    if(!config.qualifyingAction)return toast('Qualifying action required');
+    config.rewardPerAction={amount:parseFloat($('pd_loy_amt').value)||0,currency:'GHS'};
+    const capAmt=parseFloat($('pd_loy_cap_amt').value);
+    if(capAmt>0)config.capPerPeriod={amount:capAmt,periodDays:parseFloat($('pd_loy_cap_days').value)||30};
+  }
+  const r=await fetch('/api/platform/products',{method:'POST',headers:H(),body:JSON.stringify({payerId,type,name,description:$('pd_desc').value,config})});
+  const o=await r.json().catch(()=>null);
+  if(r.ok){toast(`${o.name} created as draft`);$('pd_name').value='';$('pd_desc').value='';$('pd_create_status').textContent='';loadProducts();}
+  else{$('pd_create_status').textContent=`${(o&&o.message)||'Failed'}${o&&o.detail?': '+o.detail:''}`;toast('Could not create product — see note below the button');}
+}
+
+async function loadProducts(){
+  const r=await (await fetch('/api/platform/products',{headers:H()})).json().catch(()=>null);
+  PRODUCTS=(r&&r.data)||[];
+  const statusPill=(s)=>({draft:'<span class="pill open">draft</span>',sandbox:'<span class="pill">sandbox</span>',live:'<span class="pill settled">live</span>'}[s]||esc(s));
+  $('pd_list').innerHTML=PRODUCTS.length?`<table><thead><tr><th>Product</th><th>Type</th><th>Payer</th><th>Status</th><th>Actions</th></tr></thead><tbody>`+
+    PRODUCTS.map(p=>`<tr><td>${esc(p.name)}<br><span class="muted" style="font-size:11px">${esc(p.id)}</span></td>
+      <td>${esc(p.type)}</td><td>${esc(p.payerName||p.payerId)}</td><td>${statusPill(p.status)}</td>
+      <td style="white-space:nowrap">
+        ${p.status==='draft'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Move to sandbox</button>`:''}
+        ${p.status==='sandbox'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','live')">Publish live</button> <button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','draft')">Back to draft</button>`:''}
+        ${p.status==='live'?`<button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Pause to sandbox</button>`:''}
+        <button class="ghost mini" onclick="pdSelectForMeasure('${esc(p.id)}')">Measure</button>
+      </td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">No products yet — build one above.</p>';
+  if($('pd_measure_product')){
+    const cur=$('pd_measure_product').value;
+    $('pd_measure_product').innerHTML='<option value="">Select product…</option>'+PRODUCTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.type)})</option>`).join('');
+    if(cur)$('pd_measure_product').value=cur;
+  }
+}
+async function setProductStatus(id,status){
+  const r=await fetch(`/api/platform/products/${encodeURIComponent(id)}/status`,{method:'POST',headers:H(),body:JSON.stringify({status})});
+  if(r.ok){toast(`Status: ${status}`);loadProducts();}else{const o=await r.json().catch(()=>({}));toast(o.message||'Failed');}
+}
+function pdSelectForMeasure(id){
+  const btn=[...document.querySelectorAll('.tabs button')].find(b=>(b.getAttribute('onclick')||'').includes("'pde'"));
+  if(btn)tab('pde',btn);
+  if($('pd_measure_product')){$('pd_measure_product').value=id;loadAccrualHistory();}
+}
+function pdRenderResults(r){
+  const money=(a,c)=>`${esc(c||'GHS')} ${Number(a||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const provRows=(r.providers||[]).map(p=>`<tr><td>${esc(p.tenantId)}</td><td>${p.score!=null?p.score:'—'}</td>
+    <td>${p.kind?`<span class="pill ${p.kind==='bonus'?'settled':'rejected'}">${esc(p.kind)}</span> ${money(p.amount,p.currency)}`:'<span class="muted">no tier hit</span>'}</td>
+    <td class="muted" style="font-size:12px">${esc(p.reason||(p.completions!=null?(p.completions+' completion(s)'):''))}</td></tr>`).join('');
+  const patRows=(r.patients||[]).map(p=>`<tr><td>${esc(p.memberId)}</td><td>${p.score!=null?p.score:(p.actionCount!=null?p.actionCount+' actions':'—')}</td>
+    <td>${money(p.amount,p.currency)}</td><td class="muted" style="font-size:12px">${esc(p.reason||'')}</td></tr>`).join('');
+  $('pd_measure_results').innerHTML=`
+    <p class="muted" style="font-size:12px">Enrolled in period: <b>${r.enrolledCount||0}</b></p>
+    <p style="font-weight:600;margin:10px 0 4px">Providers</p>
+    <table><thead><tr><th>Provider</th><th>Score</th><th>Result</th><th>Why</th></tr></thead><tbody>${provRows||'<tr><td colspan=4 class="muted">No participating providers with data in this period.</td></tr>'}</tbody></table>
+    <p style="font-weight:600;margin:14px 0 4px">Patients</p>
+    <table><thead><tr><th>Member</th><th>Score / count</th><th>Amount</th><th>Why</th></tr></thead><tbody>${patRows||'<tr><td colspan=4 class="muted">No qualifying patients in this period.</td></tr>'}</tbody></table>`;
+}
+async function previewProduct(){
+  const id=$('pd_measure_product').value; if(!id)return toast('Pick a product');
+  const body={from:$('pd_measure_from').value||undefined,to:$('pd_measure_to').value||undefined};
+  const r=await (await fetch(`/api/platform/products/${encodeURIComponent(id)}/preview`,{method:'POST',headers:H(),body:JSON.stringify(body)})).json().catch(()=>null);
+  if(!r||r.error)return toast((r&&r.message)||'Preview failed');
+  pdRenderResults(r); toast('Preview only — nothing saved');
+}
+async function accrueProduct(){
+  const id=$('pd_measure_product').value; if(!id)return toast('Pick a product');
+  const body={from:$('pd_measure_from').value||undefined,to:$('pd_measure_to').value||undefined};
+  const r=await (await fetch(`/api/platform/products/${encodeURIComponent(id)}/accrue`,{method:'POST',headers:H(),body:JSON.stringify(body)})).json().catch(()=>null);
+  if(!r||r.error)return toast((r&&r.message)||'Accrue failed');
+  pdRenderResults(r.results); toast(`Accrued ${r.accrued.length} entr${r.accrued.length===1?'y':'ies'}`);
+  loadAccrualHistory();
+}
+async function loadAccrualHistory(){
+  const id=$('pd_measure_product')?$('pd_measure_product').value:'';
+  if(!id){$('pd_accrual_history').innerHTML='<p class="muted">Pick a product above.</p>';return;}
+  const r=await (await fetch(`/api/platform/products/${encodeURIComponent(id)}/accruals`,{headers:H()})).json().catch(()=>null);
+  const rows=(r&&r.data)||[];
+  $('pd_accrual_history').innerHTML=rows.length?`<table><thead><tr><th>When</th><th>Who</th><th>Kind</th><th>Amount</th><th>Why</th></tr></thead><tbody>`+
+    rows.map(a=>`<tr><td>${esc(new Date(a.computedAt).toLocaleString())}</td>
+      <td>${esc(a.beneficiaryType)}: ${esc(a.beneficiaryId)}</td>
+      <td><span class="pill ${a.kind==='penalty'?'rejected':'settled'}">${esc(a.kind)}</span></td>
+      <td>${esc(a.currency)} ${Number(a.amount).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="muted" style="font-size:12px">${esc(a.reason||'')}</td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">No accruals recorded yet for this product.</p>';
+}
+
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();};
+boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();};
 boot();
 </script>
 </body></html>

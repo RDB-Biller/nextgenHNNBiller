@@ -53,6 +53,21 @@ CREATE INDEX IF NOT EXISTS idx_networks_tenant ON networks(tenant_id);
 CREATE TABLE IF NOT EXISTS pricing_rules (id text PRIMARY KEY, tenant_id text, type text, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS claimit (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS idempotency_keys (scope text, key text, request_hash text, status text, response_status int, response_body jsonb, created_at timestamptz DEFAULT now(), PRIMARY KEY (scope, key));
+-- Product Development Environment (services/products.js, metricsLibrary.js, incentives.js):
+-- a payer-built VBC / promotional-campaign / loyalty "product", the clinical
+-- observations an EMR/EHR partner feeds in to measure it, and the incentive/
+-- penalty/cashback figures the engine accrues against it.
+CREATE TABLE IF NOT EXISTS clinical_observations (id text PRIMARY KEY, payer_id text, member_id text, tenant_id text, emr_partner_id text, condition text, type text, recorded_at timestamptz, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_observations_payer_cond ON clinical_observations(payer_id, condition);
+CREATE INDEX IF NOT EXISTS idx_observations_member ON clinical_observations(payer_id, member_id);
+CREATE TABLE IF NOT EXISTS products (id text PRIMARY KEY, type text, payer_id text, status text, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_products_payer ON products(payer_id);
+CREATE INDEX IF NOT EXISTS idx_products_type ON products(type);
+-- Append-only, same convention as 'ledger' (no UPDATE/DELETE -- corrections are new entries).
+CREATE TABLE IF NOT EXISTS incentive_accruals (id text PRIMARY KEY, product_id text, payer_id text, beneficiary_type text, beneficiary_id text, amount numeric, currency text, kind text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_accruals_product ON incentive_accruals(product_id);
+CREATE INDEX IF NOT EXISTS idx_accruals_payer ON incentive_accruals(payer_id);
+CREATE INDEX IF NOT EXISTS idx_accruals_beneficiary ON incentive_accruals(beneficiary_type, beneficiary_id);
 CREATE INDEX IF NOT EXISTS idx_bills_tenant ON bills(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_tenant ON claims(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_payer ON claims(payer_id);
@@ -237,6 +252,44 @@ function pgRepo(exec) {
       summary: async (t) => (await exec(
         'SELECT type, count(*)::int AS n, COALESCE(SUM(amount) FILTER (WHERE cash_movement),0) AS cash, COALESCE(SUM(amount),0) AS total FROM ledger WHERE tenant_id=$1 GROUP BY type', [t])).rows,
     },
+    // ---- Product Development Environment ----------------------------------
+    observations: {
+      get: (id) => one('SELECT data FROM clinical_observations WHERE id=$1', [id]),
+      listByPayer: (payerId) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 ORDER BY recorded_at', [payerId]),
+      listByPayerCondition: (payerId, condition) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 AND condition=$2 ORDER BY recorded_at', [payerId, condition]),
+      listByMember: (payerId, memberId) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 AND member_id=$2 ORDER BY recorded_at', [payerId, memberId]),
+      insert: (o) => exec(
+        `INSERT INTO clinical_observations (id,payer_id,member_id,tenant_id,emr_partner_id,condition,type,recorded_at,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [o.id, o.payerId, o.memberId, o.tenantId || null, o.emrPartnerId || null, o.condition || null, o.type, o.recordedAt, o]),
+    },
+    products: {
+      get: (id) => one('SELECT data FROM products WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM products ORDER BY created_at DESC', []),
+      listByPayer: (p) => many('SELECT data FROM products WHERE payer_id=$1 ORDER BY created_at DESC', [p]),
+      listByType: (t) => many('SELECT data FROM products WHERE type=$1 ORDER BY created_at DESC', [t]),
+      save: (p) => exec(
+        `INSERT INTO products (id,type,payer_id,status,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET type=EXCLUDED.type, payer_id=EXCLUDED.payer_id,
+           status=EXCLUDED.status, data=EXCLUDED.data, updated_at=now()`,
+        [p.id, p.type, p.payerId, p.status, p]),
+    },
+    accruals: {
+      insert: (a) => exec(
+        `INSERT INTO incentive_accruals (id,product_id,payer_id,beneficiary_type,beneficiary_id,amount,currency,kind,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [a.id, a.productId, a.payerId, a.beneficiaryType, a.beneficiaryId, a.amount, a.currency, a.kind, a]),
+      listByProduct: (productId, limit = 500) => many(
+        'SELECT data FROM incentive_accruals WHERE product_id=$1 ORDER BY created_at DESC LIMIT $2', [productId, limit]),
+      listByBeneficiary: (beneficiaryType, beneficiaryId, limit = 500) => many(
+        'SELECT data FROM incentive_accruals WHERE beneficiary_type=$1 AND beneficiary_id=$2 ORDER BY created_at DESC LIMIT $3',
+        [beneficiaryType, beneficiaryId, limit]),
+      listByPayer: (payerId, limit = 1000) => many(
+        'SELECT data FROM incentive_accruals WHERE payer_id=$1 ORDER BY created_at DESC LIMIT $2', [payerId, limit]),
+    },
     idempotency: {
       begin: async (scope, key, hash) => {
         const ins = await exec(
@@ -412,6 +465,35 @@ function memRepo(M) {
         return Object.values(by);
       },
     },
+    // ---- Product Development Environment ----------------------------------
+    observations: {
+      get: async (id) => M.observations.get(id) || null,
+      listByPayer: async (payerId) =>
+        list(M.observations, (o) => o.payerId === payerId).sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      listByPayerCondition: async (payerId, condition) =>
+        list(M.observations, (o) => o.payerId === payerId && o.condition === condition)
+          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      listByMember: async (payerId, memberId) =>
+        list(M.observations, (o) => o.payerId === payerId && o.memberId === memberId)
+          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      insert: async (o) => { M.observations.set(o.id, o); },
+    },
+    products: {
+      get: async (id) => M.products.get(id) || null,
+      all: async () => [...M.products.values()].reverse(),
+      listByPayer: async (p) => list(M.products, (x) => x.payerId === p).reverse(),
+      listByType: async (t) => list(M.products, (x) => x.type === t).reverse(),
+      save: async (p) => M.products.set(p.id, p),
+    },
+    accruals: {
+      insert: async (a) => { M.accruals.push(a); },
+      listByProduct: async (productId, limit = 500) =>
+        M.accruals.filter((a) => a.productId === productId).slice(-limit).reverse(),
+      listByBeneficiary: async (beneficiaryType, beneficiaryId, limit = 500) =>
+        M.accruals.filter((a) => a.beneficiaryType === beneficiaryType && a.beneficiaryId === beneficiaryId).slice(-limit).reverse(),
+      listByPayer: async (payerId, limit = 1000) =>
+        M.accruals.filter((a) => a.payerId === payerId).slice(-limit).reverse(),
+    },
     idempotency: {
       begin: async (scope, key, hash) => {
         const k = `${scope}\u0000${key}`;
@@ -476,6 +558,7 @@ if (usePg) {
     verifications: new Map(), verifyTokens: new Map(), priorApprovals: new Map(), notifications: [],
     ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
+    observations: new Map(), products: new Map(), accruals: [],
   };
   repo = memRepo(M);
   const mutex = makeMutex();

@@ -57,16 +57,19 @@ Demo path: open `http://localhost:4000/app/biller.html`, build a bill with a mem
 ID, tap a payer (insurer *or* employer), then open `/app/payers.html` (or the printed
 secure link) and **Authorise** — watch it settle on `/app/dashboard.html` with the
 notification fan-out. `npm run smoke` runs it over HTTP (needs `npm start` running
-first). Four more smoke suites run in-process, no server/network needed: `npm run
+first). Five more smoke suites run in-process, no server/network needed: `npm run
 smoke:verification` (patient verification, dashboard queue, reissue/override/prior
 approvals, SMS/WhatsApp OTP + 2-way reply), `npm run smoke:messaging-live`
 (credential encryption, the platform test account, and all three provider adapters,
 against a mocked HTTP layer — see **SMS / WhatsApp verification** below), `npm run
 smoke:operating-mode` (the sandbox/live confirmation gate, hybrid independence of
 the two rails, and settlement credential resolution against a mocked Stanbic
-transport — see **Operating mode** below), and `npm run smoke:payer-commercial`
+transport — see **Operating mode** below), `npm run smoke:payer-commercial`
 (payer edition/licence redemption and the per-claim commission's accrual + revenue
-attribution — see **Payer commercial edition & commission** below).
+attribution — see **Payer commercial edition & commission** below), and `npm run
+smoke:pde` (observation ingestion, product validation, and all three product
+types' scoring/reward math, including the null-vs-zero metric distinction and
+period-window clipping — see **Product Development Environment** below).
 
 ## Clinic / EHR API (key `x-api-key: emr_demo_key_123`)
 
@@ -453,7 +456,7 @@ spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 | `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
 | `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
 | `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
-| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels | `x-platform-key` | all |
+| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels, **Product Lab** (VBC/campaign/loyalty products, metric library, preview/accrue) | `x-platform-key`; the one EMR-partner observation endpoint uses its own `x-api-key` instead | all |
 
 Every documented endpoint is verified against the app's mounted routes.
 
@@ -698,6 +701,77 @@ key-less `GET /health` on load and hides itself the moment either rail goes live
 It's a convenience shortcut for whoever's demoing at the clinic terminal, not a
 credential boundary: `platform.html` still requires its own platform key regardless
 of whether the link is shown.
+
+## Product Development Environment: VBC, campaigns, and loyalty programs
+
+Master Control's **Product Lab** tab lets a payer's product team — no coding
+required — build three kinds of product on top of the ecosystem of providers
+(hospitals, pharmacies, physio practices…) already in this platform:
+
+- **Value-Based-Care (VBC) programs** — pick a condition (hypertension,
+  diabetes, or dyslipidemia), pick which pre-built clinical metrics matter
+  (blood-pressure control, HbA1c control, LDL control, complication rate,
+  follow-up adherence — each condition has its own set, `src/services/
+  metricsLibrary.js`), and weight them into one blended 0–100 outcome score.
+  Each participating provider is scored only on **its own** patients, then
+  lands in a bonus or penalty tier purely from where that score falls — the
+  tool for the perverse fee-for-service incentive you're guarding against
+  (more complications/follow-ups silently paying a provider more). A patient
+  can optionally earn their own cashback too, judged on their own reading of
+  the program's primary metric, independent of their provider's score.
+- **Promotional campaigns** (e.g. a breast-screening drive) — a target action,
+  a time window, an optional flat reward for the patient and/or the provider
+  per completion.
+- **Loyalty / discount programs** (e.g. a spa/wellness cashback) — a
+  qualifying action, a flat reward per occurrence, an optional cap per period.
+
+All three share one engine (`src/services/products.js` builds and validates
+the product; `src/services/incentives.js` scores it and writes the payout).
+VBC prices off the blended formula above because that's what value-based
+care actually is; campaigns and loyalty programs price off a flat amount per
+completed action instead ("pay GHS 15 per completed screening"), because
+forcing those through a weighted score would be false precision. Either way,
+the result right now **only accrues as figures to review** — like the
+Revenue page does for platform fees — nothing disburses automatically. A
+product's `POST /api/platform/products/:id/accrue` is the one call that
+writes; `/preview` runs the identical calculation without saving, so a
+product manager can see what a draft would pay out before committing to it.
+
+**Lifecycle**: every product starts in `draft`, moves to `sandbox` to test
+against real observation data risk-free, then `live` once reviewed —
+draft↔sandbox↔live, one step at a time (`POST /api/platform/products/:id/
+status`). Every status computes/accrues identically today; the obvious seam
+for later is gating real disbursement on `live`, the same way **Operating
+mode** above gates real settlement on the live rail.
+
+**Where the clinical data comes from**: this app bills procedures and
+medicines, not diagnoses or vitals, everywhere else — clinical observations
+are the one deliberate exception, and they only ever arrive from an EMR/EHR
+partner's own feed, never typed in by hand here. A partner pushes them to
+`POST /api/v1/emr/observations` (header `x-api-key`, the key issued when the
+partner was added under the **EMR/EHR partners** tab — a different principal
+from a clinic/hospital tenant's key of the same header name, see `src/
+middleware/auth.js#authEmrPartner`). Body is one observation or `{
+observations: [...] }` for batch sync:
+
+```json
+{ "payerId": "pay_acacia", "memberId": "ACA-00123", "tenantId": "ten_euracare",
+  "condition": "hypertension", "type": "blood_pressure",
+  "systolic": 128, "diastolic": 80, "recordedAt": "2026-03-01T09:00:00Z" }
+```
+
+`type` is one of `blood_pressure | hba1c | ldl | complication |
+followup_visit | screening_completed | wellness_visit`; the last two feed
+campaigns and loyalty programs rather than a VBC score. A member's
+attribution to a program is implicit — anyone with an observation tagged to
+that payer + condition in the measurement period counts — so enrollment
+needs no separate roster to maintain.
+
+A metric nobody has reported data for yet is **excluded** from a VBC score,
+never scored as 0 — `GET /api/platform/metrics-library` (optionally
+`?domain=vbc&condition=diabetes`) lists what's available, and `src/services/
+metricsLibrary.js`'s header explains that rule in full, since it's the one
+easiest to get backwards when extending the library.
 
 ## Stanbic settlement (verified against the SBG Money Transfer API doc)
 

@@ -58,6 +58,7 @@ tags:
 - name: Patient Verification
 - name: Messaging
 - name: Operating Mode
+- name: Product Lab
 components:
   securitySchemes:
     PlatformKey:
@@ -65,6 +66,13 @@ components:
       in: header
       name: x-platform-key
       description: SaaS owner master key
+    EmrPartnerKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: An EMR/EHR partner's own key (created via POST .../emr-partners above) — distinct
+        from a clinic/hospital tenant's key of the same header name on the core billing API. Only
+        used for POST /api/v1/emr/observations below; an EMR partner has no other access.
 paths:
   /api/platform/me:
     get:
@@ -393,6 +401,132 @@ paths:
           description: '{ settlement, messaging, updatedAt, updatedBy, seededFromEnv }'
         '422':
           description: confirmation_required — switching Settlement to live without confirm:"LIVE"
+  /api/platform/metrics-library:
+    get:
+      tags:
+      - Product Lab
+      summary: Pre-built metric definitions a VBC program is built from
+      description: 'Query params domain? (vbc|campaign|loyalty) and condition? (hypertension|diabetes|dyslipidemia)
+        narrow the list, e.g. ?domain=vbc&condition=diabetes to populate a condition-specific metric
+        picker. Each metric''s clinical/behavioural definition (what counts as "at target", etc) is
+        fixed here — a product manager building a program picks from this list and assigns a weight,
+        rather than inventing a metric from scratch. See services/metricsLibrary.js.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ conditions: [{id,label}], metrics: [{id,domain,condition,label,unit,higherIsBetter}] }'
+  /api/platform/products:
+    get:
+      tags:
+      - Product Lab
+      summary: List products (VBC programs, promotional campaigns, loyalty programs)
+      description: Query params payerId? and type? (vbc|campaign|loyalty) narrow the list.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: [Product] }'
+    post:
+      tags:
+      - Product Lab
+      summary: Build a new product, as a draft
+      description: 'Body { payerId, type: vbc|campaign|loyalty, name, description?, config }. config''s
+        required shape depends on type — see services/products.js#validateConfig: vbc needs condition
+        + metrics[{metricId,weight}] (+ optional metricParams, providerTiers, patientCashback); campaign
+        needs targetAction + startDate + endDate (+ optional patientReward, providerReward); loyalty
+        needs qualifyingAction + rewardPerAction (+ optional partnerCategory, capPerPeriod). providers
+        (an array of client ids) is accepted on every type. A fresh product always starts in draft —
+        see POST .../status to move it to sandbox, then live.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The created Product
+        '422':
+          description: invalid_type | invalid_condition | unknown_metric | metric_condition_mismatch
+            | at_least_one_metric_required | targetAction_required | rewardPerAction_required | ... —
+            see products.js#validateConfig for the complete list
+        '404':
+          description: unknown_payer
+  /api/platform/products/{id}:
+    get:
+      tags:
+      - Product Lab
+      summary: Get one product
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The Product
+        '404':
+          description: unknown_product
+    put:
+      tags:
+      - Product Lab
+      summary: Update a product's name, description, or config
+      description: Body { name?, description?, config? }. A partial config is merged onto the existing
+        one, then re-validated as a whole (so you can patch just e.g. providerTiers without resending
+        everything else).
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The updated Product
+  /api/platform/products/{id}/status:
+    post:
+      tags:
+      - Product Lab
+      summary: Move a product between draft, sandbox, and live
+      description: 'Body { status: draft|sandbox|live }. Only one step at a time, in order
+        (draft<->sandbox<->live) — draft can''t jump straight to live. live is stamped with publishedAt
+        the first time it''s reached. Right now every status computes and accrues identically (nothing
+        disburses automatically in any status — see Operating Mode-style gating note in incentives.js
+        for the obvious future seam); the status is about organisational readiness, not a money gate,
+        today.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: The updated Product
+        '422':
+          description: invalid_transition
+  /api/platform/products/{id}/preview:
+    post:
+      tags:
+      - Product Lab
+      summary: Run the scoring/reward engine for a period WITHOUT writing anything
+      description: Body { from?, to? } (ISO dates, both optional/open-ended). Lets a product manager
+        see what a program would pay out before committing to it. Safe to call as often as you like.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ enrolledCount, providers: [{tenantId,score?,amount?,currency?,kind?,reason?}],
+            patients: [{memberId,score?,amount?,currency?,kind?,reason?}] }'
+  /api/platform/products/{id}/accrue:
+    post:
+      tags:
+      - Product Lab
+      summary: Run the same engine as /preview and WRITE one accrual row per rewarded/penalised party
+      description: Body { from?, to? }. Figures accrue for review only — nothing disburses automatically
+        (see services/incentives.js). Calling this twice for the same period double-counts; the UI
+        shows accrual history per product precisely so that's visible, not hidden.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ results: <same shape as /preview>, accrued: [IncentiveAccrual] }'
+  /api/platform/products/{id}/accruals:
+    get:
+      tags:
+      - Product Lab
+      summary: Accrual history for one product
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ data: [IncentiveAccrual] }'
   /api/platform/payers:
     get:
       tags:
@@ -608,6 +742,60 @@ paths:
       responses:
         '201':
           description: Created
+  /api/v1/emr/observations:
+    post:
+      tags:
+      - EMR partners
+      - Product Lab
+      summary: Push clinical observations (the one thing an EMR/EHR partner's own key can do)
+      description: 'Not under /api/platform — called directly by the partner itself, authenticated
+        with the key POST .../emr-partners issued it (header x-api-key, NOT a tenant''s key despite
+        the same header name — see the EmrPartnerKey security scheme). This is the only clinical data
+        this app accepts (it bills procedures/medicines, not diagnoses or vitals, everywhere else) and
+        the only source services/metricsLibrary.js'' VBC metrics are computed from. Body is either one
+        observation object, or { observations: [ ...observation objects ] } for batch sync. Each
+        observation: { payerId, memberId, type, condition?, tenantId?, value?, systolic?, diastolic?,
+        unit?, recordedAt? }. type must be one of blood_pressure | hba1c | ldl | complication |
+        followup_visit | screening_completed | wellness_visit — see services/observations.js.'
+      security:
+      - EmrPartnerKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payerId:
+                  type: string
+                memberId:
+                  type: string
+                type:
+                  type: string
+                  enum: [blood_pressure, hba1c, ldl, complication, followup_visit, screening_completed, wellness_visit]
+                condition:
+                  type: string
+                  enum: [hypertension, diabetes, dyslipidemia]
+                tenantId:
+                  type: string
+                  description: Which participating provider this observation is attributed to, if known
+                value:
+                  type: number
+                systolic:
+                  type: number
+                diastolic:
+                  type: number
+                recordedAt:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: '{ ok: true, count, data: [ClinicalObservation] }'
+        '401':
+          description: missing_api_key | invalid_api_key
+        '422':
+          description: payerId_required | memberId_required | invalid_type
+        '404':
+          description: unknown_payer
   /api/platform/users:
     get:
       tags:

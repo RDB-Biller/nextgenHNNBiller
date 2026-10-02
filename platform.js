@@ -24,6 +24,9 @@ const credentials = require('../services/credentials');
 const operatingMode = require('../services/operatingMode');
 const payerEditions = require('../services/payerEditions');
 const fees = require('../services/fees');
+const metricsLibrary = require('../services/metricsLibrary');
+const products = require('../services/products');
+const incentives = require('../services/incentives');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -608,6 +611,84 @@ router.get('/payers/:id/pricelist', async (req, res, next) => {
 
 router.delete('/payers/:id/pricelist', async (req, res, next) => {
   try { res.json(await priceList.clear(req.params.id)); } catch (e) { next(e); }
+});
+
+// ---- Product Development Environment ---------------------------------------
+// A non-technical product manager builds a VBC program, promotional campaign,
+// or loyalty/discount program here (services/products.js), against clinical
+// observations an EMR partner has fed in (services/observations.js, routes/
+// emr.js), then previews and accrues the incentives/penalties/cashback it
+// produces (services/incentives.js). Nothing here disburses money -- see
+// incentives.js's own header for why that's deliberate right now.
+
+// The metric library a VBC program is built from -- condition optional, e.g.
+// ?domain=vbc&condition=diabetes to populate a condition-specific picker.
+router.get('/metrics-library', (req, res) => {
+  res.json({
+    conditions: metricsLibrary.CONDITIONS,
+    metrics: metricsLibrary.listMetrics({ domain: req.query.domain, condition: req.query.condition }),
+  });
+});
+
+router.get('/products', async (req, res, next) => {
+  try {
+    let data = req.query.payerId ? await products.listByPayer(req.query.payerId) : await products.all();
+    if (req.query.type) data = data.filter((p) => p.type === req.query.type);
+    res.json({ data });
+  } catch (e) { next(e); }
+});
+
+router.get('/products/:id', async (req, res, next) => {
+  try { res.json(await products.get(req.params.id)); } catch (e) { next(e); }
+});
+
+// Body: { payerId, type: 'vbc'|'campaign'|'loyalty', name, description?, config }
+// -- config's required shape depends on type; see products.js#validateConfig.
+router.post('/products', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await products.create(b.payerId, b, req.principal?.id || 'HNN'));
+  } catch (e) { next(e); }
+});
+
+router.put('/products/:id', async (req, res, next) => {
+  try { res.json(await products.update(req.params.id, req.body || {}, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// Body: { status: 'draft'|'sandbox'|'live' }. Only draft<->sandbox<->live
+// (in that order) are allowed in one step -- see products.js#VALID_TRANSITIONS.
+router.post('/products/:id/status', async (req, res, next) => {
+  try { res.json(await products.setStatus(req.params.id, req.body?.status, req.principal?.id || 'HNN')); }
+  catch (e) { next(e); }
+});
+
+// Read-only: runs the scoring/reward engine for a period WITHOUT writing
+// anything -- lets a product manager see what a program would pay out before
+// committing to it. Body: { from?, to? } (ISO dates; both optional/open-ended).
+router.post('/products/:id/preview', async (req, res, next) => {
+  try {
+    const product = await products.get(req.params.id);
+    res.json(await incentives.compute(product, { from: req.body?.from, to: req.body?.to }));
+  } catch (e) { next(e); }
+});
+
+// Runs the same engine as /preview but WRITES one accrual row per rewarded/
+// penalised provider and patient. Safe to call repeatedly for different,
+// non-overlapping periods; calling it twice for the same period double-counts,
+// same caveat as re-running any other accrual job -- callers are expected to
+// track which periods they've already run (the UI shows accrual history per
+// product so this is visible, not hidden).
+router.post('/products/:id/accrue', async (req, res, next) => {
+  try {
+    const product = await products.get(req.params.id);
+    res.json(await incentives.accrue(product, { from: req.body?.from, to: req.body?.to }, req.principal?.id || 'HNN'));
+  } catch (e) { next(e); }
+});
+
+router.get('/products/:id/accruals', async (req, res, next) => {
+  try { res.json({ data: await incentives.listAccrualsByProduct(req.params.id) }); }
+  catch (e) { next(e); }
 });
 
 module.exports = router;

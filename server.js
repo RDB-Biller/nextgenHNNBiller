@@ -24,6 +24,7 @@ const platformRoutes = require('./routes/platform');
 const { authPlatform, requireFeature } = require('./middleware/access');
 const claimitRoutes = require('./routes/claimit');
 const reportPortalRoutes = require('./routes/reportPortal');
+const emrRoutes = require('./routes/emr');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -61,6 +62,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);
+// EMR/EHR partner clinical-observation feed (Product Development Environment /
+// VBC) — the partner's OWN api_key, not a tenant's; see routes/emr.js.
+app.use('/api/v1/emr', emrRoutes);
 
 // Clinic / EHR / EMR API — tenant key
 app.use('/api/v1', authTenant);
