@@ -53,6 +53,28 @@ CREATE INDEX IF NOT EXISTS idx_networks_tenant ON networks(tenant_id);
 CREATE TABLE IF NOT EXISTS pricing_rules (id text PRIMARY KEY, tenant_id text, type text, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS claimit (id text PRIMARY KEY, tenant_id text, bill_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS idempotency_keys (scope text, key text, request_hash text, status text, response_status int, response_body jsonb, created_at timestamptz DEFAULT now(), PRIMARY KEY (scope, key));
+-- Product Development Environment (services/products.js, metricsLibrary.js, incentives.js):
+-- a payer-built VBC / promotional-campaign / loyalty "product", the clinical
+-- observations an EMR/EHR partner feeds in to measure it, and the incentive/
+-- penalty/cashback figures the engine accrues against it.
+CREATE TABLE IF NOT EXISTS clinical_observations (id text PRIMARY KEY, payer_id text, member_id text, tenant_id text, emr_partner_id text, condition text, type text, recorded_at timestamptz, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_observations_payer_cond ON clinical_observations(payer_id, condition);
+CREATE INDEX IF NOT EXISTS idx_observations_member ON clinical_observations(payer_id, member_id);
+-- Manual/self-service clinical entry (services/clinicalLinks.js): an OTP-verified
+-- binding of a phone number to a payer+member, used both to gate the patient
+-- self-entry web portal and to attribute inbound SMS/WhatsApp readings
+-- (routes/webhooks.js) to the right member without a bill or EMR feed in play.
+CREATE TABLE IF NOT EXISTS clinical_links (id text PRIMARY KEY, payer_id text, member_id text, phone_normalized text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_clinical_links_member ON clinical_links(payer_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_clinical_links_phone ON clinical_links(phone_normalized, status);
+CREATE TABLE IF NOT EXISTS products (id text PRIMARY KEY, type text, payer_id text, status text, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_products_payer ON products(payer_id);
+CREATE INDEX IF NOT EXISTS idx_products_type ON products(type);
+-- Append-only, same convention as 'ledger' (no UPDATE/DELETE -- corrections are new entries).
+CREATE TABLE IF NOT EXISTS incentive_accruals (id text PRIMARY KEY, product_id text, payer_id text, beneficiary_type text, beneficiary_id text, amount numeric, currency text, kind text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_accruals_product ON incentive_accruals(product_id);
+CREATE INDEX IF NOT EXISTS idx_accruals_payer ON incentive_accruals(payer_id);
+CREATE INDEX IF NOT EXISTS idx_accruals_beneficiary ON incentive_accruals(beneficiary_type, beneficiary_id);
 CREATE INDEX IF NOT EXISTS idx_bills_tenant ON bills(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_tenant ON claims(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claims_payer ON claims(payer_id);
@@ -67,6 +89,21 @@ CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON ledger(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_bill ON ledger(bill_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tenant ON pricing_rules(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_claimit_tenant ON claimit(tenant_id);
+-- Prospecting campaigns (Master Control "Campaigns" tab, services/campaigns.js):
+-- a named group of contacts (e.g. the seeded Ghana health-provider list), the
+-- contacts in it, each bulk send run against a group, and the per-recipient
+-- outcome of that run. Phone matching for inbound "YES" replies uses the
+-- JSONB phoneNormalized field, same trade-off already made for verifications
+-- and clinical_links -- fine at this scale, no dedicated column/index.
+CREATE TABLE IF NOT EXISTS campaign_groups (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS campaign_contacts (id text PRIMARY KEY, group_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_campaign_contacts_group ON campaign_contacts(group_id);
+CREATE TABLE IF NOT EXISTS campaigns (id text PRIMARY KEY, group_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS campaign_sends (id text PRIMARY KEY, campaign_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_campaign_sends_campaign ON campaign_sends(campaign_id);
+-- Public trial sign-ups (register.html / routes/registerPortal.js), whether
+-- from the campaign "YES" reply link or a direct visit to /register/.
+CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 `;
 
 // Build a repo whose queries run through `exec` (the pool, or a tx client).
@@ -138,6 +175,11 @@ function pgRepo(exec) {
       byToken: (t) => one('SELECT data FROM verifications WHERE token=$1', [t]),
       byBill: (b) => one('SELECT data FROM verifications WHERE bill_id=$1', [b]),
       listByTenant: (t) => many('SELECT data FROM verifications WHERE tenant_id=$1 ORDER BY created_at', [t]),
+      // Phone-matching for inbound SMS/WhatsApp replies (services/verification.js
+      // handleInboundReply). No dedicated column/index, same trade-off already
+      // made for claimit.byClaimNumber's JSONB lookup — fine at this scale.
+      listPendingByPhone: (p) => many(
+        "SELECT data FROM verifications WHERE status='pending' AND data->>'phoneNormalized'=$1 ORDER BY created_at", [p]),
       insert: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
       update: (v) => exec(upsert('verifications', ['tenant_id', 'bill_id', 'status', 'token']), [v.id, v.tenantId, v.billId, v.status, v.token, v]),
     },
@@ -223,11 +265,95 @@ function pgRepo(exec) {
       listByTenant: (t, limit = 100) => many('SELECT data FROM ledger WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2', [t, limit]),
       listByBill: (b) => many('SELECT data FROM ledger WHERE bill_id=$1 ORDER BY created_at', [b]),
       all: (limit = 5000) => many('SELECT data FROM ledger ORDER BY created_at DESC LIMIT $1', [limit]),
+      // payer_id comes from refs.payerId on the entry itself (fees.js) — not a
+      // real column, extracted from the jsonb data so revenue can be sliced by
+      // payer (insurer/employer) as well as by client, with no migration.
       revenueAll: async () => (await exec(
-        `SELECT tenant_id, type, count(*)::int AS n, COALESCE(SUM(amount),0) AS total
-         FROM ledger WHERE type LIKE 'platform_fee_%' GROUP BY tenant_id, type`, [])).rows,
+        `SELECT tenant_id, type, data->'refs'->>'payerId' AS payer_id, count(*)::int AS n, COALESCE(SUM(amount),0) AS total
+         FROM ledger WHERE type LIKE 'platform_fee_%' GROUP BY tenant_id, type, data->'refs'->>'payerId'`, [])).rows,
       summary: async (t) => (await exec(
         'SELECT type, count(*)::int AS n, COALESCE(SUM(amount) FILTER (WHERE cash_movement),0) AS cash, COALESCE(SUM(amount),0) AS total FROM ledger WHERE tenant_id=$1 GROUP BY type', [t])).rows,
+    },
+    // ---- Product Development Environment ----------------------------------
+    observations: {
+      get: (id) => one('SELECT data FROM clinical_observations WHERE id=$1', [id]),
+      listByPayer: (payerId) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 ORDER BY recorded_at', [payerId]),
+      listByPayerCondition: (payerId, condition) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 AND condition=$2 ORDER BY recorded_at', [payerId, condition]),
+      listByMember: (payerId, memberId) => many(
+        'SELECT data FROM clinical_observations WHERE payer_id=$1 AND member_id=$2 ORDER BY recorded_at', [payerId, memberId]),
+      insert: (o) => exec(
+        `INSERT INTO clinical_observations (id,payer_id,member_id,tenant_id,emr_partner_id,condition,type,recorded_at,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [o.id, o.payerId, o.memberId, o.tenantId || null, o.emrPartnerId || null, o.condition || null, o.type, o.recordedAt, o]),
+    },
+    clinicalLinks: {
+      get: (id) => one('SELECT data FROM clinical_links WHERE id=$1', [id]),
+      listActiveByPhone: (p) => many("SELECT data FROM clinical_links WHERE phone_normalized=$1 AND status='active' ORDER BY created_at DESC", [p]),
+      listPendingByPhone: (p) => many("SELECT data FROM clinical_links WHERE phone_normalized=$1 AND status='pending' ORDER BY created_at DESC", [p]),
+      insert: (l) => exec(upsert('clinical_links', ['payer_id', 'member_id', 'phone_normalized', 'status']),
+        [l.id, l.payerId, l.memberId, l.phoneNormalized, l.status, l]),
+      update: (l) => exec(upsert('clinical_links', ['payer_id', 'member_id', 'phone_normalized', 'status']),
+        [l.id, l.payerId, l.memberId, l.phoneNormalized, l.status, l]),
+    },
+    products: {
+      get: (id) => one('SELECT data FROM products WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM products ORDER BY created_at DESC', []),
+      listByPayer: (p) => many('SELECT data FROM products WHERE payer_id=$1 ORDER BY created_at DESC', [p]),
+      listByType: (t) => many('SELECT data FROM products WHERE type=$1 ORDER BY created_at DESC', [t]),
+      save: (p) => exec(
+        `INSERT INTO products (id,type,payer_id,status,data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET type=EXCLUDED.type, payer_id=EXCLUDED.payer_id,
+           status=EXCLUDED.status, data=EXCLUDED.data, updated_at=now()`,
+        [p.id, p.type, p.payerId, p.status, p]),
+    },
+    accruals: {
+      insert: (a) => exec(
+        `INSERT INTO incentive_accruals (id,product_id,payer_id,beneficiary_type,beneficiary_id,amount,currency,kind,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [a.id, a.productId, a.payerId, a.beneficiaryType, a.beneficiaryId, a.amount, a.currency, a.kind, a]),
+      listByProduct: (productId, limit = 500) => many(
+        'SELECT data FROM incentive_accruals WHERE product_id=$1 ORDER BY created_at DESC LIMIT $2', [productId, limit]),
+      listByBeneficiary: (beneficiaryType, beneficiaryId, limit = 500) => many(
+        'SELECT data FROM incentive_accruals WHERE beneficiary_type=$1 AND beneficiary_id=$2 ORDER BY created_at DESC LIMIT $3',
+        [beneficiaryType, beneficiaryId, limit]),
+      listByPayer: (payerId, limit = 1000) => many(
+        'SELECT data FROM incentive_accruals WHERE payer_id=$1 ORDER BY created_at DESC LIMIT $2', [payerId, limit]),
+    },
+    // ---- Prospecting campaigns ----------------------------------------------
+    campaignGroups: {
+      get: (id) => one('SELECT data FROM campaign_groups WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM campaign_groups ORDER BY created_at', []),
+      save: (g) => exec(upsert('campaign_groups', []), [g.id, g]),
+    },
+    campaignContacts: {
+      listByGroup: (groupId) => many('SELECT data FROM campaign_contacts WHERE group_id=$1 ORDER BY created_at', [groupId]),
+      insert: (c) => exec(upsert('campaign_contacts', ['group_id']), [c.id, c.groupId, c]),
+      countByGroup: async (groupId) => {
+        const r = await exec('SELECT count(*)::int AS n FROM campaign_contacts WHERE group_id=$1', [groupId]);
+        return r.rows[0]?.n || 0;
+      },
+    },
+    campaigns: {
+      get: (id) => one('SELECT data FROM campaigns WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM campaigns ORDER BY created_at DESC', []),
+      insert: (c) => exec(upsert('campaigns', ['group_id', 'status']), [c.id, c.groupId, c.status, c]),
+      update: (c) => exec(upsert('campaigns', ['group_id', 'status']), [c.id, c.groupId, c.status, c]),
+    },
+    campaignSends: {
+      insert: (s) => exec(upsert('campaign_sends', ['campaign_id', 'status']), [s.id, s.campaignId, s.status, s]),
+      listByCampaign: (campaignId) => many('SELECT data FROM campaign_sends WHERE campaign_id=$1 ORDER BY created_at', [campaignId]),
+      listSentByPhone: (phoneNormalized) => many(
+        "SELECT data FROM campaign_sends WHERE status='sent' AND data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
+    },
+    trialRegistrations: {
+      get: (id) => one('SELECT data FROM trial_registrations WHERE id=$1', [id]),
+      all: () => many('SELECT data FROM trial_registrations ORDER BY created_at DESC', []),
+      listByPhone: (phoneNormalized) => many(
+        "SELECT data FROM trial_registrations WHERE data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
+      insert: (r) => exec(upsert('trial_registrations', ['org_type', 'status']), [r.id, r.orgType, r.status, r]),
+      update: (r) => exec(upsert('trial_registrations', ['org_type', 'status']), [r.id, r.orgType, r.status, r]),
     },
     idempotency: {
       begin: async (scope, key, hash) => {
@@ -321,6 +447,7 @@ function memRepo(M) {
       byToken: async (t) => M.verifications.get(M.verifyTokens.get(t)) || null,
       byBill: async (b) => list(M.verifications, (v) => v.billId === b)[0] || null,
       listByTenant: async (t) => list(M.verifications, (v) => v.tenantId === t),
+      listPendingByPhone: async (p) => list(M.verifications, (v) => v.status === 'pending' && v.phoneNormalized === p),
       insert: async (v) => { M.verifications.set(v.id, v); if (v.token) M.verifyTokens.set(v.token, v.id); },
       update: async (v) => M.verifications.set(v.id, v),
     },
@@ -387,8 +514,9 @@ function memRepo(M) {
         const out = {};
         for (const e of M.ledger) {
           if (!String(e.type).startsWith('platform_fee_')) continue;
-          const k = `${e.tenantId}|${e.type}`;
-          (out[k] = out[k] || { tenant_id: e.tenantId, type: e.type, n: 0, total: 0 });
+          const payerId = e.refs?.payerId || null;
+          const k = `${e.tenantId}|${e.type}|${payerId}`;
+          (out[k] = out[k] || { tenant_id: e.tenantId, type: e.type, payer_id: payerId, n: 0, total: 0 });
           out[k].n++; out[k].total += Number(e.amount);
         }
         return Object.values(out);
@@ -401,6 +529,72 @@ function memRepo(M) {
         }
         return Object.values(by);
       },
+    },
+    // ---- Product Development Environment ----------------------------------
+    observations: {
+      get: async (id) => M.observations.get(id) || null,
+      listByPayer: async (payerId) =>
+        list(M.observations, (o) => o.payerId === payerId).sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      listByPayerCondition: async (payerId, condition) =>
+        list(M.observations, (o) => o.payerId === payerId && o.condition === condition)
+          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      listByMember: async (payerId, memberId) =>
+        list(M.observations, (o) => o.payerId === payerId && o.memberId === memberId)
+          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)),
+      insert: async (o) => { M.observations.set(o.id, o); },
+    },
+    clinicalLinks: {
+      get: async (id) => M.clinicalLinks.get(id) || null,
+      listActiveByPhone: async (p) => list(M.clinicalLinks, (l) => l.phoneNormalized === p && l.status === 'active').reverse(),
+      listPendingByPhone: async (p) => list(M.clinicalLinks, (l) => l.phoneNormalized === p && l.status === 'pending').reverse(),
+      insert: async (l) => { M.clinicalLinks.set(l.id, l); },
+      update: async (l) => { M.clinicalLinks.set(l.id, l); },
+    },
+    products: {
+      get: async (id) => M.products.get(id) || null,
+      all: async () => [...M.products.values()].reverse(),
+      listByPayer: async (p) => list(M.products, (x) => x.payerId === p).reverse(),
+      listByType: async (t) => list(M.products, (x) => x.type === t).reverse(),
+      save: async (p) => M.products.set(p.id, p),
+    },
+    accruals: {
+      insert: async (a) => { M.accruals.push(a); },
+      listByProduct: async (productId, limit = 500) =>
+        M.accruals.filter((a) => a.productId === productId).slice(-limit).reverse(),
+      listByBeneficiary: async (beneficiaryType, beneficiaryId, limit = 500) =>
+        M.accruals.filter((a) => a.beneficiaryType === beneficiaryType && a.beneficiaryId === beneficiaryId).slice(-limit).reverse(),
+      listByPayer: async (payerId, limit = 1000) =>
+        M.accruals.filter((a) => a.payerId === payerId).slice(-limit).reverse(),
+    },
+    // ---- Prospecting campaigns ----------------------------------------------
+    campaignGroups: {
+      get: async (id) => M.campaignGroups.get(id) || null,
+      all: async () => [...M.campaignGroups.values()],
+      save: async (g) => M.campaignGroups.set(g.id, g),
+    },
+    campaignContacts: {
+      listByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId),
+      insert: async (c) => { M.campaignContacts.set(c.id, c); },
+      countByGroup: async (groupId) => list(M.campaignContacts, (c) => c.groupId === groupId).length,
+    },
+    campaigns: {
+      get: async (id) => M.campaigns.get(id) || null,
+      all: async () => [...M.campaigns.values()].reverse(),
+      insert: async (c) => M.campaigns.set(c.id, c),
+      update: async (c) => M.campaigns.set(c.id, c),
+    },
+    campaignSends: {
+      insert: async (s) => { M.campaignSends.set(s.id, s); },
+      listByCampaign: async (campaignId) => list(M.campaignSends, (s) => s.campaignId === campaignId),
+      listSentByPhone: async (phoneNormalized) =>
+        list(M.campaignSends, (s) => s.status === 'sent' && s.phoneNormalized === phoneNormalized).reverse(),
+    },
+    trialRegistrations: {
+      get: async (id) => M.trialRegistrations.get(id) || null,
+      all: async () => [...M.trialRegistrations.values()].reverse(),
+      listByPhone: async (phoneNormalized) => list(M.trialRegistrations, (r) => r.phoneNormalized === phoneNormalized).reverse(),
+      insert: async (r) => M.trialRegistrations.set(r.id, r),
+      update: async (r) => M.trialRegistrations.set(r.id, r),
     },
     idempotency: {
       begin: async (scope, key, hash) => {
@@ -466,6 +660,9 @@ if (usePg) {
     verifications: new Map(), verifyTokens: new Map(), priorApprovals: new Map(), notifications: [],
     ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
+    observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
+    campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(),
   };
   repo = memRepo(M);
   const mutex = makeMutex();
