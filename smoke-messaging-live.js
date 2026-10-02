@@ -170,7 +170,10 @@ async function resolveSenderAndSendChecks() {
 }
 
 async function main() {
-  ok(messaging.SANDBOX === false, 'precondition: this file must run with MESSAGING_SANDBOX=false');
+  // messaging.js no longer reads MESSAGING_SANDBOX itself at require time — it
+  // asks operatingMode (store.settings), which falls back to this env var only
+  // because nothing's been saved there yet in this fresh in-memory store.
+  ok((await messaging.isSandbox()) === false, 'precondition: this file must run with MESSAGING_SANDBOX=false');
   ok(credentials.isConfigured() === true, 'precondition: this file must run with CREDENTIAL_ENCRYPTION_KEY set');
   await credentialsChecks();
   await messagingAccountChecks();

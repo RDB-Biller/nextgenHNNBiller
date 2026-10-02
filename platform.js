@@ -21,12 +21,44 @@ const priceList = require('../services/priceList');
 const messaging = require('../services/messaging');
 const messagingAccount = require('../services/messagingAccount');
 const credentials = require('../services/credentials');
+const operatingMode = require('../services/operatingMode');
+const payerEditions = require('../services/payerEditions');
+const fees = require('../services/fees');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
 const rand = () => crypto.randomBytes(5).toString('hex');
 
 router.get('/me', (req, res) => res.json({ principal: req.principal, editions: editions.EDITIONS, roles: users.ROLES }));
+
+// ---- Operating Mode: runtime sandbox/live switch for Settlement (Stanbic/SBG) --
+// ---- and Messaging (SMS/WhatsApp), independently switchable (hybrid combos) ----
+// See services/operatingMode.js. This is now the LIVE, authoritative switch —
+// SBG_SANDBOX/MESSAGING_SANDBOX only seed the starting default (get().seededFromEnv
+// says whether anything's actually been saved here yet). Switching Settlement to
+// live moves real money through Stanbic, so it requires confirm:"LIVE" in the
+// same call; Messaging has no such gate (see operatingMode.js's header comment
+// for why). Switching either rail back to sandbox never needs confirmation.
+router.get('/operating-mode', async (req, res, next) => {
+  try { res.json(await operatingMode.get()); } catch (e) { next(e); }
+});
+
+// Body: { settlement?: { sandbox }, messaging?: { sandbox }, confirm? }. Only the
+// rail(s) actually included are changed. 422 with { error:'confirmation_required',
+// detail } if settlement.sandbox:false is sent without confirm:"LIVE" (exact).
+router.put('/operating-mode', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const patch = {};
+    if (body.settlement && 'sandbox' in body.settlement) patch.settlement = { sandbox: body.settlement.sandbox };
+    if (body.messaging && 'sandbox' in body.messaging) patch.messaging = { sandbox: body.messaging.sandbox };
+    if (body.confirm !== undefined) patch.confirm = body.confirm;
+    res.json(await operatingMode.set(patch, req.principal?.id || 'HNN'));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message, detail: e.detail });
+    next(e);
+  }
+});
 
 // ---- overview ---------------------------------------------------------------
 router.get('/overview', async (req, res, next) => {
@@ -233,12 +265,33 @@ router.put('/clients/:id/messaging-credentials', async (req, res, next) => {
 });
 
 // ---- payers (insurers + corporate) ------------------------------------------
+// Never includes the encrypted blob or a decrypted secret — same shape as
+// maskTenantCredentials() above, just for a payer's Stanbic/SBG credentials.
+function maskSettlementCredentials(sc) {
+  const rec = sc || {};
+  return { configured: !!rec.encrypted, hint: rec.hint || null, updatedAt: rec.updatedAt || null, updatedBy: rec.updatedBy || null };
+}
+
 router.get('/payers', async (req, res, next) => {
   try {
     const rows = (await store.payers.all()).filter((p) => !p.tenantId);
     res.json({ data: rows.map((p) => ({ id: p.id, name: p.name, kind: p.kind, apiKey: p.apiKey,
       sourceAccount: p.sbg?.sourceAccount || null, contact: p.contact || null, tracker: p.tracker || null,
-      repriceClaims: p.repriceClaims === true, requirePatientVerification: p.requirePatientVerification === true })) });
+      repriceClaims: p.repriceClaims === true, requirePatientVerification: p.requirePatientVerification === true,
+      // Commercial edition + per-claim commission (Master Control) -- see
+      // services/payerEditions.js / fees.js#onPayerCommission. Doesn't gate any
+      // of the fields above; only the commission itself.
+      edition: payerEditions.editionOf(p), editionUpdatedAt: p.editionUpdatedAt || null,
+      licence: payerEditions.licenceState(p),
+      commission: { enabled: p.commission?.enabled === true, rate: p.commission?.rate || 0,
+        cap: fees.MAX_PAYER_COMMISSION_RATE, updatedAt: p.commission?.updatedAt || null },
+      // Encrypted Stanbic/SBG credentials entered via Master Control, and
+      // whether the legacy plaintext fallback (payer.sbg.{username,password},
+      // pre-dating this encrypted path) is what's actually in effect instead --
+      // see services/settlement.js#clientForPayer().
+      settlementCredentials: maskSettlementCredentials(p.settlementCredentials),
+      legacySettlementCredentialsConfigured: !!(p.sbg?.username && p.sbg?.password),
+    })) });
   } catch (e) { next(e); }
 });
 
@@ -251,6 +304,88 @@ router.post('/payers', async (req, res, next) => {
       sbg: { sourceAccount: sourceAccount || null }, createdAt: new Date().toISOString() };
     await store.payers.save(payer);
     res.status(201).json(payer);
+  } catch (e) { next(e); }
+});
+
+// Flip a payer between editions — instant, reversible, no data loss. Unlike a
+// hospital, this doesn't gate the payer's own feature access (NNEST, price
+// lists, targets, prior approvals keep working regardless) -- only whether the
+// per-claim commission below can be enabled.
+router.put('/payers/:id/edition', async (req, res, next) => {
+  try { res.json(await payerEditions.setEdition(req.params.id, req.body?.edition, req.principal?.id || 'platform_admin')); }
+  catch (e) { next(e); }
+});
+
+// Renew a payer's licence for another term (default 6 months), mirroring
+// POST /clients/:id/renew. feeAmount = what was charged for this term.
+router.post('/payers/:id/renew', async (req, res, next) => {
+  try {
+    res.json(await payerEditions.renew(req.params.id, {
+      termMonths: req.body?.termMonths, feeAmount: req.body?.feeAmount, by: req.principal?.id || 'HNN',
+    }));
+  } catch (e) { next(e); }
+});
+
+// Set/enable a commercial payer's per-claim platform commission (separate from,
+// and additive to, whatever expedited-settlement fee the hospital's own pricing
+// rules may already charge this same payer -- see fees.js#onPayerCommission).
+// Body: { enabled?, rate? } -- either alone leaves the other untouched. rate
+// accepts 0..1 or 0..100 and is clamped to fees.MAX_PAYER_COMMISSION_RATE.
+router.put('/payers/:id/commission', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    if (payerEditions.editionOf(payer) !== 'commercial') {
+      return res.status(402).json({ error: 'upgrade_required', feature: 'payer_commission',
+        edition: payerEditions.editionOf(payer), message: 'A per-claim commission requires the commercial edition.' });
+    }
+    const body = req.body || {};
+    payer.commission = {
+      enabled: body.enabled !== undefined ? body.enabled === true : (payer.commission?.enabled || false),
+      rate: body.rate != null ? fees.normalisePayerCommissionRate(body.rate) : (payer.commission?.rate || 0),
+      updatedAt: new Date().toISOString(), updatedBy: req.principal?.id || 'HNN',
+    };
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, commission: payer.commission, cap: fees.MAX_PAYER_COMMISSION_RATE });
+  } catch (e) { next(e); }
+});
+
+// A payer's own Stanbic/SBG marketplace username/password (the A2A authoriser
+// credentials used by settlement.js#clientForPayer()), entered via Master
+// Control and encrypted at rest -- same treatment as SMS/WhatsApp provider
+// credentials (services/credentials.js), and for the same reason: these can't
+// be known at deploy time and are at least as sensitive as any other secret
+// this app handles. Falls back to legacy plaintext payer.sbg.{username,password}
+// (pre-existing seed/demo data) whenever this hasn't been set -- see
+// settlement.js. Body: { username, password }, both required.
+router.put('/payers/:id/settlement-credentials', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(422).json({ error: 'username_and_password_required' });
+    payer.settlementCredentials = {
+      encrypted: credentials.encrypt({ username, password }),
+      hint: credentials.hint(password),
+      updatedAt: new Date().toISOString(), updatedBy: req.principal?.id || 'HNN',
+    };
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, settlementCredentials: maskSettlementCredentials(payer.settlementCredentials) });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Clear the encrypted settlement credentials, reverting to whatever legacy
+// plaintext payer.sbg fields exist (or none, if there are none).
+router.delete('/payers/:id/settlement-credentials', async (req, res, next) => {
+  try {
+    const payer = await store.payers.get(req.params.id);
+    if (!payer) return res.status(404).json({ error: 'payer_not_found' });
+    payer.settlementCredentials = null;
+    await store.payers.save(payer);
+    res.json({ payerId: payer.id, settlementCredentials: maskSettlementCredentials(null) });
   } catch (e) { next(e); }
 });
 

@@ -46,6 +46,7 @@ tags:
 - name: Clients
 - name: Editions
 - name: Payers
+- name: Payer Commission
 - name: EMR partners
 - name: IT leads
 - name: Licences
@@ -56,6 +57,7 @@ tags:
 - name: Price Lists
 - name: Patient Verification
 - name: Messaging
+- name: Operating Mode
 components:
   securitySchemes:
     PlatformKey:
@@ -337,11 +339,71 @@ paths:
           description: client_not_found
         '422':
           description: no_credentials_configured / unknown_provider / missing_fields
+  /api/platform/operating-mode:
+    get:
+      tags:
+      - Operating Mode
+      summary: Live sandbox/live state of both rails (Settlement + Messaging)
+      description: 'The runtime-authoritative switch. SBG_SANDBOX/MESSAGING_SANDBOX only seed the
+        starting default the first time this is read with nothing saved yet (seededFromEnv: true
+        in the response). Once anything here has been saved via the PUT below, this record governs
+        at runtime, independent of those env vars, until a restart with an empty database. The two
+        rails are switched independently, which is what makes a hybrid deployment possible — e.g.
+        Messaging live while Settlement stays sandboxed for further testing, or vice versa.'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ settlement: { sandbox }, messaging: { sandbox }, updatedAt, updatedBy, seededFromEnv }'
+    put:
+      tags:
+      - Operating Mode
+      summary: Switch Settlement and/or Messaging between sandbox and live
+      description: 'Body { settlement?: { sandbox }, messaging?: { sandbox }, confirm? }. Only the
+        rail(s) actually included are changed; the other keeps whatever it currently resolves to.
+        Switching settlement.sandbox to false (live) moves real money through Stanbic for every payer
+        with settlement credentials configured, so it requires confirm set to exactly "LIVE" (case-sensitive)
+        in the same call — otherwise this returns 422 confirmation_required and nothing is changed.
+        Messaging has no such requirement in either direction, since going live there only costs SMS/WhatsApp
+        send fees, not bank risk. Switching either rail back to sandbox never requires confirm.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settlement:
+                  type: object
+                  properties:
+                    sandbox:
+                      type: boolean
+                messaging:
+                  type: object
+                  properties:
+                    sandbox:
+                      type: boolean
+                confirm:
+                  type: string
+                  description: Must be exactly "LIVE" when switching settlement.sandbox to false; ignored
+                    otherwise
+      responses:
+        '200':
+          description: '{ settlement, messaging, updatedAt, updatedBy, seededFromEnv }'
+        '422':
+          description: confirmation_required — switching Settlement to live without confirm:"LIVE"
   /api/platform/payers:
     get:
       tags:
       - Payers
-      summary: Global payers
+      summary: Global payers, with edition, commission and settlement-credentials state
+      description: 'Each payer''s commercial edition and licence state is included (edition, editionUpdatedAt,
+        licence — see the Editions endpoints), its per-claim commission masked to { enabled, rate,
+        cap, updatedAt } (see PUT .../commission), and its Stanbic/SBG settlement credentials masked
+        to { configured, hint, updatedAt, updatedBy } plus legacySettlementCredentialsConfigured, which
+        is true when an older plaintext payer.sbg credential is what''s actually in effect because
+        nothing''s been saved via PUT .../settlement-credentials yet.'
       security:
       - PlatformKey: []
       responses:
@@ -356,6 +418,177 @@ paths:
       responses:
         '201':
           description: Created
+  /api/platform/payers/{id}/edition:
+    put:
+      tags:
+      - Editions
+      summary: Transition a payer between editions (both directions)
+      description: Instant, reversible, non-destructive — mirrors PUT .../clients/{id}/edition. Unlike
+        a hospital client, a payer's edition does not gate its own feature access (NNEST, price lists,
+        targets, prior approvals keep working regardless of edition); it only gates whether the per-claim
+        commission below can be enabled.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - edition
+              properties:
+                edition:
+                  type: string
+                  enum:
+                  - non_commercial
+                  - commercial
+      responses:
+        '200':
+          description: '{ payerId, name, from, to }'
+        '404':
+          description: payer_not_found
+        '422':
+          description: unknown_edition
+  /api/platform/payers/{id}/commission:
+    put:
+      tags:
+      - Payer Commission
+      summary: Set a commercial payer's per-claim platform commission
+      description: 'Body { enabled?, rate? } — either alone leaves the other untouched. rate accepts
+        0..1 or 0..100 and is clamped to 15%. This commission is separate from, and additional to,
+        whatever expedited-settlement fee a hospital''s own pricing rules may already charge this same
+        payer (see the Core Billing API''s revenue rules) — both can accrue on the same settled claim.
+        Returns 402 upgrade_required if the payer is not currently commercial; upgrade it first via
+        PUT .../edition.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                rate:
+                  type: number
+                  description: 0..1 or 0..100; clamped to 15%
+      responses:
+        '200':
+          description: '{ payerId, commission: { enabled, rate, updatedAt, updatedBy }, cap }'
+        '402':
+          description: upgrade_required — payer is non_commercial
+        '404':
+          description: payer_not_found
+  /api/platform/payers/{id}/renew:
+    post:
+      tags:
+      - Licensing
+      summary: Renew a payer's licence for another term (default 6 months)
+      description: Mirrors POST .../clients/{id}/renew. Extends from the later of now or current expiry.
+        feeAmount records what was charged (0 while free).
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                termMonths:
+                  type: integer
+                  default: 6
+                feeAmount:
+                  type: number
+                  default: 0
+      responses:
+        '200':
+          description: '{ payerId, name, edition, expiresAt, termMonths, feeAmount, key }'
+        '404':
+          description: payer_not_found
+  /api/platform/payers/{id}/settlement-credentials:
+    put:
+      tags:
+      - Operating Mode
+      summary: Set a payer's Stanbic/SBG marketplace username/password (encrypted at rest)
+      description: 'Body { username, password }, both required. Used to authorise the A2A transfer
+        to a provider — see services/settlement.js#clientForPayer() in the Core Billing API. Stored
+        encrypted the same way SMS/WhatsApp provider credentials are (CREDENTIAL_ENCRYPTION_KEY must
+        be set on the server); never echoed back, only masked as { configured, hint, updatedAt, updatedBy
+        }. Falls back to a legacy plaintext credential already on the payer record whenever nothing''s
+        saved here — see legacySettlementCredentialsConfigured on GET .../payers.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - username
+              - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: '{ payerId, settlementCredentials: { configured, hint, updatedAt, updatedBy } }'
+        '404':
+          description: payer_not_found
+        '422':
+          description: username_and_password_required / credential_encryption_not_configured
+    delete:
+      tags:
+      - Operating Mode
+      summary: Clear a payer's encrypted settlement credentials
+      description: Reverts to whatever legacy plaintext payer.sbg credential exists on the record,
+        or none at all.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Payer id
+      responses:
+        '200':
+          description: '{ payerId, settlementCredentials }'
+        '404':
+          description: payer_not_found
   /api/platform/emr-partners:
     get:
       tags:
@@ -625,14 +858,17 @@ paths:
     get:
       tags:
       - Revenue
-      summary: SaaS-wide accrued revenue (all clients), by type and by client
+      summary: SaaS-wide accrued revenue (all clients), by type, by client and by payer
       description: Aggregates platform_fee_* ledger entries across every tenant. All figures are accrued
-        receivables, not cash held.
+        receivables, not cash held. byPayer[] attributes expedited-settlement and per-claim commission
+        fees to the payer that owes them (derived from the fee's own refs, not from the bill's coverage,
+        which can be imprecise for a split bill); a fee type with no payer in its refs — e.g. a report
+        fee charged to the patient — is simply left out of byPayer, not dumped under an "unknown" bucket.
       security:
       - PlatformKey: []
       responses:
         '200':
-          description: '{ totalAccrued, byType[], byClient[] }'
+          description: '{ totalAccrued, byType[], byClient[], byPayer[] }'
   /api/platform/revenue/recent:
     get:
       tags:

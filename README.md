@@ -57,11 +57,16 @@ Demo path: open `http://localhost:4000/app/biller.html`, build a bill with a mem
 ID, tap a payer (insurer *or* employer), then open `/app/payers.html` (or the printed
 secure link) and **Authorise** — watch it settle on `/app/dashboard.html` with the
 notification fan-out. `npm run smoke` runs it over HTTP (needs `npm start` running
-first). Two more smoke suites run in-process, no server/network needed: `npm run
+first). Four more smoke suites run in-process, no server/network needed: `npm run
 smoke:verification` (patient verification, dashboard queue, reissue/override/prior
-approvals, SMS/WhatsApp OTP + 2-way reply) and `npm run smoke:messaging-live`
+approvals, SMS/WhatsApp OTP + 2-way reply), `npm run smoke:messaging-live`
 (credential encryption, the platform test account, and all three provider adapters,
-against a mocked HTTP layer — see **SMS / WhatsApp verification** below).
+against a mocked HTTP layer — see **SMS / WhatsApp verification** below), `npm run
+smoke:operating-mode` (the sandbox/live confirmation gate, hybrid independence of
+the two rails, and settlement credential resolution against a mocked Stanbic
+transport — see **Operating mode** below), and `npm run smoke:payer-commercial`
+(payer edition/licence redemption and the per-claim commission's accrual + revenue
+attribution — see **Payer commercial edition & commission** below).
 
 ## Clinic / EHR API (key `x-api-key: emr_demo_key_123`)
 
@@ -188,12 +193,12 @@ actually uses is resolved per-tenant by `resolveSender(tenant)`:
    "Messaging test account" card in `platform.html`).
 3. Otherwise, **sandbox** — logs the message instead of sending it.
 
-All of that sits underneath `MESSAGING_SANDBOX` (default on, same sandbox-by-default
-pattern `SBG_SANDBOX` uses for the bank rail): while it's anything but `"false"`,
-nothing above is ever actually sent, no matter what's configured or activated — turning
-it off is a separate, deployment-wide decision from configuring either credential
-source. `GET /api/platform/messaging/providers` lists each provider's required
-credential fields plus `encryptionConfigured`.
+All of that sits underneath the Messaging rail's sandbox/live switch — see
+**Operating mode** below. While sandboxed, nothing above is ever actually sent, no
+matter what's configured or activated; going live is a separate, one-click decision
+from configuring either credential source, made from Master Control's Operating
+Mode tab, not a redeploy. `GET /api/platform/messaging/providers` lists each
+provider's required credential fields plus `encryptionConfigured`.
 
 Provider credentials are the **one deliberate exception** to "secrets come from env
 only" elsewhere in this app (see **Before production** below): a client's own account
@@ -448,7 +453,7 @@ spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 | `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
 | `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
 | `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
-| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions**, SMS/WhatsApp verification channels | `x-platform-key` | all |
+| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels | `x-platform-key` | all |
 
 Every documented endpoint is verified against the app's mounted routes.
 
@@ -470,6 +475,36 @@ flag flip — no redeploy, no data migration, **nothing deleted on downgrade**.
   IT lead redeems one themselves at `POST /api/admin/edition/:tenantId/redeem`.
 - Commercial-only endpoints return **402 `upgrade_required`**; clients self-check with
   `GET /api/v1/bills/edition`.
+
+### Payer commercial edition & commission
+
+**Payers** (insurers and corporate payers) carry the same two-value edition as a
+hospital client — same licence-key machinery, same instant/reversible/non-destructive
+flip — but it gates a **different** thing. A payer's edition never affects its own
+feature access: NNEST, price lists, processing targets, and prior approvals all keep
+working regardless of edition. The only thing it gates is a new **per-claim platform
+commission**: `src/services/payerEditions.js`, `PUT /api/platform/payers/:id/edition`,
+`PUT /api/platform/payers/:id/commission`, `POST /api/platform/payers/:id/renew`.
+
+The commission is charged directly to a commercial payer on every claim it settles —
+**separate from, and additional to**, whatever `expedited_settlement` fee a hospital's
+own revenue rules may already charge that same payer above. Both can accrue on the
+same settled claim; this one is the payer's own commercial relationship with the
+platform, not something the hospital configures or that passes through it.
+
+```
+PUT /api/platform/payers/acacia/edition     { "edition": "commercial" }
+PUT /api/platform/payers/acacia/commission  { "enabled": true, "rate": 5 }
+```
+
+`rate` accepts `0..1` or `0..100` and is clamped to **15%**
+(`fees.MAX_PAYER_COMMISSION_RATE`), the same convention as every other percentage
+rule in this app. Attempting to set or enable a commission on a non-commercial payer
+returns **402 `upgrade_required`** — upgrade the edition first. Commission revenue is
+fully reflected in **SaaS-wide revenue**'s `byPayer[]` breakdown below. Managed from
+the "Commercial edition & commission" card under the **Payers** tab in
+`/app/platform.html`, alongside the existing payer edition badge and upgrade/downgrade
+button in the payers table.
 
 ### Other charges (report fees)
 
@@ -603,15 +638,59 @@ cover all, no implicit default), and `split` sets how payers divide the rest.
 
 ## SaaS-wide revenue (platform owner)
 
-Accrued platform fees aggregated across every client, by type and by client.
-All figures are receivables (cashMovement:false) — the platform never holds funds.
+Accrued platform fees aggregated across every client, by type, by client, and by
+payer. All figures are receivables (cashMovement:false) — the platform never holds funds.
+
+`byPayer[]` attributes the expedited-settlement fee and the per-claim commission
+(see **Payer commercial edition & commission** below) to the payer that owes them —
+read off the fee's own `refs.payerId`, not derived from the bill's coverage, which
+can be imprecise on a split bill. A fee with no payer in its refs at all (e.g. a
+report fee charged to the patient) is simply left out of `byPayer`, not dumped
+under a meaningless "unknown" bucket; it still counts in `byType`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/platform/revenue` | Totals by type and by client |
-| GET | `/api/platform/revenue/recent` | Recent fee activity feed |
+| GET | `/api/platform/revenue` | Totals by type, by client, and by payer |
+| GET | `/api/platform/revenue/recent` | Recent fee activity feed (now also names the payer, where one applies) |
 
-UI: `/app/revenue.html` (auth `x-platform-key`).
+UI: `/app/revenue.html` (auth `x-platform-key`) — "Revenue by payer" sits alongside
+the existing by-type and by-client cards.
+
+## Operating mode: sandbox, live, or hybrid (master control board)
+
+Two rails, each independently switchable between sandbox and live, with **no
+redeploy**: **Settlement** (Stanbic/SBG disbursements) and **Messaging**
+(SMS/WhatsApp — see above). `src/services/operatingMode.js`, the **Operating
+mode** tab in `/app/platform.html`, `GET`/`PUT /api/platform/operating-mode`.
+
+This is what makes a genuine **hybrid** deployment possible — e.g. Messaging live
+(real SMS/WhatsApp, real provider cost) while Settlement stays sandboxed (no real
+bank transfers yet, further testing), or vice versa. Before this existed,
+`MESSAGING_SANDBOX` was a deployment-wide kill switch nothing in the database could
+override; it and `SBG_SANDBOX` now only **seed the starting default**, read once,
+the first time `GET /api/platform/operating-mode` is called with nothing saved yet
+(`seededFromEnv: true` in the response). The moment anything is saved via the `PUT`
+below, that record governs **at runtime**, independent of either env var, until a
+process restart finds an empty database (a fresh deploy).
+
+Going live on **Settlement** moves real money through Stanbic for every payer that
+has settlement credentials configured, so it's the one deliberately frictioned
+transition: the request must include `confirm: "LIVE"` (exact, case-sensitive) or
+it's rejected with `422 confirmation_required` and nothing changes. **Messaging**
+going live has no such gate — a plain toggle, since the consequence is SMS/WhatsApp
+send fees, not bank risk. Switching **either** rail back to sandbox never requires
+confirmation. Both rails can be set in one call or separately, and each is
+independent of the other:
+
+```json
+PUT /api/platform/operating-mode
+{ "messaging": { "sandbox": false }, "settlement": { "sandbox": false }, "confirm": "LIVE" }
+```
+
+While Messaging is sandboxed, `biller.html`'s "simulate patient reply" control and
+`otpCodeSandbox` in the bill-creation response keep working exactly as before — see
+**SMS / WhatsApp verification** above — now driven by this live setting rather than
+the static env var.
 
 ## Stanbic settlement (verified against the SBG Money Transfer API doc)
 
@@ -623,10 +702,32 @@ Settlement performs the bank's four-call sequence inside one authorize call:
 4. `POST /v1/disbursements` → status + reference
 
 Success requires `responseHeader.statusCode === "000"` (not just HTTP 200); a failure
-envelope raises `SbgError` with the bank's code. Configure with `SBG_BASE_URL`,
-`SBG_PATH_PREFIX`, `SBG_USERNAME`, `SBG_PASSWORD`, `SBG_SANDBOX`. Two hosts supported:
-the marketplace gateway (`/api/sbg-transfer` prefix) and the direct smartapp host
-(empty prefix). Sandbox settles instantly with an `SBX-` reference.
+envelope raises `SbgError` with the bank's code. Two hosts supported: the
+marketplace gateway (`/api/sbg-transfer` prefix) and the direct smartapp host (empty
+prefix). Sandbox settles instantly with an `SBX-` reference; which mode applies is
+the Settlement rail's own switch — see **Operating mode** above, not a static
+per-process setting.
+
+**Credentials resolve per payer**, in order, each one a fallback for the last:
+
+1. **This payer's own encrypted credential** — `PUT`/`DELETE
+   /api/platform/payers/:id/settlement-credentials` (Master Control, "Settlement
+   credentials" under the Payers tab), stored encrypted the same way SMS/WhatsApp
+   provider credentials are (AES-256-GCM, `CREDENTIAL_ENCRYPTION_KEY`; see
+   `src/services/credentials.js`) and never echoed back — only `{configured, hint,
+   updatedAt, updatedBy}`.
+2. **A legacy plaintext credential already on the payer record** (`payer.sbg.
+   {username, password}`) — pre-dates the encrypted path above; existing seed/demo
+   payers keep working with no forced migration. `GET /api/platform/payers` reports
+   `legacySettlementCredentialsConfigured` so Master Control can tell which one is
+   actually in effect.
+3. **`SBG_USERNAME`/`SBG_PASSWORD`** — a single deployment-wide fallback credential,
+   same env-only convention every other secret in this app follows (see **Before
+   production** below), used only if a payer has neither of the above.
+
+Configure the host and the deployment-wide fallback with `SBG_BASE_URL`,
+`SBG_PATH_PREFIX`, `SBG_USERNAME`, `SBG_PASSWORD`; `SBG_SANDBOX` is now only the
+starting default for the Settlement rail — see **Operating mode** above.
 
 ## Running modes
 
@@ -638,10 +739,11 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 
 1. **Rotate the leaked Stanbic credential** from the "public" Postman collection
    (plaintext password for `sbg_transfer_api_tester`). Secrets come from env only here
-   — the one deliberate exception is third-party SMS/WhatsApp provider credentials
-   (Twilio / Africa's Talking / Hubtel), which can't be known at deploy time and are
-   instead entered via Master Control and stored encrypted at rest; see **SMS /
-   WhatsApp verification** above.
+   — the deliberate exceptions are third-party SMS/WhatsApp provider credentials
+   (Twilio / Africa's Talking / Hubtel) and a payer's own Stanbic/SBG marketplace
+   credentials, neither of which can be known at deploy time; both are instead entered
+   via Master Control and stored encrypted at rest — see **SMS / WhatsApp
+   verification** and **Stanbic settlement** above.
 2. **Authenticate payer authorisation** — back the secure link / payer API with the
    payer's login + step-up (OTP / signed mandate) before any transfer.
 3. **No PHI over email/WhatsApp** — notifications carry references and links only.

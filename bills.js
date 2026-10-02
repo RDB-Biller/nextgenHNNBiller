@@ -27,6 +27,11 @@ router.post('/', async (req, res, next) => {
     // persisted onto the bill (single source of truth stays the verifications
     // table); this is just a one-time convenience snapshot in the response.
     const v = await verification.createForBill(bill);
+    // Sandbox-only convenience: while the Messaging rail is sandboxed (Master
+    // Control's Operating Mode, or MESSAGING_SANDBOX before anything's been
+    // saved there — see services/operatingMode.js), nothing is ever sent for
+    // real, so this is the only way to see the code at all while testing/demoing.
+    const messagingSandbox = await messaging.isSandbox();
     res.status(201).json({ ...bill, patientVerification: {
       status: v.status, link: v.link, channelsSent: v.channelsSent || [],
       // Per-channel send failures (e.g. provider_credentials_incomplete,
@@ -35,10 +40,7 @@ router.post('/', async (req, res, next) => {
       ...((v.smsError || v.whatsappError) ? { channelErrors: {
         ...(v.smsError ? { sms: v.smsError } : {}), ...(v.whatsappError ? { whatsapp: v.whatsappError } : {}),
       } } : {}),
-      // Sandbox-only convenience: while MESSAGING_SANDBOX is on, nothing is
-      // ever sent for real, so this is the only way to see the code at all
-      // while testing/demoing (see messaging.js).
-      ...(messaging.SANDBOX && v.otpCode ? { otpCodeSandbox: v.otpCode } : {}),
+      ...(messagingSandbox && v.otpCode ? { otpCodeSandbox: v.otpCode } : {}),
     } });
   } catch (e) { next(e); }
 });
@@ -125,12 +127,13 @@ router.post('/:id/verification/reissue', async (req, res, next) => {
     const v = await verification.forBill(bill.id);
     if (!v) return res.status(404).json({ error: 'verification_not_found' });
     const updated = await verification.reissue(v.id);
+    const messagingSandbox = await messaging.isSandbox();
     res.json({ status: updated.status, link: updated.link, remindersSent: updated.remindersSent,
       channelsSent: updated.channelsSent || [],
       ...((updated.smsError || updated.whatsappError) ? { channelErrors: {
         ...(updated.smsError ? { sms: updated.smsError } : {}), ...(updated.whatsappError ? { whatsapp: updated.whatsappError } : {}),
       } } : {}),
-      ...(messaging.SANDBOX && updated.otpCode ? { otpCodeSandbox: updated.otpCode } : {}) });
+      ...(messagingSandbox && updated.otpCode ? { otpCodeSandbox: updated.otpCode } : {}) });
   } catch (e) { next(e); }
 });
 

@@ -14,6 +14,8 @@
   .ed.commercial{background:var(--brand-soft);color:var(--brand)}
   .ed.non_commercial{background:#EEF2F0;color:var(--muted)}
   .mini{padding:6px 10px;font-size:13px}
+  .pill.sandbox{background:var(--brand-soft);color:var(--brand)}
+  .pill.live{background:#FBE6E1;color:var(--bad)}
 </style></head><body>
 <div class="wrap">
   <div class="top">
@@ -27,6 +29,7 @@
 
   <div class="tabs">
     <button class="on" onclick="tab('clients',this)">Clients</button>
+    <button onclick="tab('opmode',this)">Operating mode</button>
     <button onclick="tab('leads',this)">IT leads</button>
     <button onclick="tab('payers',this)">Payers</button>
     <button onclick="tab('emr',this)">EMR/EHR partners</button>
@@ -98,6 +101,36 @@
     </div>
   </div>
 
+  <div class="panel" id="p-opmode">
+    <div class="card" style="margin-bottom:14px">
+      <h2>Operating mode</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Settlement and Messaging switch independently — e.g. Messaging can go live while Settlement stays sandboxed, or vice versa. Once anything here is saved, it governs at runtime (no redeploy); the server's env vars only seed the very first default, before Master Control has ever saved anything.</p>
+      <p class="muted" id="om_last" style="font-size:12px;margin:0"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div>
+          <h2 style="margin-bottom:4px">Settlement <span class="muted" style="font-size:12px;font-weight:400">— Stanbic / SBG disbursements</span></h2>
+          <p class="muted" style="margin:0 0 10px;font-size:13px">Real bank transfers once live. Going live moves real money, so it requires typing <span class="key">LIVE</span> to confirm; going back to sandbox never does.</p>
+          <span class="pill" id="om_settlement_pill">—</span>
+        </div>
+        <button class="mini" id="om_settlement_btn" onclick="toggleSettlement()">—</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div>
+          <h2 style="margin-bottom:4px">Messaging <span class="muted" style="font-size:12px;font-weight:400">— SMS / WhatsApp</span></h2>
+          <p class="muted" style="margin:0 0 10px;font-size:13px">Real sends (and provider cost) once live — a plain toggle either direction, since this doesn't move money. While sandboxed, this is also what powers "simulate patient reply" on the billing screen.</p>
+          <span class="pill" id="om_messaging_pill">—</span>
+        </div>
+        <button class="mini" id="om_messaging_btn" onclick="toggleMessaging()">—</button>
+      </div>
+    </div>
+  </div>
+
   <div class="panel" id="p-leads">
     <div class="card" style="margin-bottom:14px"><h2>Assign an IT lead</h2>
       <div class="row">
@@ -129,6 +162,44 @@
       </div>
     </div>
     <div class="card" style="margin-bottom:14px"><h2>Global payers</h2><div id="payers"></div></div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Commercial edition &amp; commission</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">A commercial payer can carry a per-claim platform commission — separate from, and additional to, whatever expedited-settlement fee a hospital's own pricing already charges this same payer. Doesn't affect NNEST, price lists, targets or verification, which keep working regardless of edition.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pc_payer" onchange="loadPayerCommission()"></select></div>
+        <div class="field" style="display:flex;align-items:flex-end;gap:8px">
+          <span class="ed" id="pc_ed_badge">—</span>
+          <button class="ghost mini" id="pc_ed_btn" onclick="togglePayerEdition()">—</button>
+        </div>
+      </div>
+      <div id="pc_commission_box" style="display:none">
+        <div class="row">
+          <div class="field"><label>Commission rate (%)</label><input id="pc_rate" type="number" step="0.1" min="0" max="15" placeholder="5"/></div>
+          <div class="field" style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:8px;font-weight:500;margin:0 0 11px">
+              <input type="checkbox" id="pc_enabled" style="width:auto"/> Enabled
+            </label>
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="savePayerCommission()">Save</button></div>
+        </div>
+        <p class="muted" style="font-size:12px;margin:0">Capped at 15%. <span id="pc_licence_line"></span> <a href="#" onclick="renewPayerLicence();return false">Renew 6 months</a></p>
+      </div>
+      <p class="muted" id="pc_upgrade_hint" style="font-size:12px;display:none">This payer is non-commercial — upgrade it above to enable a commission.</p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Settlement credentials <span class="muted" style="font-size:12px;font-weight:400">— Stanbic / SBG</span></h2>
+      <p class="muted" style="margin-top:0;font-size:13px">This payer's own Stanbic marketplace username/password, used to authorise the A2A transfer to a provider. Stored encrypted; falls back to a legacy plaintext credential already on the payer record if nothing's saved here.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="sc_payer" onchange="loadPayerSettlementCreds()"></select></div>
+        <div class="field"><label>Username</label><input id="sc_username" autocomplete="off"/></div>
+        <div class="field"><label>Password</label><input id="sc_password" type="password" autocomplete="off"/></div>
+        <div class="field" style="display:flex;align-items:flex-end;gap:8px">
+          <button class="primary" style="flex:1" onclick="savePayerSettlementCreds()">Save</button>
+          <button class="ghost" onclick="clearPayerSettlementCreds()">Clear</button>
+        </div>
+      </div>
+      <p class="muted" id="sc_status" style="font-size:12px"></p>
+    </div>
 
     <div class="card" style="margin-bottom:14px"><h2>Processing target</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Set a volume an insurer/employer aims to process through HNN, and track settled value against it.</p>
@@ -231,8 +302,54 @@ async function boot(){
     ['IT leads & partners',`${ov.itLeads} leads · ${ov.emrPartners} EMR`]]
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
   await loadProviderMeta();
-  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics(),loadTestAccount()]);
+  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics(),loadTestAccount(),loadOperatingMode()]);
   orgOptions();
+}
+
+// ---- Operating Mode: runtime sandbox/live switch, Settlement + Messaging ----
+let OPMODE=null;
+async function loadOperatingMode(){
+  const r=await (await fetch('/api/platform/operating-mode',{headers:H()})).json().catch(()=>null);
+  if(!r)return; OPMODE=r; renderOpMode();
+}
+function renderOpMode(){
+  if(!OPMODE)return;
+  $('om_last').textContent=OPMODE.seededFromEnv
+    ?'Nothing saved here yet — both rails are at their deploy (env var) default.'
+    :`Last changed by ${esc(OPMODE.updatedBy||'—')} on ${OPMODE.updatedAt?new Date(OPMODE.updatedAt).toLocaleString():'—'}.`;
+  const paint=(rail,prefix,label)=>{
+    $(prefix+'_pill').className='pill '+(rail.sandbox?'sandbox':'live');
+    $(prefix+'_pill').textContent=rail.sandbox?'Sandbox':'LIVE';
+    const btn=$(prefix+'_btn');
+    btn.textContent=rail.sandbox?`Switch ${label} to live…`:`Switch ${label} to sandbox`;
+    btn.className='mini '+(rail.sandbox?'accent':'ghost');
+  };
+  paint(OPMODE.settlement,'om_settlement','Settlement');
+  paint(OPMODE.messaging,'om_messaging','Messaging');
+}
+async function putOperatingMode(patch){
+  const r=await fetch('/api/platform/operating-mode',{method:'PUT',headers:H(),body:JSON.stringify(patch)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){OPMODE=o;renderOpMode();return true;}
+  toast('Failed: '+(o.detail||o.error||r.status));
+  return false;
+}
+async function toggleSettlement(){
+  if(!OPMODE)return;
+  if(OPMODE.settlement.sandbox){
+    const typed=prompt('Switching Settlement to LIVE moves real money through Stanbic for every payer that has settlement credentials configured.\n\nType LIVE to confirm:');
+    if(typed===null)return;
+    if(await putOperatingMode({settlement:{sandbox:false},confirm:typed}))toast('Settlement is now LIVE');
+  } else {
+    if(!confirm('Switch Settlement back to sandbox?'))return;
+    if(await putOperatingMode({settlement:{sandbox:true}}))toast('Settlement is back in sandbox');
+  }
+}
+async function toggleMessaging(){
+  if(!OPMODE)return;
+  const goingLive=OPMODE.messaging.sandbox;
+  if(await putOperatingMode({messaging:{sandbox:!OPMODE.messaging.sandbox}}))
+    toast(goingLive?'Messaging is now LIVE':'Messaging is back in sandbox');
 }
 
 // ---- real SMS/WhatsApp sending: provider metadata, platform test account, ---
@@ -391,16 +508,101 @@ async function toggle(id,status){const r=await fetch(`/api/platform/users/${id}/
 
 async function loadPayers(){
   const r=await (await fetch('/api/platform/payers',{headers:H()})).json(); PAYERS=r.data||[];
-  $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Source account</th><th>Payer API key</th><th>Verify gate</th></tr></thead><tbody>`+
+  $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Edition</th><th>Commission</th><th>Source account</th><th>Payer API key</th><th>Verify gate</th></tr></thead><tbody>`+
     PAYERS.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.kind==='employer'?'corporate':'insurer')}</td>
+      <td><span class="ed ${esc(p.edition)}">${esc(p.edition.replace('_',' '))}</span>
+        ${p.edition==='commercial'
+          ?`<button class="ghost mini" style="margin-left:6px" onclick="setPayerEd('${esc(p.id)}','non_commercial')">Downgrade</button>`
+          :`<button class="accent mini" style="margin-left:6px" onclick="setPayerEd('${esc(p.id)}','commercial')">Upgrade</button>`}</td>
+      <td>${p.commission&&p.commission.enabled&&p.commission.rate>0?esc((p.commission.rate*100).toFixed(1))+'%':'<span class="muted">off</span>'}</td>
       <td>${esc(p.sourceAccount||'—')}</td><td><span class="key">${esc(p.apiKey||'')}</span></td>
       <td>${p.requirePatientVerification?'<span class="pill settled">on</span>':'<span class="pill open">off</span>'}</td></tr>`).join('')+`</tbody></table>`;
-  // fill target + pricelist + verify-gate payer selects
+  // fill target + pricelist + verify-gate + commission + settlement-credentials payer selects
   const opts='<option value="">Select payer…</option>'+PAYERS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   if($('tg_payer'))$('tg_payer').innerHTML=opts;
   if($('pl_payer'))$('pl_payer').innerHTML=opts;
   if($('pv_payer'))$('pv_payer').innerHTML=opts;
+  if($('pc_payer'))$('pc_payer').innerHTML=opts;
+  if($('sc_payer'))$('sc_payer').innerHTML=opts;
   loadTargets();
+}
+async function setPayerEd(id,edition){
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/edition`,{method:'PUT',headers:H(),body:JSON.stringify({edition})});
+  if(r.ok){const o=await r.json();toast(`${o.name}: ${o.from} → ${o.to}`);loadPayers();
+    if($('pc_payer').value===id)loadPayerCommission();}
+  else toast('Failed');
+}
+function loadPayerCommission(){
+  const id=$('pc_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  if(!payer){ $('pc_ed_badge').textContent='—'; $('pc_ed_badge').className='ed';
+    $('pc_ed_btn').textContent='—'; $('pc_commission_box').style.display='none'; $('pc_upgrade_hint').style.display='none'; return; }
+  $('pc_ed_badge').textContent=payer.edition.replace('_',' ');
+  $('pc_ed_badge').className='ed '+payer.edition;
+  const commercial=payer.edition==='commercial';
+  $('pc_ed_btn').textContent=commercial?'Downgrade':'Upgrade to commercial';
+  $('pc_ed_btn').className=(commercial?'ghost':'accent')+' mini';
+  $('pc_commission_box').style.display=commercial?'block':'none';
+  $('pc_upgrade_hint').style.display=commercial?'none':'block';
+  if(commercial){
+    $('pc_rate').value=payer.commission&&payer.commission.rate?(payer.commission.rate*100).toFixed(1):'';
+    $('pc_enabled').checked=!!(payer.commission&&payer.commission.enabled);
+    const lic=payer.licence||{};
+    $('pc_licence_line').textContent=lic.expiresAt
+      ?`Licence ${lic.expired?'expired':'expires'} ${new Date(lic.expiresAt).toLocaleDateString()}${lic.daysLeft!=null&&!lic.expired?` (${lic.daysLeft}d left)`:''}.`
+      :'No licence expiry set (open-ended).';
+  }
+}
+async function togglePayerEdition(){
+  const id=$('pc_payer').value; if(!id)return toast('Pick a payer');
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  await setPayerEd(id,payer&&payer.edition==='commercial'?'non_commercial':'commercial');
+  $('pc_payer').value=id; loadPayerCommission();
+}
+async function savePayerCommission(){
+  const id=$('pc_payer').value; if(!id)return toast('Pick a payer');
+  const body={enabled:$('pc_enabled').checked,rate:parseFloat($('pc_rate').value)||0};
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/commission`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast(`Commission saved: ${(o.commission.rate*100).toFixed(1)}% ${o.commission.enabled?'(enabled)':'(disabled)'}`);
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.commission=o.commission; loadPayers();$('pc_payer').value=id;}
+  else toast('Failed: '+(o.message||o.error||r.status));
+}
+async function renewPayerLicence(){
+  const id=$('pc_payer').value; if(!id)return toast('Pick a payer');
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/renew`,{method:'POST',headers:H(),body:JSON.stringify({})});
+  if(r.ok){const o=await r.json();toast(`Renewed to ${new Date(o.expiresAt).toLocaleDateString()}`);await loadPayers();$('pc_payer').value=id;loadPayerCommission();}
+  else toast('Failed');
+}
+function loadPayerSettlementCreds(){
+  const id=$('sc_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  $('sc_username').value=''; $('sc_password').value='';
+  if(!payer){ $('sc_status').textContent=''; return; }
+  const sc=payer.settlementCredentials||{configured:false};
+  $('sc_status').textContent=sc.configured
+    ? `Configured (secret ${sc.hint||'…'}).`
+    : payer.legacySettlementCredentialsConfigured
+      ? 'Using legacy demo credentials already on this payer record (nothing encrypted saved here yet).'
+      : 'Not configured — this payer has no settlement credentials at all yet.';
+}
+async function savePayerSettlementCreds(){
+  const id=$('sc_payer').value; if(!id)return toast('Pick a payer');
+  const username=$('sc_username').value.trim(), password=$('sc_password').value;
+  if(!username||!password)return toast('Username and password required');
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/settlement-credentials`,{method:'PUT',headers:H(),body:JSON.stringify({username,password})});
+  const o=await r.json().catch(()=>({}));
+  if(r.ok){toast('Settlement credentials saved');$('sc_password').value='';
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.settlementCredentials=o.settlementCredentials; loadPayerSettlementCreds();}
+  else toast('Failed: '+(o.error||r.status));
+}
+async function clearPayerSettlementCreds(){
+  const id=$('sc_payer').value; if(!id)return toast('Pick a payer');
+  if(!confirm('Clear saved settlement credentials for this payer?'))return;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/settlement-credentials`,{method:'DELETE',headers:H()});
+  if(r.ok){const o=await r.json();toast('Cleared');
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.settlementCredentials=o.settlementCredentials; loadPayerSettlementCreds();}
+  else toast('Failed');
 }
 function loadVerifyGate(){
   const id=$('pv_payer').value;

@@ -4,22 +4,26 @@ const https = require('https');
 const config = require('../config');
 const credentials = require('./credentials');
 const messagingAccount = require('./messagingAccount');
+const operatingMode = require('./operatingMode');
 
 /**
  * Generic, swappable SMS/WhatsApp gateway. `send()` is the single seam: every
  * caller in this codebase goes through it and never knows or cares which
  * provider ends up handling a given message.
  *
- * MESSAGING_SANDBOX (default true) is the deployment-wide kill switch — while
- * it's on, nothing is ever dispatched for real, no matter what's configured
- * underneath. Once an operator sets MESSAGING_SANDBOX=false, each send
- * resolves its own credentials per tenant (see resolveSender): a client's own
- * "bring your own" provider account first (tenant.messagingCredentials, set
- * from Master Control), else the platform's shared test account
- * (services/messagingAccount.js, activated/deactivated from Master Control),
- * else it logs instead of sending — the exact same safety net sandbox mode
- * always provided, just reached for a different reason (nothing configured
- * yet, rather than sandbox being on).
+ * The Messaging rail's sandbox/live state is a runtime switch controlled by
+ * Master Control (services/operatingMode.js) — MESSAGING_SANDBOX only seeds
+ * its starting value the first time it's read with nothing saved yet; once
+ * Master Control has saved anything there, that record governs. While it's
+ * sandboxed, nothing is ever dispatched for real, no matter what's configured
+ * underneath. Once it's live, each send resolves its own credentials per
+ * tenant (see resolveSender): a client's own "bring your own" provider
+ * account first (tenant.messagingCredentials, set from Master Control), else
+ * the platform's shared test account (services/messagingAccount.js,
+ * activated/deactivated from Master Control), else it logs instead of
+ * sending — the exact same safety net sandbox mode always provided, just
+ * reached for a different reason (nothing configured yet, rather than the
+ * rail being sandboxed).
  *
  * Three real adapters are wired in: Twilio, Africa's Talking, Hubtel. Their
  * confidence levels differ — see each function's own comment and the
@@ -29,7 +33,7 @@ const messagingAccount = require('./messagingAccount');
  * Adding a fourth provider only means adding one function and a line in
  * ADAPTERS; nothing else in the codebase changes.
  */
-const SANDBOX = config.messaging.sandbox;
+async function isSandbox() { return operatingMode.isMessagingSandbox(); }
 
 function genOtp() {
   // 6 digits, zero-padded — never starts with a letter, easy to read back over a
@@ -269,7 +273,7 @@ async function resolveSender(tenant) {
  */
 async function send({ channel, to, body, tenant } = {}) {
   if (!to) return { ok: false, error: 'no_recipient' };
-  if (SANDBOX) {
+  if (await isSandbox()) {
     const providerMessageId = `SBX-MSG-${crypto.randomBytes(6).toString('hex')}`;
     const sentAt = new Date().toISOString();
     // eslint-disable-next-line no-console
@@ -297,7 +301,7 @@ async function send({ channel, to, body, tenant } = {}) {
 }
 
 module.exports = {
-  send, genOtp, normalizePhone, resolveSender, SANDBOX, PROVIDER_NAMES, PROVIDER_META,
+  send, genOtp, normalizePhone, resolveSender, isSandbox, PROVIDER_NAMES, PROVIDER_META,
   get PROVIDER() { return config.messaging.provider; },
   _setRequestImplForTests,
 };

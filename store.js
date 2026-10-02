@@ -228,9 +228,12 @@ function pgRepo(exec) {
       listByTenant: (t, limit = 100) => many('SELECT data FROM ledger WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2', [t, limit]),
       listByBill: (b) => many('SELECT data FROM ledger WHERE bill_id=$1 ORDER BY created_at', [b]),
       all: (limit = 5000) => many('SELECT data FROM ledger ORDER BY created_at DESC LIMIT $1', [limit]),
+      // payer_id comes from refs.payerId on the entry itself (fees.js) — not a
+      // real column, extracted from the jsonb data so revenue can be sliced by
+      // payer (insurer/employer) as well as by client, with no migration.
       revenueAll: async () => (await exec(
-        `SELECT tenant_id, type, count(*)::int AS n, COALESCE(SUM(amount),0) AS total
-         FROM ledger WHERE type LIKE 'platform_fee_%' GROUP BY tenant_id, type`, [])).rows,
+        `SELECT tenant_id, type, data->'refs'->>'payerId' AS payer_id, count(*)::int AS n, COALESCE(SUM(amount),0) AS total
+         FROM ledger WHERE type LIKE 'platform_fee_%' GROUP BY tenant_id, type, data->'refs'->>'payerId'`, [])).rows,
       summary: async (t) => (await exec(
         'SELECT type, count(*)::int AS n, COALESCE(SUM(amount) FILTER (WHERE cash_movement),0) AS cash, COALESCE(SUM(amount),0) AS total FROM ledger WHERE tenant_id=$1 GROUP BY type', [t])).rows,
     },
@@ -393,8 +396,9 @@ function memRepo(M) {
         const out = {};
         for (const e of M.ledger) {
           if (!String(e.type).startsWith('platform_fee_')) continue;
-          const k = `${e.tenantId}|${e.type}`;
-          (out[k] = out[k] || { tenant_id: e.tenantId, type: e.type, n: 0, total: 0 });
+          const payerId = e.refs?.payerId || null;
+          const k = `${e.tenantId}|${e.type}|${payerId}`;
+          (out[k] = out[k] || { tenant_id: e.tenantId, type: e.type, payer_id: payerId, n: 0, total: 0 });
           out[k].n++; out[k].total += Number(e.amount);
         }
         return Object.values(out);
