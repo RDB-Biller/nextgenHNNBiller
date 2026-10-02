@@ -133,6 +133,54 @@ The clinic dashboard (`dashboard.html`, `GET /api/v1/dashboard`) tracks whatever
 been verified yet as a follow-up queue — `totals.pendingVerification` (count) and
 `pendingVerifications[]` (oldest first, with patient/provider/amount/status/link).
 
+### SMS / WhatsApp verification (optional)
+
+Off for every channel, for every client, by default. A platform admin turns channels on
+per client — `PUT /api/platform/clients/:id/verification-channels {sms?, whatsapp?,
+includeTreatmentDetail?}` (`platform.html`, "Patient verification by SMS/WhatsApp" under
+the Clients tab). When a channel is on, the same verification message that carries the
+link also goes out on SMS and/or WhatsApp, with a 6-digit one-time code the patient can
+text back instead of opening the link. The code expires after
+`VERIFICATION_OTP_TTL_MINUTES` (default 60 minutes) and locks after
+`VERIFICATION_OTP_MAX_ATTEMPTS` (default 5) wrong guesses; once locked, only the web
+link still works. Reissuing (above) always generates a fresh code, invalidating any
+earlier one.
+
+Replying **YES** (or `CONFIRM`/`OK`) confirms outright only when **exactly one**
+verification is pending for that phone number. With two or more pending — e.g. the same
+patient billed twice in one visit — a bare "yes" is ambiguous on purpose, so the patient
+is asked for the specific code instead of risking the wrong bill getting confirmed. A
+code is likewise only ever matched against that same phone's own pending verifications,
+never across phone numbers, so a leaked or guessed code can't be replayed against
+someone else's bill. Confirming this way is recorded as `verifiedVia: "sms"` or
+`"whatsapp"` (vs `"web"` for the link), alongside the existing `verifiedBy: "patient"`.
+
+Inbound replies land on `POST /api/v1/webhooks/messaging-inbound` — shared-secret
+header (`x-webhook-secret`, checked against `MESSAGING_WEBHOOK_SECRET`, same pattern as
+`/webhooks/collection`), provider-agnostic `{from, text, channel}` body with a couple of
+common field-name aliases so a specific provider's webhook shape only needs a thin
+translation layer in front, not a rewrite. Matching/lockout logic:
+`src/services/verification.js#handleInboundReply`.
+
+`includeTreatmentDetail` is a **separate** toggle, also off by default: leaving it off
+keeps the SMS/WhatsApp text to just the amount and the link — the no-PHI rule below
+stays true. Turning it on additionally lists the treatment/line items in the text
+itself, which is the one deliberate, opt-in exception to that rule.
+
+No real SMS/WhatsApp provider is wired in yet. `src/services/messaging.js` is a single
+swappable seam (`send()`); while `MESSAGING_SANDBOX` is unset or anything but `"false"`,
+it logs the message instead of sending it — the same sandbox-by-default pattern
+`SBG_SANDBOX` uses for the bank rail. In sandbox mode only, `POST /api/v1/bills` and the
+reissue endpoint also echo the one-time code back as `otpCodeSandbox`, and
+`biller.html`'s verification block adds a "simulate patient reply" control, so the
+whole loop — dispatch, OTP, 2-way reply, ambiguity, lockout — can be demoed end-to-end
+without a real phone or provider. Wiring in a real one (Twilio, Africa's Talking,
+Hubtel, Meta's WhatsApp Cloud API, …) later means filling in `send()` and setting
+`MESSAGING_SANDBOX=false`; nothing else in the flow changes. Configure with
+`MESSAGING_SANDBOX`, `MESSAGING_PROVIDER`, `MESSAGING_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`
+(used to build the link inside the SMS/WhatsApp text), `VERIFICATION_OTP_TTL_MINUTES`,
+`VERIFICATION_OTP_MAX_ATTEMPTS`.
+
 ## Money split
 
 `subtotal − discount = net`. Patient pays `copay%` of net (minus cashback); the
@@ -347,13 +395,13 @@ spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 
 | Spec | Covers | Auth | Edition |
 | --- | --- | --- | --- |
-| `hnn-01-core-billing` | Bills, patient payments, routing, dashboard, edition check | `x-api-key` | all |
+| `hnn-01-core-billing` | Bills, patient payments, routing, dashboard, edition check, inbound SMS/WhatsApp replies | `x-api-key` | all |
 | `hnn-02-payer-claims` | Claims, authorise A2A, secure links | `x-payer-key` | all |
 | `hnn-03-nhis-claimit` | NHIS tracking, refunds, cashback, bulk ingest | `x-api-key` | commercial |
 | `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
 | `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
 | `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
-| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** | `x-platform-key` | all |
+| `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions**, SMS/WhatsApp verification channels | `x-platform-key` | all |
 
 Every documented endpoint is verified against the app's mounted routes.
 
@@ -546,6 +594,10 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 2. **Authenticate payer authorisation** — back the secure link / payer API with the
    payer's login + step-up (OTP / signed mandate) before any transfer.
 3. **No PHI over email/WhatsApp** — notifications carry references and links only.
+   The one exception is opt-in and off by default: a client can turn on
+   `includeTreatmentDetail` (`PUT /api/platform/clients/:id/verification-channels`,
+   see **SMS / WhatsApp verification** below), which lists the treatment/line items in
+   the SMS/WhatsApp text itself. Leave it off to keep this rule strictly true.
 4. **Persistence** — the app uses **PostgreSQL when `DATABASE_URL` is set** (survives
    restarts, scales to many instances) and an in-memory store otherwise. Schema is
    auto-created and seeded on boot. Money paths use `SELECT … FOR UPDATE` transactions
@@ -555,5 +607,9 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
 
 - FHIR adapter for EHRs that prefer `Invoice`/`ChargeItem`.
 - Payer-specific validation / pre-authorisation rules before authorise.
-- Real email + SMS providers with delivery status.
+- A real SMS/WhatsApp provider (Twilio, Africa's Talking, Hubtel, Meta's WhatsApp Cloud
+  API, …) wired into `src/services/messaging.js#send()` — the opt-in, OTP, 2-way-reply
+  and sandbox-demo plumbing around it is already built (see **SMS / WhatsApp
+  verification** above); only the provider call itself remains. Email delivery status
+  is still unbuilt.
 - Payer remittance statements and clinic payout reports.

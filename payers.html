@@ -9,7 +9,7 @@
   <nav class="nav"><a href="#" onclick="load();return false">Refresh</a></nav></div>
   <p class="muted" style="margin:0 0 12px;font-size:13px">For payers without their own system. Insurers and employers with an RX/HR system use the <strong>Payer API</strong> (<code>x-payer-key</code>) instead — same actions.</p>
   <div class="field" style="max-width:340px"><label>Payer key</label>
-    <select id="key" onchange="load()">
+    <select id="key" onchange="load();loadPA()">
       <optgroup label="Insurers">
         <option value="payer_acacia_key">Acacia Health Insurance</option>
         <option value="payer_cosmopolitan_key">Cosmopolitan Health Insurance</option>
@@ -23,6 +23,19 @@
     </select></div>
   <div class="grid cols-3" id="kpis" style="margin:14px 0 18px"></div>
   <div class="card"><h2>Claims addressed to you</h2><div id="list"></div></div>
+  <div class="card"><h2>Prior approvals <span class="muted" style="font-weight:400;font-size:12px">pre-authorise a member so a later claim can be verified by referencing this instead of waiting on the patient</span></h2>
+    <div class="row">
+      <div class="field"><label>Member / Policy ID</label><input id="pa_member" placeholder="ACA-00123"/></div>
+      <div class="field"><label>Patient name (optional)</label><input id="pa_name" placeholder="Ama Mensah"/></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Description</label><input id="pa_desc" placeholder="e.g. Elective surgery at Euracare"/></div>
+      <div class="field"><label>Amount cap (optional)</label><input id="pa_cap" type="number" placeholder="GHS"/></div>
+      <div class="field"><label>Expires (optional)</label><input id="pa_exp" type="date"/></div>
+    </div>
+    <button class="accent" onclick="addPA()">Record prior approval</button>
+    <div id="pa_list" style="margin-top:14px"></div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
@@ -32,6 +45,7 @@ const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':
 const pill=(s)=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
 const key=()=>$('key').value;
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);};
+let lastClaims=[];
 
 async function load(){
   const s=await(await fetch('/api/payer/summary',{headers:{'x-payer-key':key()}})).json().catch(()=>null);
@@ -40,14 +54,84 @@ async function load(){
   $('kpis').innerHTML=[['Pending',s.pending],['Pending value',`GHS ${num(s.pendingValue)}`],['Settled value',`GHS ${num(s.settledValue)}`]]
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum">${k[1]}</div></div>`).join('');
   const d=await(await fetch('/api/payer/claims',{headers:{'x-payer-key':key()}})).json();
-  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>`+
+  lastClaims=d.data||[];
+  const vpill=(pv)=>pv.status==='verified'?'<span class="pill settled">verified</span>'
+    :pv.status==='disputed'?'<span class="pill rejected">disputed</span>'
+    :'<span class="pill pending">pending</span>';
+  const vCell=(c)=>{
+    const pv=c.patientVerification||{status:'not_sent'};
+    if(pv.status==='verified'){
+      const by=pv.verifiedBy==='payer_override'?'verified by you':pv.verifiedBy==='prior_approval'?'via prior approval':'';
+      return vpill(pv)+(by?`<div class="muted" style="font-size:11px">${by}</div>`:'');
+    }
+    const resend=pv.status!=='not_sent'?`<a href="#" onclick="resendV('${c.claimId}');return false" style="font-size:11px">resend</a> · `:'';
+    return `${vpill(pv)}<div style="margin-top:4px">${resend}<a href="#" onclick="overrideV('${c.claimId}');return false" style="font-size:11px">verify manually</a></div>`;
+  };
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Verification</th><th>Status</th><th></th></tr></thead><tbody>`+
     (d.data.map(c=>`<tr><td>${esc(c.claimId.slice(0,12))}…</td><td>${esc(c.patientName||'—')}</td><td>${esc(c.memberId||'—')}</td>
-      <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td><td>${pill(c.status)}</td>
-      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=7 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+      <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td>
+      <td>${vCell(c)}</td>
+      <td>${pill(c.status)}</td>
+      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=8 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+}
+async function resendV(id){
+  const r=await fetch(`/api/payer/claims/${id}/verification/reissue`,{method:'POST',headers:{'x-payer-key':key()}});
+  if(r.ok){toast('Verification link resent to patient');load();return;}
+  const e=await r.json().catch(()=>({}));
+  toast('Resend failed: '+(e.error||r.status));
+}
+async function overrideV(id){
+  const c=lastClaims.find(x=>x.claimId===id);
+  const pas=(c&&c.matchingPriorApprovals)||[];
+  let priorApprovalId=null, reason=null;
+  if(pas.length){
+    const list=pas.map((p,i)=>`${i+1}) ${p.description||'(no description)'}${p.amountCap?' · cap GHS '+num(p.amountCap):''}`).join('\n');
+    const pick=prompt(`This member has ${pas.length} prior approval(s) on file. Enter a number to reference one, or leave blank to verify by other means:\n${list}`);
+    if(pick===null)return;
+    if(pick.trim()&&pas[parseInt(pick,10)-1])priorApprovalId=pas[parseInt(pick,10)-1].id;
+  }
+  if(!priorApprovalId){
+    reason=prompt('How was this verified? (e.g. called the hospital, reviewed the claim directly)');
+    if(reason===null)return;
+  }
+  const r=await fetch(`/api/payer/claims/${id}/verification/override`,{method:'POST',
+    headers:{'Content-Type':'application/json','x-payer-key':key()},body:JSON.stringify({reason,priorApprovalId})});
+  if(r.ok){toast('Marked verified');load();return;}
+  const e=await r.json().catch(()=>({}));
+  toast('Failed: '+(e.error||r.status));
+}
+async function loadPA(){
+  const r=await fetch('/api/payer/prior-approvals',{headers:{'x-payer-key':key()}});
+  if(!r.ok){$('pa_list').innerHTML='';return;}
+  const {data}=await r.json();
+  const st=(s)=>s==='active'?'settled':s==='expired'?'pending':'rejected';
+  $('pa_list').innerHTML=data.length?`<table><thead><tr><th>Member</th><th>Patient</th><th>Description</th><th class="num">Cap</th><th>Expires</th><th>Used</th><th>Status</th><th></th></tr></thead><tbody>`+
+    data.map(p=>`<tr><td>${esc(p.memberId)}</td><td>${esc(p.patientName||'—')}</td><td>${esc(p.description||'—')}</td>
+      <td class="num">${p.amountCap!=null?num(p.amountCap):'—'}</td><td>${p.expiresAt?esc(String(p.expiresAt).slice(0,10)):'—'}</td>
+      <td>${p.timesUsed||0}</td><td><span class="pill ${st(p.effectiveStatus)}">${esc(p.effectiveStatus)}</span></td>
+      <td>${p.effectiveStatus==='active'?`<button class="ghost" style="padding:6px 10px" onclick="revokePA('${p.id}')">Revoke</button>`:''}</td></tr>`).join('')+`</tbody></table>`
+    :'<p class="muted">None recorded yet.</p>';
+}
+async function addPA(){
+  const memberId=$('pa_member').value.trim(); if(!memberId)return toast('Member ID required');
+  const body={memberId,patientName:$('pa_name').value||null,description:$('pa_desc').value||null,
+    amountCap:$('pa_cap').value||null, expiresAt:$('pa_exp').value||null};
+  const r=await fetch('/api/payer/prior-approvals',{method:'POST',headers:{'Content-Type':'application/json','x-payer-key':key()},body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));return toast('Failed: '+(e.error||r.status));}
+  $('pa_member').value='';$('pa_name').value='';$('pa_desc').value='';$('pa_cap').value='';$('pa_exp').value='';
+  toast('Prior approval recorded'); loadPA();
+}
+async function revokePA(id){
+  if(!confirm('Revoke this prior approval?'))return;
+  const r=await fetch('/api/payer/prior-approvals/'+id,{method:'DELETE',headers:{'x-payer-key':key()}});
+  toast(r.ok?'Revoked':'Failed'); loadPA();
 }
 async function authz(id){
   const r=await fetch(`/api/payer/claims/${id}/authorize`,{method:'POST',headers:{'x-payer-key':key()}});
-  if(r.ok){toast('Transfer authorised');load();}else toast('Failed');
+  if(r.ok){toast('Transfer authorised');load();return;}
+  const e=await r.json().catch(()=>({}));
+  toast(e.message==='patient_verification_pending'?'Blocked: the patient has not verified this bill yet':'Failed');
+  load();
 }
 async function rej(id){
   const reason=prompt('Reason (optional):')||'';
@@ -89,6 +173,6 @@ async function suspendTerms(tid){
   const r=await fetch('/api/payer/network/providers/'+encodeURIComponent(tid),{method:'DELETE',headers:H()});
   toast(r.ok?'Suspended':'Failed'); loadNetwork();
 }
-load(); loadNetwork();
+load(); loadNetwork(); loadPA();
 </script>
 </body></html>

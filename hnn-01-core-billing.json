@@ -1,0 +1,755 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HNN Biller \u2014 Core Billing API",
+    "version": "1.0.0",
+    "description": "Create itemised bills, take patient payment (Mobile Money, card, cash), and read the clinic dashboard. Available on **every** edition \u2014 this is the baseline any EMR/EHR can integrate against.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip \u2014 no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production.up.railway.app`\n\n_The platform never custodies funds: money moves account-to-account to the provider; fees are accrued to the ledger as receivables._"
+  },
+  "servers": [
+    {
+      "url": "https://nextgenhnnbiller-production.up.railway.app",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Bills"
+    },
+    {
+      "name": "Payments"
+    },
+    {
+      "name": "Dashboard"
+    },
+    {
+      "name": "Editions"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "TenantKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Clinic/hospital (EMR) key"
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/bills": {
+      "post": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Create an itemised bill",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "REQUIRED. Provider/clinic name."
+                  },
+                  "patient": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "REQUIRED"
+                      },
+                      "phone": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "REQUIRED. At least one line item.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "description": "Catalogue code (e.g. GP-CONSULT). Optional if name+cost given."
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "cost": {
+                          "type": "number",
+                          "description": "Unit price in GHS"
+                        },
+                        "qty": {
+                          "type": "integer",
+                          "default": 1,
+                          "description": "Quantity (default 1). Line total = cost x qty."
+                        },
+                        "nhisTariffCode": {
+                          "type": "string",
+                          "description": "Optional NHIS tariff code passed through to the claim."
+                        },
+                        "diagnosisCode": {
+                          "type": "string",
+                          "description": "Optional per-item diagnosis/ICD code."
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "adjustments": {
+                    "type": "object",
+                    "properties": {
+                      "copayPercent": {
+                        "type": "number",
+                        "description": "Patient share of net (0 = payers cover all). Explicit \u2014 no implicit default."
+                      },
+                      "cashbackPercent": {
+                        "type": "number"
+                      },
+                      "discountCode": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "insurance": {
+                    "type": "object",
+                    "description": "Optional at bill creation; memberId REQUIRED only when routing to a payer.",
+                    "properties": {
+                      "payerId": {
+                        "type": "string"
+                      },
+                      "memberId": {
+                        "type": "string"
+                      },
+                      "employer": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "clinical": {
+                    "type": "object",
+                    "description": "OPTIONAL clinical context carried onto the claim (insurers often require it). Never required to bill.",
+                    "properties": {
+                      "diagnosis": {
+                        "type": "string"
+                      },
+                      "differentialDiagnosis": {
+                        "type": "string",
+                        "description": "Optional differential diagnosis"
+                      },
+                      "icdVersion": {
+                        "type": "string",
+                        "enum": [
+                          "ICD-10",
+                          "ICD-11"
+                        ],
+                        "description": "ICD classification version"
+                      },
+                      "icdCode": {
+                        "type": "string",
+                        "description": "ICD-10 or ICD-11 code, e.g. B54 / 1F40"
+                      },
+                      "complaint": {
+                        "type": "string"
+                      },
+                      "clinician": {
+                        "type": "string"
+                      },
+                      "encounterDate": {
+                        "type": "string"
+                      },
+                      "notes": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "split": {
+                    "type": "object",
+                    "description": "OPTIONAL. Split the covered (payer) portion between two or more payers. Omit for a single payer. Each payer gets its own itemised claim; the claims sum exactly to the payer share.",
+                    "properties": {
+                      "payers": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "payerId"
+                          ],
+                          "properties": {
+                            "payerId": {
+                              "type": "string"
+                            },
+                            "memberId": {
+                              "type": "string",
+                              "description": "Member/policy ID with THIS payer"
+                            },
+                            "percent": {
+                              "type": "number",
+                              "description": "Share as % of the payer portion (use percent OR amount)"
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Explicit GHS share (amounts must sum to the payer portion)"
+                            },
+                            "paying": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "Set false to exclude a listed payer (checkbox off)"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "provider",
+                  "patient",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable). A verification link is generated and sent to the patient automatically \u2014 the response includes patientVerification:{status,link,channelsSent} as a one-time snapshot (not persisted onto the bill; the live record is read at GET /verify/api/{token}). See the Payer & Claims API for how a payer can require verification before authorising. If this client has SMS and/or WhatsApp verification enabled (see the Master Control API's /api/platform/clients/{id}/verification-channels), the same message also goes out on those channels with a one-time reply code the patient can text back instead of opening the link; in sandbox mode (no real provider configured) the response also includes otpCodeSandbox so this can be demoed without a phone."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "List this clinic\u2019s bills",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/{id}": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Get a bill",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "bill_not_found"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/{id}/route": {
+      "post": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Route a bill to a payer (creates a claim + secure link)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payerId": {
+                    "type": "string",
+                    "description": "Single-payer routing"
+                  },
+                  "split": {
+                    "type": "object",
+                    "description": "Multi-payer routing: { payers:[{payerId,memberId,percent|amount,paying?}] }. Overrides any split set at bill creation."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Single: { claim, payerLink, mode:\"single\" }. Split: { claims:[{claimId,payerId,payerName,amount,payerLink}], split, mode:\"split\" }."
+          },
+          "403": {
+            "description": "payer_not_available (another facility\u2019s slot)"
+          },
+          "422": {
+            "description": "invalid_split / split_amounts_do_not_match_payer_share / missing_member_id / unknown_payer"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/{id}/verification/reissue": {
+      "post": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Resend the patient's verification link",
+        "description": "For hospital staff to nudge a patient who hasn't responded yet \u2014 reuses the same token/link, so anywhere it was already shared stays valid. A previously disputed record is reset to pending first, so a fresh look is possible once whatever was disputed has been corrected. Counts and timestamps the reminder (remindersSent, lastRemindedAt).",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bill id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ status, link, remindersSent, channelsSent }, plus otpCodeSandbox in sandbox mode \u2014 reissuing re-sends on whichever channels are enabled and generates a fresh reply code, invalidating any earlier one."
+          },
+          "404": {
+            "description": "bill_not_found / verification_not_found"
+          },
+          "409": {
+            "description": "verification_not_pending (already verified)"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/payers": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Payers this facility can route to (global + its own active tabs)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/edition": {
+      "get": {
+        "tags": [
+          "Editions"
+        ],
+        "summary": "What this client is licensed for",
+        "description": "Returns the edition and a feature map. API-only partners use this to show/hide features in their own UI.",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ client, name, edition, features{}, licence{ active, expiresAt, daysLeft } }"
+          }
+        }
+      }
+    },
+    "/api/v1/payments/intents": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Create a patient payment intent",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "billId"
+                ],
+                "properties": {
+                  "billId": {
+                    "type": "string"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "mtn-momo",
+                      "card",
+                      "cash"
+                    ]
+                  },
+                  "payerPhone": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/v1/payments/intents/{id}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Get a payment intent",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Totals, recent bills, claims, notifications, and the pending patient-verification follow-up queue",
+        "description": "totals.pendingVerification is a count; pendingVerifications is the list (oldest first) \u2014 each with patientName, provider, amount, status (pending|disputed), disputeReason, and the verify link. Excludes anything already verified.",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/claims": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Claims raised by this clinic",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/claims/{id}": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Claim + its bill",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/collection": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Payment gateway callback (x-webhook-secret)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/messaging-inbound": {
+      "post": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Inbound SMS/WhatsApp reply to a patient verification message (x-webhook-secret)",
+        "description": "Provider-agnostic \u2014 accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message), with channel inferred from Twilio's whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK confirms only when exactly one verification is pending for that phone; otherwise the patient can send the numeric reply code from their message instead, matched only within that phone's own pending verifications. Secured the same way as /api/v1/webhooks/collection \u2014 a shared secret header, not a provider-specific request signature.",
+        "responses": {
+          "200": {
+            "description": "{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code, locked, no_match, unrecognized."
+          },
+          "401": {
+            "description": "bad_signature"
+          },
+          "422": {
+            "description": "missing_from_or_text"
+          }
+        }
+      }
+    },
+    "/pay/api/session/{intentId}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Public patient checkout session (sanitised, no key)",
+        "description": "Backs the hosted patient payment page; the phone number is masked and no clinical detail is exposed.",
+        "parameters": [
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "session_not_found"
+          }
+        }
+      }
+    },
+    "/pay/api/session/{intentId}/confirm": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Confirm a patient checkout session",
+        "parameters": [
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ status: paid }"
+          }
+        }
+      }
+    },
+    "/api/v1/institutions": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Banks / institutions available on the settlement rail",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/account-validation": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Validate a beneficiary account before settlement",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "accountNumber",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "serviceRoutingCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/network-terms": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "This facility\u2019s expedited settlement (NNEST) terms, as set by each payer",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/catalog": {
+      "get": {
+        "tags": [
+          "Bills"
+        ],
+        "summary": "Search the chargeable catalog (NHIS Medicines List + your items)",
+        "description": "Type-ahead search over 550+ NHIS formulations (official codes, tariff prices, prescribing level) plus demo items. Use q to search by name or code.",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text (name or code)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter, e.g. drug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ count:{total,nhis,demo}, data:[{code,name,category,price,unit,level}] }"
+          }
+        }
+      }
+    }
+  }
+}

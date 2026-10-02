@@ -1,0 +1,456 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HNN Biller — Master Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/>
+<style>
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid var(--line)}
+  .tabs button{background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 14px;color:var(--muted);font-weight:600}
+  .tabs button.on{color:var(--brand);border-bottom-color:var(--brand)}
+  .panel{display:none}.panel.on{display:block}
+  .key{font-family:'Spline Sans Mono',monospace;font-size:11px;background:#0f172a;color:#a7f3d0;padding:3px 7px;border-radius:6px;word-break:break-all}
+  .ed{font-family:'Spline Sans Mono',monospace;font-size:11px;padding:3px 9px;border-radius:999px}
+  .ed.commercial{background:var(--brand-soft);color:var(--brand)}
+  .ed.non_commercial{background:#EEF2F0;color:var(--muted)}
+  .mini{padding:6px 10px;font-size:13px}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="brandmark">HNN Biller<span class="dot">.</span> Master Control</div>
+      <p class="muted" style="margin:4px 0 0">Clients, payers, EMR partners, IT leads and licensing across the whole deployment.</p></div>
+    <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="revenue.html" target="_blank" rel="noopener">Revenue</a><a href="submissions.html" target="_blank" rel="noopener">Submissions</a><a href="admin.html" target="_blank" rel="noopener">IT-lead console</a><a href="biller.html" target="_blank" rel="noopener">Billing</a></nav>
+  </div>
+
+  <div class="field" style="max-width:340px"><label>Platform key</label><input id="pkey" value="platform_demo_key_123" onchange="boot()"/></div>
+  <div class="grid cols-3" id="kpis" style="margin:14px 0 4px"></div>
+
+  <div class="tabs">
+    <button class="on" onclick="tab('clients',this)">Clients</button>
+    <button onclick="tab('leads',this)">IT leads</button>
+    <button onclick="tab('payers',this)">Payers</button>
+    <button onclick="tab('emr',this)">EMR/EHR partners</button>
+    <button onclick="tab('lic',this)">Licences</button>
+    <button onclick="tab('policy',this)">Licensing policy</button>
+  </div>
+
+  <div class="panel on" id="p-clients">
+    <div class="card" style="margin-bottom:14px"><h2>Add a client (hospital / clinic / pharmacy)</h2>
+      <div class="row">
+        <div class="field"><label>Name</label><input id="c_name" placeholder="City Clinic"/></div>
+        <div class="field"><label>Edition</label><select id="c_ed"><option value="non_commercial">Non-commercial</option><option value="commercial">Commercial</option></select></div>
+        <div class="field"><label>Routing code</label><input id="c_rc" placeholder="300591"/></div>
+        <div class="field"><label>Account</label><input id="c_ac" placeholder="0123456789"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addClient()">Create</button></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px"><h2>Clients</h2><div id="clients"></div></div>
+
+    <div class="card"><h2>Patient verification by SMS/WhatsApp</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">When a channel is on, the patient verification link sent at billing time (and on resend) also goes out by SMS and/or WhatsApp, with a short code the patient can text back instead of opening the link. Off by default for every client; unrelated to the payer-side verification gate under Payers.</p>
+      <div class="row">
+        <div class="field"><label>Client</label><select id="vc_client" onchange="loadVerifChannels()"></select></div>
+        <div class="field" style="display:flex;align-items:flex-end;gap:16px">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:0 0 11px">
+            <input type="checkbox" id="vc_sms" style="width:auto"/> SMS
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:0 0 11px">
+            <input type="checkbox" id="vc_wa" style="width:auto"/> WhatsApp
+          </label>
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="saveVerifChannels()">Save</button></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500">
+        <input type="checkbox" id="vc_detail" style="width:auto"/>
+        Also list the treatment / line items in the message (default off — no PHI over SMS/WhatsApp; the link always has full detail)
+      </label>
+    </div>
+  </div>
+
+  <div class="panel" id="p-leads">
+    <div class="card" style="margin-bottom:14px"><h2>Assign an IT lead</h2>
+      <div class="row">
+        <div class="field"><label>Name</label><input id="u_name" placeholder="Kwame Mensah"/></div>
+        <div class="field"><label>Email</label><input id="u_email" placeholder="it@hospital.example"/></div>
+        <div class="field"><label>Role</label>
+          <select id="u_role" onchange="orgOptions()">
+            <option value="it_lead_facility">IT lead — hospital/clinic</option>
+            <option value="it_lead_payer">IT lead — insurer / corporate payer</option>
+            <option value="it_lead_emr">IT lead — EMR/EHR vendor</option>
+            <option value="platform_admin">Platform admin (us)</option>
+          </select></div>
+        <div class="field"><label>Organisation</label><select id="u_org"></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addUser()">Assign</button></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin:8px 0 0">They sign in to the IT-lead console with the console key issued here. Scope is enforced server-side.</p>
+    </div>
+    <div class="card"><h2>IT leads &amp; admins</h2><div id="leads"></div></div>
+  </div>
+
+  <div class="panel" id="p-payers">
+    <div class="card" style="margin-bottom:14px"><h2>Add a payer</h2>
+      <div class="row">
+        <div class="field"><label>Name</label><input id="y_name" placeholder="Acacia Health"/></div>
+        <div class="field"><label>Type</label><select id="y_kind"><option value="insurer">Insurer</option><option value="employer">Corporate payer</option></select></div>
+        <div class="field"><label>Stanbic source account</label><input id="y_src" placeholder="1300100xxx"/></div>
+        <div class="field"><label>Email</label><input id="y_email" placeholder="claims@payer.example"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addPayer()">Create</button></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px"><h2>Global payers</h2><div id="payers"></div></div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Processing target</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Set a volume an insurer/employer aims to process through HNN, and track settled value against it.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="tg_payer"></select></div>
+        <div class="field"><label>Target (GHS)</label><input id="tg_amount" type="number" placeholder="1000000"/></div>
+        <div class="field"><label>Period</label><select id="tg_period"><option value="monthly">Monthly</option><option value="sixmonth">Every 6 months</option><option value="yearly">Yearly</option></select></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="setTarget()">Set target</button></div>
+      </div>
+      <div id="targetsBoard" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px"><h2>Patient verification gate</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">When on, this payer's claims can't be authorised until the patient has verified the bill via the link sent automatically at billing time.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pv_payer" onchange="loadVerifyGate()"></select></div>
+        <div class="field" style="display:flex;align-items:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;margin:0 0 11px">
+            <input type="checkbox" id="pv_require" onchange="toggleVerifyGate()" style="width:auto"/>
+            Require patient verification before authorisation
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card"><h2>Pre-approved price list</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Upload an insurer's approved prices (CSV or Excel-exported CSV). Columns: <span class="key">code, name, price</span> and optionally <span class="key">unit, provider, category</span>. A <span class="key">provider</span> (tenant id or facility name) gives that facility its own price; blank = the payer's default.</p>
+      <div class="row">
+        <div class="field"><label>Payer</label><select id="pl_payer" onchange="loadPriceList()"></select></div>
+        <div class="field"><label>CSV / Excel file</label><input id="pl_file" type="file" accept=".csv,.tsv,text/csv,application/vnd.ms-excel"/></div>
+        <div class="field" style="display:flex;align-items:flex-end;gap:8px">
+          <button class="primary" style="flex:1" onclick="uploadPriceList()">Upload</button>
+          <button class="ghost" onclick="clearPriceList()">Clear</button>
+        </div>
+      </div>
+      <p class="muted" id="pl_status" style="font-size:12px"></p>
+      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-weight:500">
+        <input type="checkbox" id="pl_reprice" onchange="toggleReprice()" style="width:auto"/>
+        Let this price list <b>govern settlement</b> for this payer (default off — reference only)
+      </label>
+      <p class="muted" style="font-size:12px;margin:0 0 8px">When on, claims routed to this payer are repriced to its approved prices (facility-specific first, then default, else the billed price). The patient absorbs any gap between billed and approved.</p>
+      <div id="pl_preview"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="p-emr">
+    <div class="card" style="margin-bottom:14px"><h2>Add an EMR/EHR partner</h2>
+      <div class="row">
+        <div class="field"><label>Vendor</label><input id="e_name" placeholder="MedSuite Ltd"/></div>
+        <div class="field"><label>Contact</label><input id="e_contact" placeholder="Ama Owusu"/></div>
+        <div class="field"><label>Email</label><input id="e_email" placeholder="dev@medsuite.example"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addEmr()">Create</button></div>
+      </div>
+    </div>
+    <div class="card"><h2>EMR/EHR partners</h2><div id="emr"></div></div>
+  </div>
+
+  <div class="panel" id="p-policy">
+    <div class="card" style="margin-bottom:14px"><h2>Licensing policy</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">The platform ships <b>non-commercial and fee-free</b>. Switch to <b>licensed</b> to require a paid licence per term. This is separate from per-transaction pricing (all set to zero).</p>
+      <div id="policyBox"></div>
+    </div>
+    <div class="card"><h2>Client licences</h2><div id="licState"></div></div>
+  </div>
+
+  <div class="panel" id="p-lic">
+    <div class="card" style="margin-bottom:14px"><h2>Issue an upgrade key</h2>
+      <div class="row">
+        <div class="field"><label>Edition</label><select id="l_ed"><option value="commercial">Commercial</option><option value="non_commercial">Non-commercial</option></select></div>
+        <div class="field"><label>Bind to client (optional)</label><select id="l_org"><option value="">Any client</option></select></div>
+        <div class="field"><label>Expires (optional)</label><input type="date" id="l_exp"/></div>
+        <div class="field"><label>Note</label><input id="l_note" placeholder="Pilot upgrade"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="addLic()">Issue key</button></div>
+      </div>
+      <div id="l_out" style="margin-top:10px"></div>
+    </div>
+    <div class="card"><h2>Licences</h2><div id="lics"></div></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=(id)=>document.getElementById(id);
+const H=()=>({'Content-Type':'application/json','x-platform-key':$('pkey').value.trim()});
+const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n2=(n)=>Number(n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
+let CLIENTS=[],PAYERS=[],EMR=[];
+
+function tab(n,el){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on'));
+  $('p-'+n).classList.add('on'); el.classList.add('on');}
+
+async function boot(){
+  const ov=await (await fetch('/api/platform/overview',{headers:H()})).json().catch(()=>null);
+  if(!ov||ov.error){toast('Invalid platform key');return;}
+  $('kpis').innerHTML=[['Clients',`${ov.clients} (${ov.commercial} comm / ${ov.nonCommercial} non)`],
+    ['Payers',`${ov.insurers} insurers · ${ov.corporatePayers} corporate`],
+    ['IT leads & partners',`${ov.itLeads} leads · ${ov.emrPartners} EMR`]]
+    .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
+  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics()]);
+  orgOptions();
+}
+
+async function loadClients(){
+  const r=await (await fetch('/api/platform/clients',{headers:H()})).json(); CLIENTS=r.data||[];
+  $('clients').innerHTML=`<table><thead><tr><th>Client</th><th>Edition</th><th>Tenant API key</th><th>Actions</th></tr></thead><tbody>`+
+    CLIENTS.map(c=>`<tr><td>${esc(c.name)}<br><span class="muted" style="font-size:11px">${esc(c.id)}</span></td>
+      <td><span class="ed ${esc(c.edition)}">${esc(c.edition.replace('_',' '))}</span></td>
+      <td><span class="key">${esc(c.apiKey||'')}</span></td>
+      <td>${c.edition==='commercial'
+        ? `<button class="ghost mini" onclick="setEd('${esc(c.id)}','non_commercial')">Downgrade</button>`
+        : `<button class="accent mini" onclick="setEd('${esc(c.id)}','commercial')">Upgrade</button>`}</td></tr>`).join('')
+    +`</tbody></table>`;
+  const opts=CLIENTS.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  $('l_org').innerHTML='<option value="">Any client</option>'+opts;
+  if($('vc_client'))$('vc_client').innerHTML='<option value="">Select client…</option>'+opts;
+}
+function loadVerifChannels(){
+  const id=$('vc_client').value;
+  const c=(CLIENTS||[]).find(x=>x.id===id);
+  const vc=(c&&c.verificationChannels)||{sms:false,whatsapp:false,includeTreatmentDetail:false};
+  if($('vc_sms'))$('vc_sms').checked=!!vc.sms;
+  if($('vc_wa'))$('vc_wa').checked=!!vc.whatsapp;
+  if($('vc_detail'))$('vc_detail').checked=!!vc.includeTreatmentDetail;
+}
+async function saveVerifChannels(){
+  const id=$('vc_client').value; if(!id)return toast('Pick a client');
+  const body={sms:$('vc_sms').checked,whatsapp:$('vc_wa').checked,includeTreatmentDetail:$('vc_detail').checked};
+  const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/verification-channels`,{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){const o=await r.json();toast('Verification channels saved');
+    const c=(CLIENTS||[]).find(x=>x.id===id); if(c)c.verificationChannels=o.verificationChannels;}
+  else toast('Failed');
+}
+async function setEd(id,edition){
+  const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/edition`,{method:'PUT',headers:H(),body:JSON.stringify({edition})});
+  if(r.ok){const o=await r.json();toast(`${o.name}: ${o.from} → ${o.to}`);loadClients();boot();}else toast('Failed');
+}
+async function addClient(){
+  const body={name:$('c_name').value.trim(),edition:$('c_ed').value,serviceRoutingCode:$('c_rc').value,beneficiaryAccount:$('c_ac').value};
+  if(!body.name)return toast('Name required');
+  const r=await fetch('/api/platform/clients',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){const c=await r.json();toast('Client created');$('c_name').value='';loadClients();boot();
+    alert(`Client created.\n\nTenant API key (x-api-key):\n${c.apiKey}`);}else toast('Failed');
+}
+
+async function loadUsers(){
+  const r=await (await fetch('/api/platform/users',{headers:H()})).json();
+  $('leads').innerHTML=`<table><thead><tr><th>Name</th><th>Role</th><th>Scope</th><th>Console key</th><th>Status</th><th></th></tr></thead><tbody>`+
+    ((r.data||[]).map(u=>`<tr><td>${esc(u.name)}<br><span class="muted" style="font-size:11px">${esc(u.email||'')}</span></td>
+      <td>${esc(u.role.replace(/_/g,' '))}</td><td>${esc(u.orgId||'all')}</td>
+      <td><span class="key">${esc(u.apiKey)}</span></td>
+      <td><span class="pill ${u.status==='active'?'settled':'rejected'}">${esc(u.status)}</span></td>
+      <td><button class="ghost mini" onclick="rotate('${esc(u.id)}')">Rotate</button>
+          <button class="ghost mini" onclick="toggle('${esc(u.id)}','${u.status==='active'?'suspended':'active'}')">${u.status==='active'?'Suspend':'Restore'}</button></td></tr>`).join('')
+      ||'<tr><td colspan=6 class="muted">No IT leads assigned yet.</td></tr>')+`</tbody></table>`;
+}
+function orgOptions(){
+  const role=$('u_role').value;
+  let opts='<option value="">— none —</option>';
+  if(role==='it_lead_facility') opts=CLIENTS.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  else if(role==='it_lead_payer') opts=PAYERS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  else if(role==='it_lead_emr') opts=EMR.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  $('u_org').innerHTML=opts;
+}
+async function addUser(){
+  const body={name:$('u_name').value.trim(),email:$('u_email').value.trim(),role:$('u_role').value,orgId:$('u_org').value||null};
+  if(!body.name)return toast('Name required');
+  const r=await fetch('/api/platform/users',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json().catch(()=>({}));return toast('Failed: '+(e.message||r.status));}
+  const u=await r.json(); $('u_name').value='';$('u_email').value='';
+  alert(`IT lead assigned.\n\nConsole key (x-console-key):\n${u.apiKey}\n\nThey sign in at /app/admin.html`);
+  loadUsers(); boot();
+}
+async function rotate(id){const r=await fetch(`/api/platform/users/${id}/rotate-key`,{method:'POST',headers:H()});
+  if(r.ok){const u=await r.json();alert('New console key:\n'+u.apiKey);loadUsers();}}
+async function toggle(id,status){const r=await fetch(`/api/platform/users/${id}/status`,{method:'PUT',headers:H(),body:JSON.stringify({status})});
+  if(r.ok){toast('Updated');loadUsers();}}
+
+async function loadPayers(){
+  const r=await (await fetch('/api/platform/payers',{headers:H()})).json(); PAYERS=r.data||[];
+  $('payers').innerHTML=`<table><thead><tr><th>Payer</th><th>Type</th><th>Source account</th><th>Payer API key</th><th>Verify gate</th></tr></thead><tbody>`+
+    PAYERS.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.kind==='employer'?'corporate':'insurer')}</td>
+      <td>${esc(p.sourceAccount||'—')}</td><td><span class="key">${esc(p.apiKey||'')}</span></td>
+      <td>${p.requirePatientVerification?'<span class="pill settled">on</span>':'<span class="pill open">off</span>'}</td></tr>`).join('')+`</tbody></table>`;
+  // fill target + pricelist + verify-gate payer selects
+  const opts='<option value="">Select payer…</option>'+PAYERS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if($('tg_payer'))$('tg_payer').innerHTML=opts;
+  if($('pl_payer'))$('pl_payer').innerHTML=opts;
+  if($('pv_payer'))$('pv_payer').innerHTML=opts;
+  loadTargets();
+}
+function loadVerifyGate(){
+  const id=$('pv_payer').value;
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  if($('pv_require'))$('pv_require').checked=!!(payer&&payer.requirePatientVerification);
+}
+async function toggleVerifyGate(){
+  const id=$('pv_payer').value; if(!id){ $('pv_require').checked=false; return toast('Pick a payer'); }
+  const enabled=$('pv_require').checked;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/require-verification`,{method:'PUT',headers:H(),body:JSON.stringify({enabled})});
+  if(r.ok){ toast(enabled?'Patients must now verify before this payer can authorise':'Verification gate off');
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.requirePatientVerification=enabled;
+    await loadPayers(); $('pv_payer').value=id; }
+  else { $('pv_require').checked=!enabled; toast('Failed'); }
+}
+async function setTarget(){
+  const id=$('tg_payer').value; const amount=parseFloat($('tg_amount').value); const period=$('tg_period').value;
+  if(!id||!amount)return toast('Pick a payer and amount');
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/target`,{method:'PUT',headers:H(),body:JSON.stringify({amount,period})});
+  if(r.ok){toast('Target set');$('tg_amount').value='';loadTargets();}else toast('Failed');
+}
+async function loadTargets(){
+  if(!$('targetsBoard'))return;
+  const r=await (await fetch('/api/platform/targets',{headers:H()})).json().catch(()=>({data:[]}));
+  const data=r.data||[];
+  if(!data.length){ $('targetsBoard').innerHTML='<p class="muted" style="font-size:13px">No targets set yet.</p>'; return; }
+  $('targetsBoard').innerHTML=data.map(t=>{
+    const pct=Math.min(100,t.percent||0);
+    const col=pct>=100?'var(--brand)':pct>=60?'#167A5F':'var(--coral)';
+    return `<div style="margin:10px 0">
+      <div class="line"><strong>${esc(t.payerName)}</strong><span class="muted">${esc(t.periodLabel)} · ${t.daysLeft} days left</span></div>
+      <div style="background:#EEF2F0;border-radius:999px;height:12px;overflow:hidden;margin:4px 0"><div style="width:${pct}%;height:12px;background:${col}"></div></div>
+      <div class="line"><span class="muted" style="font-size:12px">GHS ${n2(t.processed)} of GHS ${n2(t.target)} (${t.percent}%) · ${t.claims} claims</span>
+        <a href="#" onclick="clearTarget('${esc(t.payerId)}');return false" style="color:var(--coral);font-size:12px">remove</a></div>
+    </div>`;
+  }).join('');
+}
+async function clearTarget(id){
+  await fetch(`/api/platform/payers/${encodeURIComponent(id)}/target`,{method:'DELETE',headers:H()});
+  toast('Target removed');loadTargets();
+}
+async function uploadPriceList(){
+  const id=$('pl_payer').value; const f=$('pl_file').files[0];
+  if(!id)return toast('Pick a payer'); if(!f)return toast('Choose a CSV file');
+  const csv=await f.text();
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{method:'POST',headers:H(),body:JSON.stringify({csv,replace:true})});
+  const o=await r.json();
+  if(r.ok){ $('pl_status').innerHTML=`<span style="color:var(--brand)">Imported ${o.imported} rows${o.skipped?`, skipped ${o.skipped}`:''}.</span>`; loadPriceList(); }
+  else { $('pl_status').innerHTML=`<span style="color:var(--coral)">Upload failed: ${esc(o.error||'')}${o.detail?' — '+esc((o.detail||[]).slice(0,3).join('; ')):''}</span>`; }
+}
+async function loadPriceList(){
+  const id=$('pl_payer').value; if(!id){ $('pl_preview').innerHTML=''; return; }
+  // reflect the payer's current reprice flag
+  const payer=(PAYERS||[]).find(p=>p.id===id);
+  if($('pl_reprice'))$('pl_reprice').checked=!!(payer&&payer.repriceClaims);
+  const r=await (await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{headers:H()})).json();
+  if(!r.count){ $('pl_preview').innerHTML='<p class="muted" style="font-size:13px">No price list uploaded for this payer.</p>'; return; }
+  $('pl_preview').innerHTML=`<p class="muted" style="font-size:12px">${r.count} prices · uploaded ${r.uploadedAt?new Date(r.uploadedAt).toLocaleString():''}</p>`+
+    `<table><thead><tr><th>Code</th><th>Name</th><th>Provider</th><th class="num">Price</th></tr></thead><tbody>`+
+    (r.sample||[]).map(x=>`<tr><td>${esc(x.code||'—')}</td><td>${esc(x.name||'—')}</td><td>${esc(x.provider||'default')}</td><td class="num">GHS ${n2(x.price)}</td></tr>`).join('')+
+    `</tbody></table>`;
+}
+async function clearPriceList(){
+  const id=$('pl_payer').value; if(!id)return toast('Pick a payer');
+  await fetch(`/api/platform/payers/${encodeURIComponent(id)}/pricelist`,{method:'DELETE',headers:H()});
+  toast('Price list cleared');loadPriceList();
+}
+async function toggleReprice(){
+  const id=$('pl_payer').value; if(!id){ $('pl_reprice').checked=false; return toast('Pick a payer'); }
+  const enabled=$('pl_reprice').checked;
+  const r=await fetch(`/api/platform/payers/${encodeURIComponent(id)}/reprice`,{method:'PUT',headers:H(),body:JSON.stringify({enabled})});
+  if(r.ok){ toast(enabled?'Repricing enabled — this payer\u2019s prices now govern settlement':'Repricing off — reference only');
+    const p=(PAYERS||[]).find(x=>x.id===id); if(p)p.repriceClaims=enabled; }
+  else { $('pl_reprice').checked=!enabled; toast('Failed'); }
+}
+async function addPayer(){
+  const body={name:$('y_name').value.trim(),kind:$('y_kind').value,sourceAccount:$('y_src').value,email:$('y_email').value};
+  if(!body.name)return toast('Name required');
+  const r=await fetch('/api/platform/payers',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){const p=await r.json();$('y_name').value='';alert(`Payer created.\n\nPayer API key (x-payer-key):\n${p.apiKey}`);loadPayers();boot();}
+}
+
+async function loadEmr(){
+  const r=await (await fetch('/api/platform/emr-partners',{headers:H()})).json(); EMR=r.data||[];
+  $('emr').innerHTML=`<table><thead><tr><th>Vendor</th><th>Contact</th><th>Partner key</th></tr></thead><tbody>`+
+    (EMR.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.contact?.email||'—')}</td><td><span class="key">${esc(p.apiKey)}</span></td></tr>`).join('')
+     ||'<tr><td colspan=3 class="muted">No EMR/EHR partners yet.</td></tr>')+`</tbody></table>`;
+}
+async function addEmr(){
+  const body={name:$('e_name').value.trim(),contactName:$('e_contact').value,email:$('e_email').value};
+  if(!body.name)return toast('Vendor name required');
+  const r=await fetch('/api/platform/emr-partners',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){const p=await r.json();$('e_name').value='';alert(`Partner created.\n\nPartner key:\n${p.apiKey}`);loadEmr();boot();}
+}
+
+async function loadLics(){
+  const r=await (await fetch('/api/platform/licenses',{headers:H()})).json();
+  $('lics').innerHTML=`<table><thead><tr><th>Key</th><th>Edition</th><th>Bound to</th><th>Status</th><th>Redeemed by</th><th></th></tr></thead><tbody>`+
+    ((r.data||[]).map(l=>`<tr><td><span class="key">${esc(l.key)}</span></td><td>${esc(l.edition.replace('_',' '))}</td>
+      <td>${esc(l.orgId||'any')}</td>
+      <td><span class="pill ${l.status==='redeemed'?'settled':l.status==='revoked'?'rejected':'open'}">${esc(l.status)}</span></td>
+      <td>${esc(l.redeemedBy||'—')}</td>
+      <td>${l.status==='issued'?`<button class="ghost mini" onclick="revoke('${esc(l.key)}')">Revoke</button>`:''}</td></tr>`).join('')
+     ||'<tr><td colspan=6 class="muted">No licences issued yet.</td></tr>')+`</tbody></table>`;
+}
+async function addLic(){
+  const body={edition:$('l_ed').value,orgId:$('l_org').value||null,expiresAt:$('l_exp').value||null,note:$('l_note').value||null};
+  const r=await fetch('/api/platform/licenses',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  if(!r.ok)return toast('Failed');
+  const l=await r.json();
+  $('l_out').innerHTML=`<p class="muted" style="margin:0 0 6px">Send this key to the client — their IT lead redeems it in the console:</p><div class="linkbox">${esc(l.key)}</div>`;
+  toast('Licence issued'); loadLics(); boot();
+}
+async function revoke(key){
+  if(!confirm('Revoke this key?'))return;
+  const r=await fetch(`/api/platform/licenses/${encodeURIComponent(key)}/revoke`,{method:'POST',headers:H()});
+  if(r.ok){toast('Revoked');loadLics();}
+}
+async function loadPolicy(){
+  const p=await (await fetch('/api/platform/licensing',{headers:H()})).json().catch(()=>null);
+  if(!p||p.error)return;
+  const licensed=p.mode==='licensed';
+  $('policyBox').innerHTML=`
+    <div class="row" style="align-items:flex-end">
+      <div class="field"><label>Mode</label>
+        <select id="pol_mode">
+          <option value="free_non_commercial" ${!licensed?'selected':''}>Free · non-commercial</option>
+          <option value="licensed" ${licensed?'selected':''}>Licensed · require paid licence</option>
+        </select></div>
+      <div class="field"><label>Term (months)</label><input id="pol_term" type="number" value="${p.termMonths}"/></div>
+      <div class="field"><label>Grace (days)</label><input id="pol_grace" type="number" value="${p.graceDays}" ${licensed?'':'disabled'}/></div>
+      <div class="field"><label>Licence fee / term (GHS)</label><input id="pol_fee" type="number" value="${p.licenseFee}" ${licensed?'':'disabled'}/></div>
+      <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="savePolicy()">Save policy</button></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">
+      Current: <b>${esc(p.mode.replace(/_/g,' '))}</b>${licensed?` · GHS ${p.licenseFee} per ${p.termMonths} months`:' · no fee'}.
+      ${licensed?'Clients with a lapsed licence are blocked until renewed.':'All clients operate free; licences renew every '+p.termMonths+' months at no charge.'}
+    </p>`;
+  document.getElementById('pol_mode').onchange=(e)=>{const on=e.target.value==='licensed';document.getElementById('pol_fee').disabled=!on;document.getElementById('pol_grace').disabled=!on;};
+}
+async function savePolicy(){
+  const body={mode:$('pol_mode').value,termMonths:parseInt($('pol_term').value,10)||6,licenseFee:parseFloat($('pol_fee').value)||0,graceDays:parseInt($('pol_grace').value,10)||30};
+  const r=await fetch('/api/platform/licensing',{method:'PUT',headers:H(),body:JSON.stringify(body)});
+  if(r.ok){toast('Policy saved');loadPolicy();loadLicState();}else toast('Failed');
+}
+async function loadLicState(){
+  const r=await (await fetch('/api/platform/licenses/state',{headers:H()})).json().catch(()=>null);
+  if(!r||!r.data)return;
+  $('licState').innerHTML=`<table><thead><tr><th>Client</th><th>Edition</th><th>Expires</th><th>Days left</th><th>Status</th><th></th></tr></thead><tbody>`+
+    (r.data.map(c=>`<tr><td>${esc(c.name)}</td><td><span class="ed ${esc(c.edition)}">${esc(c.edition.replace('_',' '))}</span></td>
+      <td>${c.expiresAt?esc(new Date(c.expiresAt).toLocaleDateString()):'—'}</td>
+      <td>${c.daysLeft==null?'—':c.daysLeft}</td>
+      <td>${({free:'<span class="pill settled">free</span>',licensed:'<span class="pill settled">licensed</span>',grace:'<span class="pill open">grace</span>',lapsed:'<span class="pill rejected">lapsed</span>',unlicensed:'<span class="pill rejected">unlicensed</span>'})[c.effectiveStatus]||'<span class="pill">'+esc(c.effectiveStatus||'')+'</span>'}${c.graceEndsAt?`<br><span class="muted" style="font-size:11px">until ${new Date(c.graceEndsAt).toLocaleDateString()}</span>`:''}</td>
+      <td><button class="ghost" style="padding:6px 10px" onclick="renew('${esc(c.id)}')">Renew 6 mo</button></td></tr>`).join('')
+     ||'<tr><td colspan=6 class="muted">No clients yet.</td></tr>')+`</tbody></table>`;
+}
+async function renew(id){
+  const r=await fetch(`/api/platform/clients/${encodeURIComponent(id)}/renew`,{method:'POST',headers:H(),body:JSON.stringify({})});
+  if(r.ok){const o=await r.json();toast(`Renewed to ${new Date(o.expiresAt).toLocaleDateString()}`);loadLicState();}else toast('Failed');
+}
+const _origBoot=boot;
+boot=async function(){await _origBoot();loadPolicy();loadLicState();};
+boot();
+</script>
+</body></html>

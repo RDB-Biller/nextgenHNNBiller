@@ -15,7 +15,7 @@ paths:
       summary: Create a bill
       security: [{ TenantKey: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateBill' } } } }
-      responses: { '201': { description: 'Created. A patient verification link is generated and sent automatically — response includes patientVerification:{status,link}, not persisted onto the bill itself.', content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
+      responses: { '201': { description: 'Created. A patient verification link is generated and sent automatically — response includes patientVerification:{status,link,channelsSent}, not persisted onto the bill itself. If the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels), the same message also goes out on those channels with a one-time reply code; in sandbox mode only (no real provider configured) the response additionally includes otpCodeSandbox so the flow can be demoed without a phone.', content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
     get: { summary: List bills, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
   /api/v1/bills/{id}:
     get:
@@ -35,7 +35,7 @@ paths:
       summary: Resend the patient verification link (same token) — resets a disputed record to pending
       security: [{ TenantKey: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: '{ status, link, remindersSent }' }, '409': { description: verification_not_pending } }
+      responses: { '200': { description: '{ status, link, remindersSent, channelsSent }, plus otpCodeSandbox in sandbox mode — reissuing also generates a fresh reply code, invalidating any earlier one' }, '409': { description: verification_not_pending } }
 
   /api/v1/payments/intents:
     post:
@@ -322,6 +322,23 @@ paths:
 
   /api/v1/webhooks/collection:
     post: { summary: Collection gateway confirms a patient self-pay (gateway-signed), responses: { '200': { description: OK } } }
+  /api/v1/webhooks/messaging-inbound:
+    post:
+      summary: Inbound SMS/WhatsApp reply to a patient verification message (shared-secret signed)
+      description: >
+        Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
+        with channel inferred from Twilio's whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK
+        confirms only when exactly one verification is pending for that phone; otherwise (or always) the patient
+        can send the numeric reply code from their message instead, matched only within that phone's own pending
+        verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a
+        provider-specific request signature (header x-webhook-secret, not modeled as a securityScheme here —
+        same as /api/v1/webhooks/collection).
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { from: { type: string }, text: { type: string }, channel: { type: string, enum: [sms, whatsapp] } } } } }
+      responses:
+        '200': { description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code, locked, no_match, unrecognized.' }
+        '401': { description: bad_signature }
+        '422': { description: missing_from_or_text }
 
 components:
   securitySchemes:
@@ -371,3 +388,10 @@ components:
           properties:
             status: { type: string, enum: [pending, verified, disputed] }
             link: { type: string, example: '/verify/?token=abc123' }
+            channelsSent:
+              type: array
+              items: { type: string, enum: [sms, whatsapp] }
+              description: Which channels this verification also went out on, in addition to the link (empty unless the client enabled them — see /api/platform/clients/{id}/verification-channels).
+            otpCodeSandbox:
+              type: string
+              description: Sandbox mode only (no real SMS/WhatsApp provider configured) — the one-time reply code, echoed back here purely so the flow can be demoed without a real phone. Never present, and never returned by any patient-facing endpoint, once a real provider is wired in.
