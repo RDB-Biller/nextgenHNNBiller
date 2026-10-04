@@ -6,6 +6,7 @@ const claimsService = require('../services/claims');
 const verification = require('../services/verification');
 const priorApproval = require('../services/priorApproval');
 const networks = require('../services/networks');
+const solutions = require('../services/solutions');
 const { idempotency } = require('../middleware/idempotency');
 
 const router = express.Router();
@@ -211,6 +212,17 @@ router.post('/network/preview', async (req, res, next) => {
   try {
     res.json(await networks.resolve(req.payer, req.body?.tenantId, Number(req.body?.amount) || 0));
   } catch (e) { next(e); }
+});
+
+// ---- Solutions built for this payer in Product Lab (payer surface) -------------
+
+router.get('/solutions', async (req, res, next) => {
+  try { res.json({ data: await solutions.listFor('payer', { payerId: req.payer.id }) }); } catch (e) { next(e); }
+});
+
+router.post('/solutions/:id/run', async (req, res, next) => {
+  try { res.json(await solutions.run(req.params.id, 'payer', { payerId: req.payer.id, input: req.body?.input })); }
+  catch (e) { next(e); }
 });
 
 module.exports = router;

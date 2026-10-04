@@ -57,6 +57,55 @@
   </div>
 
   <div class="panel" id="p-messaging">
+    <div class="card" style="margin-bottom:14px" id="sms_dash"><h2>SMS Dashboard</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Bulk SMS with a message log, inbox, analytics and callbacks — the Africa's Talking dashboard, running on this deployment's messaging rail. Sends use the <b>Messaging</b> sandbox/live switch under <b>Operating mode</b> and the credentials configured further down this tab; nothing is stored in env vars. <span id="sms_mode"></span></p>
+      <div class="tabs subtabs" style="margin:8px 0 12px">
+        <button class="on" onclick="smsTab('send',this)">Send</button><button onclick="smsTab('logs',this)">Message log</button><button onclick="smsTab('inbox',this)">Inbox</button><button onclick="smsTab('analytics',this)">Analytics</button><button onclick="smsTab('settings',this)">Callbacks &amp; opt-outs</button>
+      </div>
+
+      <div class="smsp" id="smsp-send">
+        <div class="row">
+          <div class="field" style="flex:2"><label>Phone numbers <span class="muted" style="font-weight:400">paste, one per line or comma-separated — or upload a file below</span></label>
+            <textarea id="sms_numbers" rows="5" placeholder="0244000001&#10;+233 20 123 4567" oninput="smsCount()"></textarea></div>
+          <div class="field" style="flex:1"><label>Upload CSV / XLSX / TXT</label>
+            <input type="file" id="sms_file" accept=".csv,.xlsx,.txt,.tsv" onchange="smsFile(this)"/>
+            <p class="muted" style="font-size:12px;margin:6px 0 0">Any column works — every cell that looks like a Ghana number is picked up. Duplicates are removed.</p>
+            <p id="sms_count" class="muted" style="font-size:13px;margin:8px 0 0"></p></div>
+        </div>
+        <div class="field"><label>Message <span class="muted" style="font-weight:400" id="sms_chars"></span></label>
+          <textarea id="sms_message" rows="3" maxlength="1600" placeholder="Your message" oninput="smsChars()"></textarea></div>
+        <button class="primary" id="sms_send_btn" onclick="smsSend()">Send bulk SMS</button>
+        <p class="muted" id="sms_send_status" style="font-size:13px"></p>
+      </div>
+
+      <div class="smsp" id="smsp-logs" style="display:none">
+        <div class="row">
+          <div class="field"><label>Search</label><input id="sms_q" placeholder="number, text, status, error…" oninput="smsDebounce(()=>smsLogs(1))"/></div>
+          <div class="field"><label>Status</label><select id="sms_status" onchange="smsLogs(1)"><option value="">All</option><option>sandbox</option><option>sent</option><option>delivered</option><option>failed</option><option>skipped_optout</option></select></div>
+          <div class="field" style="display:flex;align-items:flex-end;gap:6px"><button class="ghost" onclick="smsLogs()">Refresh</button><button class="ghost" onclick="smsExport()">Export CSV</button></div>
+        </div>
+        <div id="sms_logs"></div><div id="sms_logs_pager" style="margin-top:8px"></div>
+      </div>
+
+      <div class="smsp" id="smsp-inbox" style="display:none">
+        <div class="row"><div class="field"><label>Search</label><input id="sms_iq" oninput="smsDebounce(()=>smsInbox(1))"/></div>
+          <div class="field" style="display:flex;align-items:flex-end"><button class="ghost" onclick="smsInbox()">Refresh</button></div></div>
+        <div id="sms_inbox"></div><div id="sms_inbox_pager" style="margin-top:8px"></div>
+      </div>
+
+      <div class="smsp" id="smsp-analytics" style="display:none">
+        <div id="sms_kpis" class="grid cols-3" style="margin-bottom:10px"></div><div id="sms_daily"></div>
+      </div>
+
+      <div class="smsp" id="smsp-settings" style="display:none">
+        <p class="muted" style="margin-top:0;font-size:13px">In the Africa's Talking dashboard open <b>SMS → Callback URLs</b> and paste these. Each contains a secret, so only AT can reach them. Rotate the secret if one leaks (then re-paste).</p>
+        <div id="sms_hooks"></div>
+        <button class="ghost mini" style="margin-top:8px" onclick="smsRotate()">Rotate secret</button>
+        <p class="muted" style="margin:16px 0 6px;font-size:13px"><b>Opted-out numbers</b> — skipped on every send. Africa's Talking's Bulk SMS Opt-Out callback adds numbers here automatically.</p>
+        <div class="row"><div class="field"><input id="sms_oo" placeholder="0244000001"/></div><div class="field"><button class="ghost" onclick="smsOptAdd()">Add opt-out</button></div></div>
+        <div id="sms_optouts"></div>
+      </div>
+    </div>
     <div class="card" style="margin-bottom:14px"><h2>Messaging test account (platform-wide)</h2>
       <p class="muted" style="margin-top:0;font-size:13px">One shared Twilio/Africa's Talking/Hubtel account HNN can activate for a live test and deactivate again when done — used by any client below that hasn't set up its own. Whether this actually sends for real is controlled by the Messaging rail under <b>Operating mode</b>, not by anything on this card.</p>
       <p class="muted" id="mta_enc_warn" style="display:none;font-size:13px;color:var(--bad)">The server has no <span class="key">CREDENTIAL_ENCRYPTION_KEY</span> set — saving credentials will fail until it does. Nothing is ever stored unencrypted.</p>
@@ -297,7 +346,7 @@
 
   <div class="panel" id="p-pde">
     <p class="muted" style="margin:0 0 14px;font-size:13px">A payer's product team builds Value-Based-Care programs, promotional
-      campaigns, and loyalty/discount programs here — no coding required. Every product starts as a <b>draft</b>, moves to
+      campaigns, loyalty/discount programs, and configurable <b>solutions</b> (price comparison, claim expiry, settlement cycles… exposed to patients, hospitals or the payer team) here — no coding required. Every product starts as a <b>draft</b>, moves to
       <b>sandbox</b> to test against real observation data risk-free, then <b>live</b> once it's reviewed. Incentives, penalties
       and cashback only ever <i>accrue</i> as figures to review here — nothing disburses automatically yet. Clinical indicators
       (blood pressure, HbA1c, LDL, complications, follow-ups) come from an EMR/EHR partner's own feed — see the
@@ -310,6 +359,7 @@
           <option value="vbc">Value-Based-Care program</option>
           <option value="campaign">Promotional campaign</option>
           <option value="loyalty">Loyalty / discount program</option>
+          <option value="solution">Solution (configurable module for patients / hospitals / payers)</option>
         </select></div>
       </div>
       <div class="row">
@@ -378,11 +428,37 @@
         </div>
       </div>
 
-      <button class="primary" style="margin-top:12px" onclick="createProduct()">Create as draft</button>
+      <div id="pd_solution_fields" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 8px;font-size:13px">A <b>solution</b> turns one of HNN's built-in capabilities into a product you configure here and expose on the surfaces you choose. Moving it to <b>live</b> applies its settings to the sponsoring payer (and reverts them when paused); read-only modules like price comparison simply open to the chosen audience. In <b>sandbox</b> it runs as a dry-run for testers and is hidden from patients.</p>
+        <div class="row">
+          <div class="field"><label>Module</label><select id="pd_sol_module" onchange="pdSolModuleChanged()"></select></div>
+          <div class="field"><label>Public title</label><input id="pd_sol_title" placeholder="Find the cheapest pharmacy"/></div>
+        </div>
+        <div class="field"><label>Intro text <span class="muted" style="font-weight:400">shown above the form</span></label><input id="pd_sol_intro" placeholder="Compare what pharmacies have recently charged for your prescription."/></div>
+        <p class="muted" style="margin:8px 0 4px;font-size:13px" id="pd_sol_desc"></p>
+        <div class="field"><label>Who can use it</label><div id="pd_sol_surfaces" style="display:flex;gap:16px;flex-wrap:wrap"></div></div>
+        <p class="muted" style="margin:8px 0 4px;font-size:13px"><b>Parameters</b></p>
+        <div id="pd_sol_params" class="row"></div>
+        <p class="muted" style="font-size:12px;margin:8px 0 0">Hospital surface: the providers ticked above become an allow-list (none ticked = every hospital).
+          Patient link once live: <span id="pd_sol_link" class="key">/solutions/?p=&lt;product id&gt;</span></p>
+      </div>
+
+      <button class="primary" style="margin-top:12px" id="pd_create_btn" onclick="createProduct()">Create as draft</button> <button class="ghost" id="pd_cancel_edit" style="display:none;margin-top:12px" onclick="pdCancelEdit()">Cancel edit</button>
       <p class="muted" id="pd_create_status" style="font-size:12px"></p>
     </div>
 
     <div class="card" style="margin-bottom:14px"><h2>Products</h2><div id="pd_list"></div></div>
+
+    <div class="card" style="margin-bottom:14px;display:none" id="pd_run_card"><h2>Try a solution</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Runs a solution exactly as a patient, hospital or payer would see it — in any status — so you can check the numbers before exposing it.</p>
+      <div class="row">
+        <div class="field"><label>Solution</label><select id="pd_run_sol" onchange="pdRunFields()"></select></div>
+        <div class="field"><label>As</label><select id="pd_run_surface"><option value="master">Master Control (dry-run)</option></select></div>
+      </div>
+      <div id="pd_run_inputs" class="row"></div>
+      <button class="primary" onclick="pdRunSolution()">Run</button>
+      <div id="pd_run_out" style="margin-top:10px"></div>
+    </div>
 
     <div class="card"><h2>Preview &amp; accrue</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Preview runs the scoring/reward engine and shows what it <i>would</i> pay out for a period — nothing is saved. Accrue runs the same engine and writes those figures to the ledger below it. Run each period once; accrual history shows what's already been recorded.</p>
@@ -556,7 +632,7 @@ let CLIENTS=[],PAYERS=[],EMR=[];
 let PROVIDERS_META={},ENCRYPTION_OK=false;
 
 function tab(n,el){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
-  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('.tabs:not(.subtabs) button').forEach(b=>b.classList.remove('on'));
   $('p-'+n).classList.add('on'); el.classList.add('on');}
 
 async function boot(){
@@ -1058,6 +1134,7 @@ function pdSelectedProviders(){
 
 function pdTypeChanged(){
   const t=$('pd_type').value;
+  if($('pd_solution_fields')){$('pd_solution_fields').style.display=t==='solution'?'':'none';if(t==='solution')pdSolInit();}
   $('pd_vbc_fields').style.display=t==='vbc'?'':'none';
   $('pd_campaign_fields').style.display=t==='campaign'?'':'none';
   $('pd_loyalty_fields').style.display=t==='loyalty'?'':'none';
@@ -1085,6 +1162,7 @@ function pdSelectedMetrics(){
 }
 
 async function createProduct(){
+  if($('pd_type').value==='solution')return pdSaveSolution();
   const payerId=$('pd_payer').value; if(!payerId)return toast('Pick a sponsoring payer');
   const type=$('pd_type').value;
   const name=$('pd_name').value.trim(); if(!name)return toast('Name required');
@@ -1135,12 +1213,13 @@ async function loadProducts(){
         ${p.status==='draft'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Move to sandbox</button>`:''}
         ${p.status==='sandbox'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','live')">Publish live</button> <button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','draft')">Back to draft</button>`:''}
         ${p.status==='live'?`<button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Pause to sandbox</button>`:''}
-        <button class="ghost mini" onclick="pdSelectForMeasure('${esc(p.id)}')">Measure</button>
+        ${p.type==='solution'?`<button class="ghost mini" onclick="pdEditSolution('${esc(p.id)}')">Edit</button> <button class="ghost mini" onclick="pdTrySolution('${esc(p.id)}')">Try</button>`:`<button class="ghost mini" onclick="pdSelectForMeasure('${esc(p.id)}')">Measure</button>`}
       </td></tr>`).join('')+`</tbody></table>`
     :'<p class="muted">No products yet — build one above.</p>';
+  if(window.pdAfterProducts)pdAfterProducts();
   if($('pd_measure_product')){
     const cur=$('pd_measure_product').value;
-    $('pd_measure_product').innerHTML='<option value="">Select product…</option>'+PRODUCTS.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.type)})</option>`).join('');
+    $('pd_measure_product').innerHTML='<option value="">Select product…</option>'+PRODUCTS.filter(p=>p.type!=='solution').map(p=>`<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.type)})</option>`).join('');
     if(cur)$('pd_measure_product').value=cur;
   }
 }
@@ -1348,7 +1427,7 @@ async function setRegStatus(id,status){
 
 const _origBoot=boot;
 boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();
-  loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();};
+  loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();if(window.smsBoot)smsBoot();};
 
 // ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====
 // ===== cycles/rails/batches, TPA funders, pharmacy pricing, reconciliation =
@@ -1558,4 +1637,5 @@ const _origBoot2=boot;
 boot=async function(){await _origBoot2();loadAutomationPolicy();loadExpiryPolicy();loadBatchQueue();loadFunders();};
 boot();
 </script>
+<script src="platform-extra.js"></script>
 </body></html>

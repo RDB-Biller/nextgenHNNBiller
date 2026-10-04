@@ -15,11 +15,16 @@
     <p class="muted" style="margin-top:0;font-size:13px">Every bill sends the patient a link to confirm the charges. These haven't been confirmed yet — oldest first. A dispute needs your follow-up; the link is safe to re-share with the patient over WhatsApp/SMS yourself.</p>
     <div id="pendingVerif"></div>
   </div>
+  <div class="card" style="margin-bottom:16px" id="solCard" hidden><h2>Tools from your payers &amp; HNN</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Configurable tools (price comparison, claim expiry countdowns, reconciliation…) published to your facility.</p>
+    <div id="solList"></div>
+  </div>
   <div class="grid cols-2">
     <div class="card"><h2>Recent bills</h2><div id="bills"></div></div>
     <div class="card"><h2>Notifications sent</h2><div id="notes"></div></div>
   </div>
 </div>
+<script src="solutions-ui.js"></script>
 <script>
 const $=(id)=>document.getElementById(id);
 const num=(n)=>Number(n||0).toFixed(2);
@@ -48,6 +53,20 @@ async function refresh(){
       <td><a href="${esc(location.origin+v.link)}" target="_blank" rel="noopener">${esc(location.origin+v.link)}</a></td></tr>`).join('')
     ||'<tr><td colspan=6 class="muted">Nothing pending — every bill has been verified.</td></tr>')+`</tbody></table>`;
 }
-refresh();
+async function loadSolutions(){
+  const h={'x-api-key':$('apikey').value.trim()};
+  try{
+    const o=await SolUI.call('/api/v1/solutions',{headers:h});
+    $('solCard').hidden=!o.data.length;
+    $('solList').innerHTML='';
+    o.data.forEach(v=>{
+      const d=document.createElement('details');d.style.margin='8px 0';
+      d.innerHTML=`<summary style="cursor:pointer"><b>${SolUI.esc(v.title)}</b> ${v.status==='live'?'':'<span class="pill sandbox">test</span>'}</summary><div style="padding:10px 0"></div>`;
+      $('solList').appendChild(d);
+      SolUI.mount(d.querySelector('div'),v,'hospital',(input)=>SolUI.call(`/api/v1/solutions/${encodeURIComponent(v.id)}/run`,{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({input})}));
+    });
+  }catch(e){$('solCard').hidden=true;}
+}
+refresh();loadSolutions();
 </script>
 </body></html>

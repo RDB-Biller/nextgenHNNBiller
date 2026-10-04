@@ -1,0 +1,27 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Health tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="app.css"/></head><body>
+<div class="wrap" style="max-width:640px">
+  <div class="top"><div class="brandmark">HNN<span class="dot">.</span> Health tools</div></div>
+  <div class="card" id="root"><p class="muted">Loading…</p></div>
+  <p class="muted" style="font-size:12px;margin-top:14px">Information only — not medical or financial advice.</p>
+</div>
+<script src="solutions-ui.js"></script>
+<script>
+(async()=>{
+  const root=document.getElementById('root'),id=new URLSearchParams(location.search).get('p');
+  try{
+    if(id){
+      const view=await SolUI.call(`/solutions/api/${encodeURIComponent(id)}`);
+      document.title=view.title;
+      SolUI.mount(root,view,'patient',(input)=>SolUI.call(`/solutions/api/${encodeURIComponent(id)}/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input})}));
+    }else{
+      const o=await SolUI.call('/solutions/api');
+      root.innerHTML='<h2 style="margin-top:0">Available tools</h2>'+(o.data.length?o.data.map(v=>`<p><a href="?p=${encodeURIComponent(v.id)}"><b>${SolUI.esc(v.title)}</b></a><br><span class="muted">${SolUI.esc(v.intro||'')}</span></p>`).join(''):'<p class="muted">Nothing is available right now.</p>');
+    }
+  }catch(e){root.innerHTML=`<p style="color:var(--bad)">${SolUI.esc(e.message==='solution_not_found'?'This tool is not available.':e.message)}</p>`;}
+})();
+</script></body></html>

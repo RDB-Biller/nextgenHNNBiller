@@ -407,7 +407,77 @@ async function send({ channel, to, body, tenant } = {}) {
   }
 }
 
+/**
+ * Bulk SMS. Africa's Talking has a dedicated JSON endpoint
+ * (POST /version1/messaging/bulk: { username, message, senderId?, phoneNumbers[] })
+ * returning SMSMessageData.Recipients[] -- one request for the whole list
+ * instead of N. Every other provider (and sandbox) is a per-recipient loop over
+ * send(), so behaviour (sandbox/live, tenant vs platform credentials) is
+ * identical to every other send in the product.
+ * Returns { ok, results: [{ to, ok, providerMessageId?, error?, cost? }] }.
+ */
+async function sendBulkViaAfricasTalking(creds, { to, body }) {
+  const { apiKey, username, from } = creds || {};
+  if (!apiKey || !username) return { ok: false, error: 'provider_credentials_incomplete' };
+  const sandboxAccount = String(username).toLowerCase() === 'sandbox';
+  const base = sandboxAccount ? 'https://api.sandbox.africastalking.com' : 'https://api.africastalking.com';
+  const payload = { username, message: body, phoneNumbers: to };
+  if (from) payload.senderId = from;
+  const json = JSON.stringify(payload);
+  let res;
+  try {
+    res = await _request(`${base}/version1/messaging/bulk`, {
+      method: 'POST',
+      headers: { apiKey, Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(json) },
+      body: json,
+    });
+  } catch (e) { return { ok: false, error: e.message || 'network_error' }; }
+  let parsed = null;
+  try { parsed = JSON.parse(res.body || '{}'); } catch (_e) { /* non-JSON error body: never throw */ }
+  const recipients = parsed?.SMSMessageData?.Recipients;
+  if (!Array.isArray(recipients)) {
+    return { ok: false, error: parsed?.SMSMessageData?.Message || (parsed ? '' : 'non_json_response_') + `africastalking_http_${res.status}` };
+  }
+  const byNumber = new Map(recipients.map((r) => [String(r.number), r]));
+  return {
+    ok: true,
+    results: to.map((n) => {
+      const r = byNumber.get(String(n));
+      if (r && [100, 101, 102].includes(Number(r.statusCode))) {
+        return { to: n, ok: true, providerMessageId: r.messageId, cost: r.cost || null };
+      }
+      return { to: n, ok: false, error: (r && r.status) || 'no_recipient_result' };
+    }),
+  };
+}
+
+async function sendBulk({ to, body, tenant } = {}) {
+  const list = (Array.isArray(to) ? to : []).filter(Boolean);
+  if (!list.length) return { ok: false, error: 'no_recipients', results: [] };
+  if (typeof body !== 'string' || !body.trim()) return { ok: false, error: 'empty_message', results: [] };
+  if (await isSandbox()) {
+    const sentAt = new Date().toISOString();
+    return { ok: true, sandbox: true, sentAt, results: list.map((n) => ({ to: n, ok: true,
+      providerMessageId: `SBX-MSG-${crypto.randomBytes(6).toString('hex')}` })) };
+  }
+  const resolved = await resolveSender(tenant);
+  if (!resolved) return { ok: false, sandbox: false, error: 'messaging_provider_not_configured', results: [] };
+  const sentAt = new Date().toISOString();
+  if (resolved.provider === 'africastalking') {
+    const r = await sendBulkViaAfricasTalking(resolved.creds, { to: list, body });
+    if (!r.ok) return { ok: false, sandbox: false, error: r.error, results: [] };
+    return { ok: true, sandbox: false, sentAt, source: resolved.source, results: r.results };
+  }
+  const results = [];
+  for (const n of list) {
+    const r = await send({ channel: 'sms', to: n, body, tenant });
+    results.push({ to: n, ok: !!r.ok, providerMessageId: r.providerMessageId, error: r.ok ? undefined : r.error });
+  }
+  return { ok: true, sandbox: false, sentAt, source: resolved.source, results };
+}
+
 module.exports = {
+  sendBulk,
   send, genOtp, normalizePhone, resolveSender, isSandbox, PROVIDER_NAMES, PROVIDER_META,
   get PROVIDER() { return config.messaging.provider; },
   _setRequestImplForTests,

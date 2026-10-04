@@ -176,14 +176,9 @@ function treatmentMatches(rule, bill) {
  * leaves the claim exactly where it would have landed without this module
  * (pending manual review) -- auto-clear is a fast path, never a new gate.
  */
-async function evaluate(claim, bill) {
+function decide(policy, payerPolicy, claim, bill) {
   const none = { autoClear: false, method: null, ruleId: null };
-  const policy = await getPolicy();
   if (!policy.masterEnabled) return none;
-
-  const payer = await store.payers.get(claim.payerId);
-  if (!payer) return none;
-  const payerPolicy = payerPolicyOf(payer);
   if (!payerPolicy.enabled) return none;
 
   const amount = Number(claim.amount) || 0;
@@ -204,7 +199,16 @@ async function evaluate(claim, bill) {
   return none;
 }
 
+async function evaluate(claim, bill) {
+  const none = { autoClear: false, method: null, ruleId: null };
+  const policy = await getPolicy();
+  if (!policy.masterEnabled) return none;
+  const payer = await store.payers.get(claim.payerId);
+  if (!payer) return none;
+  return decide(policy, payerPolicyOf(payer), claim, bill);
+}
+
 module.exports = {
   KEY, getPolicy, setMasterEnabled, listRules, addRule, updateRule, removeRule,
-  payerPolicyOf, setPayerPolicy, evaluate,
+  payerPolicyOf, setPayerPolicy, evaluate, decide,
 };

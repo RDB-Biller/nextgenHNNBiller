@@ -111,6 +111,9 @@ CREATE INDEX IF NOT EXISTS idx_campaign_contacts_group ON campaign_contacts(grou
 CREATE TABLE IF NOT EXISTS campaigns (id text PRIMARY KEY, group_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS campaign_sends (id text PRIMARY KEY, campaign_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_campaign_sends_campaign ON campaign_sends(campaign_id);
+CREATE TABLE IF NOT EXISTS sms_log (id text PRIMARY KEY, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_sms_log_provider ON sms_log((data->>'providerMessageId'));
+CREATE TABLE IF NOT EXISTS sms_inbox (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 -- Public trial sign-ups (register.html / routes/registerPortal.js), whether
 -- from the campaign "YES" reply link or a direct visit to /register/.
 CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
@@ -374,6 +377,17 @@ function pgRepo(exec) {
       listSentByPhone: (phoneNormalized) => many(
         "SELECT data FROM campaign_sends WHERE status='sent' AND data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
     },
+    smsLog: {
+      insert: (m) => exec(upsert('sms_log', ['status']), [m.id, m.status, m]),
+      update: (m) => exec(upsert('sms_log', ['status']), [m.id, m.status, m]),
+      get: (id) => one('SELECT data FROM sms_log WHERE id=$1', [id]),
+      byProviderId: (pid) => one("SELECT data FROM sms_log WHERE data->>'providerMessageId'=$1 ORDER BY created_at DESC LIMIT 1", [pid]),
+      all: (limit = 5000) => many('SELECT data FROM sms_log ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
+    smsInbox: {
+      insert: (m) => exec(upsert('sms_inbox', []), [m.id, m]),
+      all: (limit = 5000) => many('SELECT data FROM sms_inbox ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
     trialRegistrations: {
       get: (id) => one('SELECT data FROM trial_registrations WHERE id=$1', [id]),
       all: () => many('SELECT data FROM trial_registrations ORDER BY created_at DESC', []),
@@ -631,6 +645,17 @@ function memRepo(M) {
       listSentByPhone: async (phoneNormalized) =>
         list(M.campaignSends, (s) => s.status === 'sent' && s.phoneNormalized === phoneNormalized).reverse(),
     },
+    smsLog: {
+      insert: async (m) => { M.smsLog.set(m.id, m); },
+      update: async (m) => { M.smsLog.set(m.id, m); },
+      get: async (id) => M.smsLog.get(id) || null,
+      byProviderId: async (pid) => [...M.smsLog.values()].reverse().find((m) => m.providerMessageId === pid) || null,
+      all: async (limit = 5000) => [...M.smsLog.values()].reverse().slice(0, limit),
+    },
+    smsInbox: {
+      insert: async (m) => { M.smsInbox.set(m.id, m); },
+      all: async (limit = 5000) => [...M.smsInbox.values()].reverse().slice(0, limit),
+    },
     trialRegistrations: {
       get: async (id) => M.trialRegistrations.get(id) || null,
       all: async () => [...M.trialRegistrations.values()].reverse(),
@@ -704,7 +729,7 @@ if (usePg) {
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(),
     funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);

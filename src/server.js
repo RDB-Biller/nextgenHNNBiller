@@ -28,6 +28,9 @@ const emrRoutes = require('./routes/emr');
 const clinicalRoutes = require('./routes/clinical');
 const clinicalPortalRoutes = require('./routes/clinicalPortal');
 const registerPortalRoutes = require('./routes/registerPortal');
+const smsHooksRoutes = require('./routes/smsHooks');
+const solutionsPortalRoutes = require('./routes/solutionsPortal');
+const solutionsApiRoutes = require('./routes/solutionsApi');
 const campaigns = require('./services/campaigns');
 const claimExpiry = require('./services/claimExpiry');
 const settlementBatches = require('./services/settlementBatches');
@@ -60,6 +63,8 @@ app.use('/verify', express.static(PUBLIC, { index: 'verify.html' }));
 // VBC) — OTP-verified by phone, not a tenant/payer key; see routes/clinicalPortal.js.
 app.use('/clinical/api', clinicalPortalRoutes);
 app.use('/clinical', express.static(PUBLIC, { index: 'clinical.html' }));
+app.use('/solutions/api', solutionsPortalRoutes);
+app.use('/solutions', express.static(PUBLIC, { index: 'solutions.html' }));
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 // Public trial sign-up — the link a prospecting campaign's "YES" reply sends
@@ -74,6 +79,7 @@ app.use('/api/payer', payerApiRoutes);
 // Admin console API (IT leads) — x-admin-key
 app.use('/api/admin', adminRoutes);
 // Master control board (SaaS owners) — x-platform-key
+app.use('/sms-hooks', smsHooksRoutes);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);
@@ -93,6 +99,7 @@ app.use('/api/v1/claimit', requireFeature('claimit'), claimitRoutes);
 // Hospital-side manual entry of clinical indicators — see routes/clinical.js.
 app.use('/api/v1/clinical-observations', clinicalRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/solutions', solutionsApiRoutes);
 app.use('/api/v1', institutionsRoutes);
 
 app.use(errorHandler);

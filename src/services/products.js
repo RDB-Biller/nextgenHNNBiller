@@ -13,6 +13,9 @@ const metricsLibrary = require('./metricsLibrary');
  * whose shape depends on `type` — see validateConfig() below for exactly
  * what each type needs.
  *
+ * Type 'solution' binds one module (services/solutions.js) to the payer and,
+ * unlike the other types, DOES act on live: see solutions.onStatusChange.
+ *
  * Lifecycle (the "test environment" you asked for):
  *   draft -> sandbox -> live -> (back to sandbox any time, e.g. to pause)
  * A product computes and accrues identically in every status right now —
@@ -24,7 +27,7 @@ const metricsLibrary = require('./metricsLibrary');
  * way services/operatingMode.js gates real settlement on the live rail.
  */
 
-const TYPES = ['vbc', 'campaign', 'loyalty'];
+const TYPES = ['vbc', 'campaign', 'loyalty', 'solution'];
 const STATUSES = ['draft', 'sandbox', 'live'];
 
 function err(status, message, detail) {
@@ -66,7 +69,8 @@ function normaliseTiers(tiers, kindAllowed) {
 }
 
 /** Validates + normalises the type-specific config. Throws 422 on anything malformed. */
-function validateConfig(type, input = {}) {
+function validateConfig(type, input = {}, existing = {}) {
+  if (type === 'solution') return require('./solutions').validateConfig(input, existing);
   if (type === 'vbc') {
     const condition = input.condition;
     if (!metricsLibrary.CONDITIONS.some((c) => c.id === condition)) {
@@ -126,6 +130,7 @@ async function create(payerId, input, actorId) {
   if (!input.name || !input.name.trim()) throw err(422, 'name_required');
 
   const config = validateConfig(input.type, input.config || {});
+  if (input.type === 'solution') config.applied = null;
   const now = new Date().toISOString();
   const product = {
     id: `prod_${input.type}_${rand()}`,
@@ -149,7 +154,13 @@ async function update(id, input, actorId) {
   if (!product) throw err(404, 'unknown_product');
   if (input.name != null) product.name = String(input.name).trim() || product.name;
   if (input.description != null) product.description = String(input.description);
-  if (input.config) product.config = validateConfig(product.type, { ...product.config, ...input.config });
+  if (input.config) {
+    const next = product.type === 'solution'
+      ? validateConfig('solution', input.config, product.config)
+      : validateConfig(product.type, { ...product.config, ...input.config });
+    if (product.type === 'solution' && product.status === 'live') await require('./solutions').onLiveUpdate(product, next);
+    product.config = next;
+  }
   product.updatedAt = new Date().toISOString();
   product.updatedBy = actorId || null;
   await store.products.save(product);
@@ -165,6 +176,7 @@ async function setStatus(id, status, actorId) {
   if (status !== product.status && !(VALID_TRANSITIONS[product.status] || []).includes(status)) {
     throw err(422, 'invalid_transition', `cannot move from ${product.status} to ${status}`);
   }
+  if (product.type === 'solution' && status !== product.status) await require('./solutions').onStatusChange(product, product.status, status);
   product.status = status;
   if (status === 'live' && !product.publishedAt) product.publishedAt = new Date().toISOString();
   product.updatedAt = new Date().toISOString();

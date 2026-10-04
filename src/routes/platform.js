@@ -36,6 +36,8 @@ const settlement = require('../services/settlement');
 const funders = require('../services/funders');
 const pharmacyPricing = require('../services/pharmacyPricing');
 const reconciliation = require('../services/reconciliation');
+const smsDashboard = require('../services/smsDashboard');
+const solutions = require('../services/solutions');
 
 const router = express.Router();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24);
@@ -1046,6 +1048,87 @@ router.put('/trial-registrations/:id/status', async (req, res, next) => {
     if (e.status) return res.status(e.status).json({ error: e.message });
     next(e);
   }
+});
+
+// ---- Solutions (Product Lab type 'solution') ---------------------------------
+// Create/edit/promote use the generic /products routes above; these add the
+// module registry (drives the generated form) and a runner so Master Control
+// can try any solution, in any status, before exposing it on a surface.
+
+router.get('/solutions/modules', async (req, res, next) => {
+  try { res.json({ modules: solutions.registry(), funders: (await funders.list()).map(funders.mask).map((f) => ({ id: f.id, name: f.name })) }); }
+  catch (e) { next(e); }
+});
+
+router.post('/solutions/:id/run', async (req, res, next) => {
+  try {
+    res.json(await solutions.run(req.params.id, 'master', { input: req.body?.input }));
+  } catch (e) { next(e); }
+});
+
+// ---- SMS Dashboard (Messaging tab) -------------------------------------------
+// Reproduction of the standalone Africa's Talking dashboard: bulk send, log,
+// inbox, analytics, export, callback URLs. Sends use the same sandbox/live
+// toggle and credentials as every other message -- see services/smsDashboard.js.
+
+const baseUrl = (req) => `${req.header('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
+
+router.get('/sms/overview', async (req, res, next) => {
+  try {
+    const mode = await operatingMode.get();
+    res.json({
+      messagingSandbox: mode.messaging.sandbox,
+      provider: (await messagingAccount.resolve())?.provider || null,
+      maxPerRequest: smsDashboard.MAX_PER_REQUEST,
+      hookUrls: await smsDashboard.hookUrls(baseUrl(req)),
+      analytics: await smsDashboard.analytics(),
+    });
+  } catch (e) { next(e); }
+});
+
+router.post('/sms/parse', (req, res) => {
+  const p = smsDashboard.parseNumbers(req.body?.numbers);
+  res.json({ valid: p.valid.length, invalid: p.invalid, duplicates: p.duplicates, sample: p.valid.slice(0, 5) });
+});
+
+router.post('/sms/send', async (req, res, next) => {
+  try { res.json(await smsDashboard.send({ message: req.body?.message, numbers: req.body?.numbers, actor: 'platform' })); }
+  catch (e) { next(e); }
+});
+
+router.get('/sms/logs', async (req, res, next) => {
+  try { res.json(await smsDashboard.logs(req.query)); } catch (e) { next(e); }
+});
+
+router.get('/sms/logs.csv', async (req, res, next) => {
+  try {
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="sms-log.csv"');
+    res.send(await smsDashboard.logsCsv(req.query));
+  } catch (e) { next(e); }
+});
+
+router.get('/sms/inbox', async (req, res, next) => {
+  try { res.json(await smsDashboard.inbox(req.query)); } catch (e) { next(e); }
+});
+
+router.get('/sms/analytics', async (req, res, next) => {
+  try { res.json(await smsDashboard.analytics({ days: Number(req.query.days) || 14 })); } catch (e) { next(e); }
+});
+
+router.post('/sms/rotate-secret', async (req, res, next) => {
+  try { await smsDashboard.rotateSecret(); res.json({ hookUrls: await smsDashboard.hookUrls(baseUrl(req)) }); }
+  catch (e) { next(e); }
+});
+
+router.get('/sms/optouts', async (req, res, next) => {
+  try { res.json({ data: await smsDashboard.listOptOuts() }); } catch (e) { next(e); }
+});
+router.post('/sms/optouts', async (req, res, next) => {
+  try { res.json(await smsDashboard.recordOptOut({ phoneNumber: req.body?.phoneNumber })); } catch (e) { next(e); }
+});
+router.delete('/sms/optouts/:phone', async (req, res, next) => {
+  try { res.json(await smsDashboard.removeOptOut(req.params.phone)); } catch (e) { next(e); }
 });
 
 module.exports = router;
