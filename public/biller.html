@@ -433,13 +433,16 @@ async function reqFinancing(){
   toast('Financing: '+f.status);
 }
 let PAYERS=[];
+// Billing-terminal default: highlighted in the payer row and pre-ticked in the split panel.
+// Display only -- nothing is routed until the user clicks a payer; the payer list itself comes from the API/seed.
+const DEFAULT_PAYER_ID='cosmopolitan';
 async function loadPayers(){
   try{
     const r=await fetch('/api/v1/bills/payers',{headers:hdr()});
     if(!r.ok) throw new Error();
     const {data}=await r.json();
     PAYERS=data;
-    const btn=(p)=>`<button onclick="routePayer('${esc(p.id)}')" title="${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
+    const btn=(p)=>`<button class="${p.id===DEFAULT_PAYER_ID?'accent':''}" onclick="routePayer('${esc(p.id)}')" title="${p.id===DEFAULT_PAYER_ID?'Default payer · ':''}${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
     const ins=data.filter(p=>p.group==='insurer'), emp=data.filter(p=>p.group==='employer');
     $('insurerTabs').innerHTML=ins.map(btn).join('')||'<span class="muted">None configured</span>';
     $('employerTabs').innerHTML=emp.map(btn).join('')||'<span class="muted">None configured</span>';
@@ -461,7 +464,7 @@ function renderSplit(){
   const mode=$('splitMode')?$('splitMode').value:'percent';
   $('splitList').innerHTML=PAYERS.map(p=>`
     <div class="line" style="gap:8px;align-items:center">
-      <label style="display:flex;align-items:center;gap:6px;flex:1"><input type="checkbox" class="spPay" data-id="${esc(p.id)}" data-name="${esc(p.name)}" onchange="preview()" style="width:auto"/> ${esc(p.name)} <span class="muted" style="font-size:11px">${esc(p.group||'')}</span></label>
+      <label style="display:flex;align-items:center;gap:6px;flex:1"><input type="checkbox" class="spPay" data-id="${esc(p.id)}" data-name="${esc(p.name)}" onchange="preview()" style="width:auto" ${p.id===DEFAULT_PAYER_ID?'checked':''}/> ${esc(p.name)} <span class="muted" style="font-size:11px">${esc(p.group||'')}</span></label>
       <input class="spMember" data-id="${esc(p.id)}" placeholder="member ID" oninput="preview()" style="max-width:120px"/>
       <input class="spVal" data-id="${esc(p.id)}" type="number" placeholder="${mode==='amount'?'GHS':'%'}" oninput="preview()" style="max-width:90px"/>
     </div>`).join('')||'<span class="muted">No payers loaded.</span>';
