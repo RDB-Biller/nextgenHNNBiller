@@ -104,5 +104,24 @@ const P = { 'x-platform-key': PKEY };
   const cosmo2 = (payers2.json.data || payers2.json).find((p) => p.id === 'cosmopolitan');
   ok(!JSON.stringify(cosmo2).includes('175'), 'pausing it reverts the payer record');
 
+  // ---- pharmacy price lists (quotations) over HTTP
+  ok((await call('GET', '/api/platform/pharmacy-quotes')).status === 401, 'price-list API requires the platform key');
+  const tpl = await call('GET', '/api/platform/pharmacy-quotes/template.csv', { headers: P });
+  ok((tpl.headers.get('content-type') || '').startsWith('text/csv') && tpl.text.startsWith('pharmacy,item'), 'template CSV downloads');
+  const imp = await call('POST', '/api/platform/pharmacy-quotes/import', { headers: P, body: { pharmacyName: 'HTTP Rx', csv: 'item,price\nZorbamycin,12.5\nBad,xx', label: 'smoke' } });
+  ok(imp.status === 201 && imp.json.accepted === 1 && imp.json.rejectedCount === 1, 'CSV price list imports over HTTP (valid row kept, bad row reported)');
+  const impX = await call('POST', '/api/platform/pharmacy-quotes/import', { headers: P, body: { table: [['Pharmacy', 'Item', 'Price'], ['HTTP Rx 2', 'Zorbamycin', '14']] } });
+  ok(impX.status === 201 && impX.json.accepted === 1, 'spreadsheet-style table imports (pharmacy column)');
+  ok((await call('POST', '/api/platform/pharmacy-quotes/import', { headers: P, body: { csv: 'item,price\nA,1' } })).status === 422, 'missing pharmacy -> 422');
+  const lst = await call('GET', '/api/platform/pharmacy-quotes', { headers: P });
+  ok(lst.json.pharmacies.some((x) => x.pharmacyName === 'HTTP Rx') && lst.json.uploads.length >= 2, 'uploads and pharmacies are listed');
+  const uni = await call('GET', '/api/platform/pharmacy-pricing/unified?name=Zorbamycin&source=side_by_side', { headers: P });
+  ok(uni.status === 200 && uni.json.rows.length === 2 && uni.json.rows[0].name === 'HTTP Rx' && uni.json.rows[0].priceSource === 'quoted', 'unified comparison ranks quoted prices before any billing exists');
+  const pcs = await call('POST', `/solutions/api/${id}/run`, { body: { input: { items: 'Zorbamycin' } } });
+  ok(pcs.status === 200 && pcs.json.result.items[0].observed === 2 && pcs.json.result.items[0].pharmacies[0].priceSource === 'quoted', 'the live patient solution already uses quotations (best_available default)');
+  ok((await call('GET', '/api/platform/pharmacy-pricing/quote-accuracy', { headers: P })).status === 200, 'quote-accuracy report responds');
+  for (const u of lst.json.uploads.filter((x) => x.label === 'smoke' || x.pharmacies.includes('HTTP Rx 2'))) await call('DELETE', `/api/platform/pharmacy-quotes/uploads/${u.uploadId}`, { headers: P });
+  ok((await call('GET', '/api/platform/pharmacy-pricing/unified?name=Zorbamycin&source=quotes', { headers: P })).json.rows.length === 0, 'removed uploads stop appearing');
+
   console.log(`\n${a} assertions${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -292,9 +292,9 @@ function solPharmacy(d){
   let h=d.advice?`<p style="background:var(--brand-soft);padding:10px;border-radius:8px">${esc(d.advice)}</p>`:'';
   if(d.basket)h+=`<p style="margin:8px 0 4px"><b>Basket total</b> (pharmacies pricing every item)</p>`+solTable(d.basket.all,[['name','Pharmacy'],['total','Total (GHS)',r=>n2(r.total)]]);
   h+=d.items.map(it=>`<p style="margin:12px 0 4px"><b>${esc(it.query)}</b>${it.reference?` <span class="muted" style="font-size:12px">NHIS ref. GHS ${n2(it.reference.price)}</span>`:''}${it.spreadPercent!=null?` <span class="muted" style="font-size:12px">· spread ${it.spreadPercent}%</span>`:''}</p>`
-    +solTable(it.pharmacies,[['name','Pharmacy'],['price','Price (GHS)',r=>n2(r.price)],['observations','Seen'],['lastSeen','Last seen',r=>String(r.lastSeen||'').slice(0,10)]])).join('');
+    +solTable(it.pharmacies,[['name','Pharmacy'],['price','Price (GHS)',r=>n2(r.price)],['priceSource','Basis'],...(d.priceSource==='side_by_side'?[['billedPrice','Billed',r=>r.billedPrice==null?'—':n2(r.billedPrice)],['quotedPrice','Quoted',r=>r.quotedPrice==null?'—':n2(r.quotedPrice)],['variancePercent','Billed vs quote',r=>r.variancePercent==null?'—':r.variancePercent+'%']]:[]),['observations','Billed seen']])).join('');
   if(d.notFound.length)h+=`<p class="muted" style="font-size:13px;margin-top:10px">No recent prices for: ${d.notFound.map(esc).join(', ')}</p>`;
-  h+=`<p class="muted" style="font-size:12px;margin-top:8px">Analytics: ${d.analytics.withPrices}/${d.analytics.medicines} medicines priced · widest spread ${d.analytics.widestSpreadPercent}% · window ${d.sinceDays} days</p>`;
+  h+=`<p class="muted" style="font-size:12px;margin-top:8px">Analytics: ${d.analytics.withPrices}/${d.analytics.medicines} medicines priced · widest spread ${d.analytics.widestSpreadPercent}% · ${d.analytics.quotedSharePercent}% of prices are quotations`+(d.analytics.quoteVsBilled?` · billed vs quote: ${d.analytics.quoteVsBilled.meanVariancePercent}% (${d.analytics.quoteVsBilled.pairs} pairs)`:'')+`</p>`;
   return h;
 }
 async function pdRunSolution(){
@@ -306,3 +306,75 @@ async function pdRunSolution(){
     $('pd_run_out').innerHTML=`<p class="muted" style="font-size:12px">${esc(o.title)} · ${o.dryRun?'dry-run (not live)':'live'}</p>`+solRender(o.module,o.result);
   }catch(e){$('pd_run_out').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`;}
 }
+
+// ======================= Pharmacy price lists (quotations) =======================
+async function xlsxTable(buf){
+  const files=await unzip(buf);
+  const dec=(s)=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+  const ssXml=await zipText(files,'xl/sharedStrings.xml');
+  const shared=ssXml?[...ssXml.matchAll(/<si[^>]*>([\s\S]*?)<\/si>/g)].map(m=>dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t=>t[1]).join(''))):[];
+  const sheet=Object.keys(files).filter(k=>/^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort()[0];
+  if(!sheet)throw new Error('no worksheet found');
+  const xml=await zipText(files,sheet);const table=[];
+  for(const rm of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)){
+    const row=[];
+    for(const m of rm[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const attrs=m[1],body=m[2]||'';const ref=(attrs.match(/\br="([A-Z]+)\d+"/)||[])[1];const t=(attrs.match(/\bt="(\w+)"/)||[])[1];
+      let col=0;if(ref)for(const ch of ref)col=col*26+(ch.charCodeAt(0)-64);col=Math.max(col-1,row.length);
+      let v='';
+      if(t==='s'){const i=(body.match(/<v>(\d+)<\/v>/)||[])[1];v=i!=null?shared[+i]:'';}
+      else if(t==='inlineStr')v=dec([...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join(''));
+      else v=(body.match(/<v>([^<]*)<\/v>/)||[])[1]||'';
+      while(row.length<col)row.push('');row[col]=v;
+    }
+    if(row.some(c=>String(c).trim()!==''))table.push(row);
+  }
+  return table;
+}
+async function pqTemplate(){
+  const r=await fetch('/api/platform/pharmacy-quotes/template.csv',{headers:H()});
+  const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='pharmacy-price-list-template.csv';a.click();URL.revokeObjectURL(a.href);
+}
+async function pqLoad(){
+  if(!$('pq_list'))return;
+  const sel=$('pq_tenant');
+  if(sel&&sel.options.length<=1)(CLIENTS||[]).filter(c=>c.facilityType==='pharmacy').forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.name;sel.appendChild(o);});
+  try{
+    const o=await (await fetch('/api/platform/pharmacy-quotes',{headers:H()})).json();
+    $('pq_list').innerHTML=(o.pharmacies&&o.pharmacies.length?`<table><thead><tr><th>Pharmacy</th><th>Items quoted</th><th>Linked to client</th><th>Last upload</th></tr></thead><tbody>`
+      +o.pharmacies.map(p=>`<tr><td>${esc(p.pharmacyName)}</td><td>${p.items}</td><td>${p.linkedTenantId?esc(p.linkedTenantId):'<span class="muted">no</span>'}</td><td>${esc(String(p.lastUploaded).slice(0,10))}</td></tr>`).join('')+'</tbody></table>'
+      :'<p class="muted">No price lists uploaded yet.</p>')
+      +(o.uploads&&o.uploads.length?`<p class="muted" style="font-size:13px;margin:12px 0 4px">Uploads</p><table><thead><tr><th>Uploaded</th><th>Pharmacies</th><th>Items</th><th>Valid</th><th>Label</th><th></th></tr></thead><tbody>`
+      +o.uploads.map(u=>`<tr><td>${esc(String(u.createdAt).slice(0,16).replace('T',' '))}</td><td>${esc(u.pharmacies.join(', '))}</td><td>${u.items}</td><td>${esc(String(u.validFrom).slice(0,10))}${u.validUntil?' → '+esc(String(u.validUntil).slice(0,10)):''}</td><td>${esc(u.label||'')}</td><td><button class="ghost mini" onclick="pqDelete('${esc(u.uploadId)}')">Remove</button></td></tr>`).join('')+'</tbody></table>':'');
+  }catch(e){$('pq_list').innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
+}
+async function pqImport(){
+  const f=$('pq_file').files&&$('pq_file').files[0];if(!f)return toast('Choose a file');
+  const body={pharmacyName:$('pq_name').value.trim()||undefined,tenantId:$('pq_tenant').value||undefined,
+    validFrom:$('pq_from').value||undefined,validUntil:$('pq_until').value||undefined,label:$('pq_label').value.trim()||undefined};
+  try{
+    if(/\.xlsx$/i.test(f.name))body.table=await xlsxTable(await f.arrayBuffer());else body.csv=await f.text();
+  }catch(e){return toast('Could not read file: '+e.message);}
+  $('pq_status').textContent='Importing…';
+  const r=await fetch('/api/platform/pharmacy-quotes/import',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok){$('pq_status').innerHTML=`<span style="color:var(--bad)">${esc(o.message||o.error||'Failed')}${o.detail?': '+esc(o.detail):''}</span>`;return;}
+  $('pq_status').innerHTML=`Imported <b>${o.accepted}</b> prices`+(o.duplicatesInFile?` · ${o.duplicatesInFile} duplicate rows merged`:'')
+    +(o.rejectedCount?` · <span style="color:var(--bad)">${o.rejectedCount} rows rejected</span> (${esc(o.rejected.slice(0,3).map(x=>`line ${x.line}: ${x.reason}`).join('; '))}${o.rejectedCount>3?'…':''})`:'');
+  $('pq_file').value='';pqLoad();
+}
+async function pqDelete(id){
+  if(!confirm('Remove this whole upload? Comparisons stop using its prices.'))return;
+  const r=await fetch(`/api/platform/pharmacy-quotes/uploads/${encodeURIComponent(id)}`,{method:'DELETE',headers:H()});
+  toast(r.ok?'Removed':'Failed');pqLoad();
+}
+async function pqAccuracy(){
+  const r=await fetch('/api/platform/pharmacy-pricing/quote-accuracy',{headers:H()});const o=await r.json().catch(()=>({}));
+  if(!r.ok){$('pq_acc').innerHTML=`<p class="muted">${esc(o.message||o.error||'Failed')}</p>`;return;}
+  if(!o.pairs){$('pq_acc').innerHTML=`<p class="muted">Nothing to compare yet — no quoted item has been billed by a linked pharmacy (${o.quotesWithoutBilledComparison} quotes waiting for billing data).</p>`;return;}
+  $('pq_acc').innerHTML=`<p style="margin:4px 0">${o.pairs} quote/bill pairs · mean variance <b>${o.overall.meanVariancePercent}%</b> · mean absolute <b>${o.overall.meanAbsVariancePercent}%</b> · within ±10%: <b>${o.overall.withinTenPercent}%</b></p>`
+    +`<table><thead><tr><th>Pharmacy</th><th>Items</th><th>Mean variance</th><th>Mean abs. variance</th><th>Within ±10%</th></tr></thead><tbody>`
+    +o.pharmacies.map(p=>`<tr><td>${esc(p.pharmacyName)}</td><td>${p.itemsCompared}</td><td>${p.meanVariancePercent}%</td><td>${p.meanAbsVariancePercent}%</td><td>${p.withinTenPercent}%</td></tr>`).join('')+'</tbody></table>'
+    +`<p class="muted" style="font-size:12px">Positive variance = the pharmacy has been billing more than it quoted.</p>`;
+}
+const _pqBoot=window.smsBoot;window.smsBoot=function(){if(_pqBoot)_pqBoot();pqLoad();};

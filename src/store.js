@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS campaign_sends (id text PRIMARY KEY, campaign_id text
 CREATE INDEX IF NOT EXISTS idx_campaign_sends_campaign ON campaign_sends(campaign_id);
 CREATE TABLE IF NOT EXISTS sms_log (id text PRIMARY KEY, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_sms_log_provider ON sms_log((data->>'providerMessageId'));
+CREATE TABLE IF NOT EXISTS pharmacy_quotes (id text PRIMARY KEY, upload_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_pharmacy_quotes_upload ON pharmacy_quotes(upload_id);
 CREATE TABLE IF NOT EXISTS sms_inbox (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 -- Public trial sign-ups (register.html / routes/registerPortal.js), whether
 -- from the campaign "YES" reply link or a direct visit to /register/.
@@ -376,6 +378,11 @@ function pgRepo(exec) {
       listByCampaign: (campaignId) => many('SELECT data FROM campaign_sends WHERE campaign_id=$1 ORDER BY created_at', [campaignId]),
       listSentByPhone: (phoneNormalized) => many(
         "SELECT data FROM campaign_sends WHERE status='sent' AND data->>'phoneNormalized'=$1 ORDER BY created_at DESC", [phoneNormalized]),
+    },
+    pharmacyQuotes: {
+      insert: (q) => exec(upsert('pharmacy_quotes', ['upload_id']), [q.id, q.uploadId, q]),
+      all: (limit = 50000) => many('SELECT data FROM pharmacy_quotes ORDER BY created_at DESC LIMIT $1', [limit]),
+      deleteByUpload: async (uploadId) => (await exec('DELETE FROM pharmacy_quotes WHERE upload_id=$1', [uploadId])).rowCount || 0,
     },
     smsLog: {
       insert: (m) => exec(upsert('sms_log', ['status']), [m.id, m.status, m]),
@@ -645,6 +652,13 @@ function memRepo(M) {
       listSentByPhone: async (phoneNormalized) =>
         list(M.campaignSends, (s) => s.status === 'sent' && s.phoneNormalized === phoneNormalized).reverse(),
     },
+    pharmacyQuotes: {
+      insert: async (q) => { M.pharmacyQuotes.set(q.id, q); },
+      all: async (limit = 50000) => [...M.pharmacyQuotes.values()].reverse().slice(0, limit),
+      deleteByUpload: async (uploadId) => {
+        let n = 0; for (const [k, v] of M.pharmacyQuotes) if (v.uploadId === uploadId) { M.pharmacyQuotes.delete(k); n++; } return n;
+      },
+    },
     smsLog: {
       insert: async (m) => { M.smsLog.set(m.id, m); },
       update: async (m) => { M.smsLog.set(m.id, m); },
@@ -729,7 +743,7 @@ if (usePg) {
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(),
     funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);

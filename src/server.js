@@ -36,7 +36,7 @@ const claimExpiry = require('./services/claimExpiry');
 const settlementBatches = require('./services/settlementBatches');
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '4mb' })); // 4mb: price-list uploads (up to 20k rows) arrive as JSON
 const PUBLIC = path.join(__dirname, '..', 'public');
 
 app.get('/', (req, res) => res.redirect('/app/dashboard.html'));

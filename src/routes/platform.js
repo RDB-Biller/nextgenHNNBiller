@@ -35,6 +35,7 @@ const settlementBatches = require('../services/settlementBatches');
 const settlement = require('../services/settlement');
 const funders = require('../services/funders');
 const pharmacyPricing = require('../services/pharmacyPricing');
+const pharmacyQuotes = require('../services/pharmacyQuotes');
 const reconciliation = require('../services/reconciliation');
 const smsDashboard = require('../services/smsDashboard');
 const solutions = require('../services/solutions');
@@ -616,6 +617,41 @@ router.get('/pharmacy-pricing/compare', async (req, res, next) => {
 router.get('/pharmacy-pricing/overview', async (req, res, next) => {
   try { res.json({ data: await pharmacyPricing.pharmacyOverview() }); }
   catch (e) { next(e); }
+});
+
+// Unified comparison: billed (real bills) and/or quoted (uploaded price lists) prices side by side.
+router.get('/pharmacy-pricing/unified', async (req, res, next) => {
+  try {
+    const { code, name, sinceDays, source, basis, quoteMaxAgeDays } = req.query;
+    res.json(await pharmacyPricing.compareUnified({ code, name, source: source || 'side_by_side', basis: basis || 'latest',
+      sinceDays: sinceDays ? Number(sinceDays) : undefined, quoteMaxAgeDays: quoteMaxAgeDays ? Number(quoteMaxAgeDays) : undefined }));
+  } catch (e) { next(e); }
+});
+
+// Does each pharmacy actually charge what it quoted? (needs both a quote and real bills)
+router.get('/pharmacy-pricing/quote-accuracy', async (req, res, next) => {
+  try { res.json(await pharmacyPricing.quoteAccuracy({ sinceDays: req.query.sinceDays ? Number(req.query.sinceDays) : undefined })); }
+  catch (e) { next(e); }
+});
+
+// ---- Pharmacy price lists (quotations), uploaded before any billing exists ----
+// Body: { pharmacyName?, tenantId?, validFrom?, validUntil?, label?, csv?: "text" | table?: [[...],[...]] }.
+// The XLSX is read in the browser and sent as `table`; CSV can be sent as raw text.
+router.get('/pharmacy-quotes', async (req, res, next) => {
+  try { res.json({ uploads: await pharmacyQuotes.listUploads(), pharmacies: await pharmacyQuotes.summary() }); }
+  catch (e) { next(e); }
+});
+router.get('/pharmacy-quotes/template.csv', (req, res) => {
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="pharmacy-price-list-template.csv"');
+  res.send(pharmacyQuotes.TEMPLATE);
+});
+router.post('/pharmacy-quotes/import', async (req, res, next) => {
+  try { res.status(201).json(await pharmacyQuotes.importQuotes({ ...(req.body || {}), by: req.principal?.id || 'HNN' })); }
+  catch (e) { next(e); }
+});
+router.delete('/pharmacy-quotes/uploads/:id', async (req, res, next) => {
+  try { res.json(await pharmacyQuotes.deleteUpload(req.params.id)); } catch (e) { next(e); }
 });
 
 // ---- HNN-settlement reconciliation (distinguishing HNN-settled items from --

@@ -17,6 +17,8 @@ const solutions = require('../src/services/solutions');
 const claimsAutomation = require('../src/services/claimsAutomation');
 const claimExpiry = require('../src/services/claimExpiry');
 const funders = require('../src/services/funders');
+const pharmacyQuotes = require('../src/services/pharmacyQuotes');
+const pharmacyPricing = require('../src/services/pharmacyPricing');
 
 let a = 0;
 const ok = (cond, label) => {
@@ -243,9 +245,85 @@ async function solutionChecks() {
   await rejects(async () => require('../src/services/incentives').compute(await store.products.get(pc.id), {}), 422, 'incentive engine refuses solution products (no accidental accrual)');
 }
 
+// ---- prospective pricing: uploaded quotations next to real billed prices ------
+
+async function quoteChecks() {
+  // parsing
+  const t = pharmacyQuotes.parseCsv('﻿pharmacy;item;price\r\n"Delta, Main";"Amoxicillin ""500""";GHS 22,00\r\n');
+  ok(t.length === 2 && t[1][0] === 'Delta, Main' && t[1][1] === 'Amoxicillin "500"', 'CSV parser handles BOM, CRLF, semicolons and quoted fields');
+  ok(pharmacyQuotes.parsePrice('GHS 1,250.50') === 1250.5 && pharmacyQuotes.parsePrice('22,00') === 22 && Number.isNaN(pharmacyQuotes.parsePrice('abc')), 'price parsing handles currency text, thousands and decimal commas');
+
+  await rejects(() => pharmacyQuotes.importQuotes({ csv: 'item,price\nAmoxicillin,20' }), 422, 'a file with no pharmacy column needs a pharmacy name');
+  await rejects(() => pharmacyQuotes.importQuotes({ pharmacyName: 'X', csv: 'foo,bar,baz,qux\n1,2,3,4' }), 422, 'unrecognised columns are rejected with guidance');
+  await rejects(() => pharmacyQuotes.importQuotes({ pharmacyName: 'X', csv: 'item,price\nAmox,abc\n,5' }), 422, 'a file with no valid rows is rejected');
+
+  // a pharmacy that is NOT a client yet (prospective)
+  const up1 = await pharmacyQuotes.importQuotes({ pharmacyName: 'Delta Pharmacy', csv: 'item,price,code\nAmoxicillin,22,AMOXICILLIN\nParacetamol,3.5,PARACETAMOL\nVitamin C,8,\nBadRow,abc,\nAmoxicillin,22.5,AMOXICILLIN' });
+  ok(up1.accepted === 3 && up1.duplicatesInFile === 1 && up1.rejectedCount === 1 && up1.rejected[0].reason === 'invalid_price', 'import accepts valid rows, merges in-file duplicates (last wins) and reports rejects');
+  // a client pharmacy, linked, whose quote differs from what it bills
+  await pharmacyQuotes.importQuotes({ pharmacyName: 'Alpha Pharmacy', tenantId: 'ph_a', table: [['Drug', 'Unit Price', 'Code'], ['Amoxicillin', '18', 'AMOXICILLIN'], ['Paracetamol', '5', 'PARACETAMOL'], ['Ibuprofen', '6', '']] });
+  // one file, several pharmacies (spreadsheet path: table with a pharmacy column)
+  await pharmacyQuotes.importQuotes({ table: [['Pharmacy', 'Medicine', 'Price'], ['Epsilon Rx', 'Amoxicillin', '30'], ['Zeta Rx', 'Amoxicillin', '19']] });
+  const sum = await pharmacyQuotes.summary();
+  ok(sum.length === 4 && sum.find((x) => x.pharmacyName === 'Alpha Pharmacy').linkedTenantId === 'ph_a', 'summary lists every quoting pharmacy and its client link');
+
+  // comparison modes
+  const q = await pharmacyPricing.compareUnified({ name: 'Amoxicillin', code: 'AMOXICILLIN', source: 'quotes' });
+  ok(q.rows.length === 4 && q.rows[0].name === 'Alpha Pharmacy' && q.rows[1].name === 'Zeta Rx' && q.rows.every((r) => r.priceSource === 'quoted'), 'quotes-only ranks quoted prices (works before any billing)');
+  const cl = await pharmacyPricing.compareUnified({ name: 'Amoxicillin', code: 'AMOXICILLIN', source: 'claims' });
+  ok(cl.rows.length === 3 && cl.rows.every((r) => r.priceSource === 'billed' && !r.quoted), 'claims-only ignores quotations entirely');
+  const best = await pharmacyPricing.compareUnified({ name: 'Amoxicillin', code: 'AMOXICILLIN', source: 'best_available' });
+  const alpha = best.rows.find((r) => r.tenantId === 'ph_a');
+  const delta = best.rows.find((r) => r.name === 'Delta Pharmacy');
+  ok(alpha.priceSource === 'billed' && alpha.price === 20 && delta.priceSource === 'quoted' && delta.price === 22.5, 'best_available prefers a billed price over the same pharmacy\'s quote, and falls back to the quote otherwise');
+  ok(alpha.billed.price === 20 && alpha.quoted.price === 18 && alpha.variancePercent === 11.11, 'a pharmacy with both shows billed vs quote variance (+11.11% = billed above quote)');
+  ok(delta.tenantId === null && delta.variancePercent === null, 'a quote-only pharmacy has no tenant id and no variance');
+
+  // through the solution, on every surface
+  const sp = await products.create('acacia', { type: 'solution', name: 'Quotes + claims', config: { module: 'pharmacy_compare', title: 'Compare', params: { priceSource: 'side_by_side', anonymisePharmacies: true } } });
+  await products.setStatus(sp.id, 'sandbox'); await products.setStatus(sp.id, 'live');
+  const pay = await solutions.run(sp.id, 'payer', { payerId: 'acacia', input: { items: 'Amoxicillin\nParacetamol' } });
+  ok(pay.result.basket.comparable === 3 && pay.result.basket.cheapest.name === 'Alpha Pharmacy' && pay.result.basket.cheapest.total === 25, 'basket mixes billed and quoted prices; Alpha (billed 20+5) is cheapest of 3 comparable');
+  const dRow = pay.result.items[0].pharmacies.find((r) => r.name === 'Delta Pharmacy');
+  ok(dRow.priceSource === 'quoted' && dRow.quotedPrice === 22.5 && dRow.billedPrice === null, 'side_by_side marks the quote-only pharmacy as quoted');
+  const aRow = pay.result.items[0].pharmacies.find((r) => r.name === 'Alpha Pharmacy');
+  ok(aRow.variancePercent === 11.11 && pay.result.analytics.quoteVsBilled.pairs >= 1 && pay.result.analytics.quotedSharePercent > 0, 'payer sees variance and quote-vs-billed analytics');
+  const pat = await solutions.run(sp.id, 'patient', { input: { items: 'Amoxicillin\nParacetamol' } });
+  const pj = JSON.stringify(pat);
+  ok(!pj.includes('Alpha Pharmacy') && !pj.includes('Delta Pharmacy') && !pj.includes('variancePercent') && !pj.includes('ph_a') && !pj.includes('quoteVsBilled'), 'patient view hides pharmacy names, ids and variance/accuracy internals');
+  ok(pat.result.items[0].pharmacies.some((r) => r.priceSource === 'quoted') && pat.result.items[0].pharmacies.some((r) => r.priceSource === 'billed'), 'patients are told which prices are quotations and which are billed');
+  const ibu = await solutions.run(sp.id, 'payer', { payerId: 'acacia', input: { items: 'Ibuprofen' } });
+  ok(ibu.result.items[0].observed === 1 && ibu.result.basket.comparable === 1, 'a medicine only quoted (never billed) is still comparable');
+  await products.setStatus(sp.id, 'sandbox');
+  await products.update(sp.id, { config: { params: { priceSource: 'claims' } } });
+  await products.setStatus(sp.id, 'live');
+  const onlyClaims = await solutions.run(sp.id, 'payer', { payerId: 'acacia', input: { items: 'Ibuprofen' } });
+  ok(onlyClaims.result.notFound[0] === 'Ibuprofen', 'switching the solution to claims-only makes the quote-only medicine disappear (parameter-driven)');
+  await products.setStatus(sp.id, 'sandbox');
+
+  // accuracy over time
+  const acc = await pharmacyPricing.quoteAccuracy();
+  const aa = acc.pharmacies.find((p) => p.tenantId === 'ph_a');
+  ok(acc.pairs === 2 && aa.itemsCompared === 2 && aa.meanVariancePercent === 5.56 && aa.withinTenPercent === 50, 'quote accuracy compares each linked quote with billed average (Alpha: +11.11% and 0%)');
+  ok(acc.quotesWithoutBilledComparison >= 5, 'quotes with no billing data yet are counted as waiting, not guessed');
+
+  // expiry + removal
+  const old = await pharmacyQuotes.importQuotes({ pharmacyName: 'Old Rx', csv: 'item,price\nAmoxicillin,1', validFrom: '2020-01-01', validUntil: '2020-12-31' });
+  ok(!(await pharmacyPricing.compareUnified({ name: 'Amoxicillin', source: 'quotes' })).rows.some((r) => r.name === 'Old Rx'), 'an expired quote is ignored');
+  const fresh = await pharmacyQuotes.importQuotes({ pharmacyName: 'Soon Rx', csv: 'item,price\nAmoxicillin,1', validFrom: new Date(Date.now() + 5 * 86400000).toISOString() });
+  ok(!(await pharmacyPricing.compareUnified({ name: 'Amoxicillin', source: 'quotes' })).rows.some((r) => r.name === 'Soon Rx'), 'a quote not yet valid is ignored');
+  await pharmacyQuotes.deleteUpload(fresh.uploadId); await pharmacyQuotes.deleteUpload(old.uploadId);
+  await rejects(() => pharmacyQuotes.deleteUpload('nope'), 404, 'removing an unknown upload -> 404');
+  await pharmacyQuotes.deleteUpload(up1.uploadId);
+  ok(!(await pharmacyQuotes.summary()).some((x) => x.pharmacyName === 'Delta Pharmacy'), 'removing an upload removes its prices from comparison');
+  const newer = await pharmacyQuotes.importQuotes({ pharmacyName: 'Zeta Rx', csv: 'item,price\nAmoxicillin,21' });
+  ok((await pharmacyPricing.compareUnified({ name: 'Amoxicillin', source: 'quotes' })).rows.find((r) => r.name === 'Zeta Rx').price === 21 && newer.accepted === 1, 'a newer upload supersedes the older quote for the same pharmacy and item');
+}
+
 (async () => {
   await store.init();
   await smsChecks();
   await solutionChecks();
+  await quoteChecks();
   console.log(`\n${a} assertions${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);
 })().catch((e) => { console.error(e); process.exit(1); });

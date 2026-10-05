@@ -597,15 +597,40 @@
         <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="linkPayerFunder()">Link</button></div>
       </div>
     </div>
+    <div class="card" style="margin-bottom:14px" id="pq_card">
+      <h2>Pharmacy price lists <span class="muted" style="font-size:12px;font-weight:400">— quotations, before any billing exists</span></h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Upload a pharmacy's price list (CSV or Excel) so comparison works from day one. Quotes are shown as <b>quoted</b> and never mixed into real <b>billed</b> prices; as bills arrive, the comparison below shows both and how far each pharmacy's billing is from its quote. Columns: <i>item</i> (or drug/medicine), <i>price</i>, optionally <i>code</i>, <i>unit</i>, and <i>pharmacy</i> if one file covers several. <a href="#" onclick="pqTemplate();return false">Download template</a></p>
+      <div class="row">
+        <div class="field"><label>Pharmacy name <span class="muted" style="font-weight:400">not needed if the file has a pharmacy column</span></label><input id="pq_name" placeholder="Alpha Pharmacy"/></div>
+        <div class="field"><label>Link to client <span class="muted" style="font-weight:400">optional</span></label><select id="pq_tenant"><option value="">— not a client yet —</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Valid from</label><input id="pq_from" type="date"/></div>
+        <div class="field"><label>Valid until <span class="muted" style="font-weight:400">optional</span></label><input id="pq_until" type="date"/></div>
+        <div class="field"><label>Label <span class="muted" style="font-weight:400">optional</span></label><input id="pq_label" placeholder="Q4 2026 list"/></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>File (.csv, .xlsx, .tsv)</label><input type="file" id="pq_file" accept=".csv,.tsv,.txt,.xlsx"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="pqImport()">Import price list</button></div>
+      </div>
+      <p class="muted" id="pq_status" style="font-size:13px"></p>
+      <div id="pq_list"></div>
+    </div>
     <div class="card" style="margin-bottom:14px">
       <h2>Cross-pharmacy price comparison</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">Built from HNN's own real billing history at tenants classified as a pharmacy (set a client's facility type on the Clients tab) — never an invented price.</p>
+      <p class="muted" style="margin-top:0;font-size:13px"><b>Billed</b> prices come from HNN's own real billing history at clients classified as a pharmacy (Clients tab); <b>quoted</b> prices come from the uploaded price lists above. Nothing is ever invented.</p>
       <div class="row">
         <div class="field"><label>Medicine (code or name)</label><input id="pp_item" placeholder="Coartem"/></div>
         <div class="field"><label>Since (days)</label><input id="pp_days" type="number" placeholder="90"/></div>
+        <div class="field"><label>Show</label><select id="pp_source"><option value="side_by_side">Billed and quoted side by side</option><option value="claims">Billed only (claims)</option><option value="quotes">Quoted only</option></select></div>
         <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="comparePharmacyPrices()">Compare</button></div>
       </div>
       <div id="pp_out" style="margin-top:10px"></div>
+      <div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
+        <button class="ghost mini" onclick="pqAccuracy()">Quote accuracy report</button>
+        <span class="muted" style="font-size:12px">Do pharmacies actually charge what they quoted? Needs a quote linked to a client that has billed.</span>
+        <div id="pq_acc" style="margin-top:8px"></div>
+      </div>
     </div>
     <div class="card">
       <h2>HNN-settlement reconciliation <span class="muted" style="font-size:12px;font-weight:400">— vs. the regular RX report</span></h2>
@@ -1594,17 +1619,20 @@ async function linkPayerFunder(){
 async function comparePharmacyPrices(){
   const item=$('pp_item').value.trim(); if(!item)return toast('Enter a medicine code or name');
   const sinceDays=$('pp_days').value||90;
-  const r=await fetch(`/api/platform/pharmacy-pricing/compare?name=${encodeURIComponent(item)}&sinceDays=${encodeURIComponent(sinceDays)}`,{headers:H()});
+  const src=$('pp_source').value;
+  const r=await fetch(`/api/platform/pharmacy-pricing/unified?code=${encodeURIComponent(item)}&name=${encodeURIComponent(item)}&sinceDays=${encodeURIComponent(sinceDays)}&source=${src}`,{headers:H()});
   const o=await r.json().catch(()=>({}));
   if(!r.ok){$('pp_out').innerHTML='';return toast('Failed: '+(o.message||o.error||r.status));}
-  if(o.note==='no_pharmacy_tenants_classified'){$('pp_out').innerHTML='<p class="muted">No clients are classified as a pharmacy yet — set facility type on the Clients tab.</p>';return;}
-  const rows=o.pharmacies||[];
+  const rows=o.rows||[];
+  const tag=(t)=>t==='quoted'?'<span class="pill open">quoted</span>':'<span class="pill settled">billed</span>';
   $('pp_out').innerHTML=(o.reference?`<p class="muted" style="font-size:12px">Catalog reference: ${esc(o.reference.name)} — ${n2(o.reference.price)} (${esc(o.reference.source)})</p>`:'')+
-    (rows.length?`<table><thead><tr><th>Pharmacy</th><th>Latest</th><th>Average</th><th>Lowest</th><th>Highest</th><th>Samples</th></tr></thead><tbody>`+
-      rows.map(p=>`<tr><td>${esc(p.tenantName)}</td><td>${n2(p.latestPrice)}</td><td>${n2(p.averagePrice)}</td><td>${n2(p.lowestPrice)}</td><td>${n2(p.highestPrice)}</td><td>${p.sampleCount}</td></tr>`).join('')+`</tbody></table>`
-      :'<p class="muted">No recent bills for this item at a classified pharmacy.</p>');
+    (rows.length?`<table><thead><tr><th>Pharmacy</th><th>Price</th><th>Basis</th><th>Billed (latest / avg / n)</th><th>Quoted</th><th>Billed vs quote</th></tr></thead><tbody>`+
+      rows.map(p=>`<tr><td>${esc(p.name)}${p.tenantId?'':' <span class="muted" style="font-size:11px">(not a client)</span>'}</td><td>${n2(p.price)}</td><td>${tag(p.priceSource)}</td>
+        <td>${p.billed?`${n2(p.billed.latest)} / ${n2(p.billed.average)} / ${p.billed.observations}`:'—'}</td>
+        <td>${p.quoted?`${n2(p.quoted.price)} <span class="muted" style="font-size:11px">${esc(String(p.quoted.uploadedAt).slice(0,10))}</span>`:'—'}</td>
+        <td>${p.variancePercent==null?'—':(p.variancePercent>0?'+':'')+p.variancePercent+'%'}</td></tr>`).join('')+`</tbody></table>`
+      :'<p class="muted">No prices for this item yet — upload a price list above, or wait for a classified pharmacy to bill it.</p>');
 }
-
 // ---- HNN-settlement reconciliation ----
 function reconciliationParams(){
   const qs=new URLSearchParams();

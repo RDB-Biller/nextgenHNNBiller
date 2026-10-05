@@ -12,7 +12,7 @@ const SolUI=(()=>{
     if(d.basket)h+=`<p style="margin:8px 0 4px"><b>Basket total</b> <span class="muted" style="font-size:12px">(pharmacies with a recent price for every item)</span></p>`
       +table(d.basket.all,[['name','Pharmacy'],['total','Total (GHS)',r=>n2(r.total)]]);
     h+=d.items.map(it=>`<p style="margin:12px 0 4px"><b>${esc(it.query)}</b>${it.reference?` <span class="muted" style="font-size:12px">NHIS reference GHS ${n2(it.reference.price)}</span>`:''}</p>`
-      +table(it.pharmacies,[['name','Pharmacy'],['price','Price (GHS)',r=>n2(r.price)],['lastSeen','Last seen',r=>String(r.lastSeen||'').slice(0,10)]])).join('');
+      +table(it.pharmacies,[['name','Pharmacy'],['price','Price (GHS)',r=>n2(r.price)],['priceSource','Based on',r=>r.priceSource==='quoted'?'pharmacy quotation':'recent bills'],['lastSeen','Updated',r=>String(r.lastSeen||'').slice(0,10)]])).join('');
     if(d.notFound.length)h+=`<p class="muted" style="font-size:13px;margin-top:10px">No recent prices found for: ${d.notFound.map(esc).join(', ')}</p>`;
     return h+`<p class="muted" style="font-size:12px;margin-top:8px">Based on what pharmacies charged in the last ${d.sinceDays} days. Prices change — confirm before paying.</p>`;
   }

@@ -206,17 +206,20 @@ const MODULES = {
 
   pharmacy_compare: {
     label: 'Pharmacy price comparison',
-    description: 'Real, observed prices for the same medicines across pharmacies, with a basket total so a patient (or an insurer advising one) can pick the cheapest complete option.',
+    description: 'Prices for the same medicines across pharmacies — what they quoted (uploaded price lists) and what they have actually billed — with a basket total so a patient (or an insurer advising one) can pick the cheapest complete option.',
     scope: 'none',
     surfaces: ['patient', 'hospital', 'payer'],
     params: [
-      { key: 'sinceDays', label: 'Only prices seen in the last (days)', type: 'number', min: 7, max: 365, default: 90 },
-      { key: 'minSamples', label: 'Min. observations per pharmacy', type: 'number', min: 1, max: 20, default: 1 },
+      { key: 'priceSource', label: 'Price source', type: 'select', options: ['best_available', 'claims', 'quotes', 'side_by_side'], default: 'best_available',
+        help: 'claims = real billed prices only; quotes = uploaded price lists only; best_available = billed where seen, else quoted; side_by_side = best_available plus both numbers and the variance.' },
+      { key: 'sinceDays', label: 'Billed prices seen in the last (days)', type: 'number', min: 7, max: 365, default: 90 },
+      { key: 'quoteMaxAgeDays', label: 'Ignore quotes older than (days)', type: 'number', min: 7, max: 730, default: 180 },
+      { key: 'minSamples', label: 'Min. billed observations per pharmacy', type: 'number', min: 1, max: 20, default: 1 },
       { key: 'maxPharmacies', label: 'Pharmacies shown per medicine', type: 'number', min: 1, max: 20, default: 5 },
-      { key: 'priceBasis', label: 'Price basis', type: 'select', options: ['latest', 'average'], default: 'latest' },
+      { key: 'priceBasis', label: 'Billed price basis', type: 'select', options: ['latest', 'average'], default: 'latest' },
       { key: 'showReference', label: 'Show official NHIS reference price', type: 'boolean', default: true },
       { key: 'advise', label: 'Show plain-language recommendation', type: 'boolean', default: true },
-      { key: 'anonymisePharmacies', label: 'Hide pharmacy names (insurer-only reveal)', type: 'boolean', default: false,
+      { key: 'anonymisePharmacies', label: 'Hide pharmacy names from patients', type: 'boolean', default: false,
         help: 'When on, patient-facing results say "Pharmacy A/B/C"; hospital and payer surfaces still see names.' },
     ],
     async apply() { return null; },
@@ -225,59 +228,71 @@ const MODULES = {
       const raw = Array.isArray(input?.items) ? input.items : String(input?.items ?? input?.q ?? '').split(/[\n,;]+/);
       const queries = raw.map((s) => String(s || '').trim().slice(0, 80)).filter(Boolean).slice(0, 10);
       if (!queries.length) throw err(422, 'items_required');
-      const basis = p.priceBasis === 'average' ? 'averagePrice' : 'latestPrice';
       const items = [];
       for (const q of queries) {
-        const cmp = await pharmacyPricing.compareItem({ code: q, name: q, sinceDays: p.sinceDays });
-        const rows = cmp.pharmacies.filter((r) => r.sampleCount >= p.minSamples).sort((a, b) => a[basis] - b[basis]);
-        const lo = rows[0]?.[basis]; const hi = rows[rows.length - 1]?.[basis];
-        items.push({
-          query: q, reference: p.showReference ? cmp.reference : null, observed: rows.length,
-          spreadPercent: rows.length > 1 && lo > 0 ? round2(((hi - lo) / lo) * 100) : null,
-          _rows: rows,
-        });
+        const cmp = await pharmacyPricing.compareUnified({ code: q, name: q, sinceDays: p.sinceDays, source: p.priceSource, basis: p.priceBasis,
+          minSamples: p.minSamples, quoteMaxAgeDays: p.quoteMaxAgeDays });
+        const rows = cmp.rows;
+        const lo = rows[0]?.price; const hi = rows[rows.length - 1]?.price;
+        items.push({ query: q, reference: p.showReference ? cmp.reference : null, observed: rows.length,
+          spreadPercent: rows.length > 1 && lo > 0 ? round2(((hi - lo) / lo) * 100) : null, _rows: rows });
       }
       // Basket: only pharmacies with a price for EVERY requested medicine are comparable like-for-like.
       const baskets = new Map();
       for (const it of items) for (const r of it._rows) {
-        if (!baskets.has(r.tenantId)) baskets.set(r.tenantId, { tenantId: r.tenantId, tenantName: r.tenantName, total: 0, count: 0 });
-        const b = baskets.get(r.tenantId); b.total += r[basis]; b.count++;
+        if (!baskets.has(r.key)) baskets.set(r.key, { key: r.key, tenantId: r.tenantId, name: r.name, total: 0, count: 0, quotedItems: 0 });
+        const b = baskets.get(r.key); b.total += r.price; b.count++; if (r.priceSource === 'quoted') b.quotedItems++;
       }
       const complete = [...baskets.values()].filter((b) => b.count === items.length)
         .map((b) => ({ ...b, total: round2(b.total) })).sort((a, b) => a.total - b.total);
       const names = new Map();
-      const label = (tenantId, tenantName) => {
-        if (!(p.anonymisePharmacies && ctx.surface === 'patient')) return tenantName;
-        if (!names.has(tenantId)) names.set(tenantId, `Pharmacy ${String.fromCharCode(65 + names.size)}`);
-        return names.get(tenantId);
+      const label = (key, name) => {
+        if (!(p.anonymisePharmacies && ctx.surface === 'patient')) return name;
+        if (!names.has(key)) names.set(key, `Pharmacy ${String.fromCharCode(65 + names.size)}`);
+        return names.get(key);
       };
       const showId = ctx.surface !== 'patient';
+      const idOf = (x) => (showId ? { tenantId: x.tenantId, pharmacyKey: x.key } : {});
       const outItems = items.map((it) => ({
         query: it.query, reference: it.reference, observed: it.observed, spreadPercent: it.spreadPercent,
         pharmacies: it._rows.slice(0, p.maxPharmacies).map((r) => ({
-          ...(showId ? { tenantId: r.tenantId } : {}), name: label(r.tenantId, r.tenantName),
-          price: r[basis], lowest: r.lowestPrice, highest: r.highestPrice, observations: r.sampleCount, lastSeen: r.latestBilledAt,
+          ...idOf(r), name: label(r.key, r.name), price: r.price, priceSource: r.priceSource,
+          ...(p.priceSource === 'side_by_side' ? {
+            billedPrice: r.billed ? r.billed.price : null, quotedPrice: r.quoted ? r.quoted.price : null,
+            ...(showId ? { variancePercent: r.variancePercent } : {}) } : {}),
+          lowest: r.billed ? r.billed.lowest : null, highest: r.billed ? r.billed.highest : null,
+          observations: r.billed ? r.billed.observations : 0, lastSeen: r.billed ? r.billed.lastSeen : (r.quoted ? r.quoted.uploadedAt : null),
         })),
       }));
+      const last = complete[complete.length - 1];
       const basket = complete.length ? {
         comparable: complete.length,
-        cheapest: { ...(showId ? { tenantId: complete[0].tenantId } : {}), name: label(complete[0].tenantId, complete[0].tenantName), total: complete[0].total },
-        mostExpensive: { name: label(complete[complete.length - 1].tenantId, complete[complete.length - 1].tenantName), total: complete[complete.length - 1].total },
-        savings: round2(complete[complete.length - 1].total - complete[0].total),
-        savingsPercent: complete[complete.length - 1].total > 0
-          ? round2(((complete[complete.length - 1].total - complete[0].total) / complete[complete.length - 1].total) * 100) : 0,
-        all: complete.slice(0, p.maxPharmacies).map((b) => ({ ...(showId ? { tenantId: b.tenantId } : {}), name: label(b.tenantId, b.tenantName), total: b.total })),
+        cheapest: { ...idOf(complete[0]), name: label(complete[0].key, complete[0].name), total: complete[0].total, quotedItems: complete[0].quotedItems },
+        mostExpensive: { name: label(last.key, last.name), total: last.total },
+        savings: round2(last.total - complete[0].total),
+        savingsPercent: last.total > 0 ? round2(((last.total - complete[0].total) / last.total) * 100) : 0,
+        all: complete.slice(0, p.maxPharmacies).map((b) => ({ ...idOf(b), name: label(b.key, b.name), total: b.total, quotedItems: b.quotedItems })),
       } : null;
       const missing = items.filter((i) => !i.observed).map((i) => i.query);
+      const priced = items.flatMap((i) => i._rows);
+      const quotedShare = priced.length ? round2((priced.filter((r) => r.priceSource === 'quoted').length / priced.length) * 100) : 0;
       let advice = null;
       if (p.advise) {
-        if (basket && basket.comparable > 1) advice = `For this list, ${basket.cheapest.name} has been the cheapest at GHS ${basket.cheapest.total.toFixed(2)} — about GHS ${basket.savings.toFixed(2)} (${basket.savingsPercent}%) less than the dearest comparable pharmacy. Prices are what pharmacies recently charged and can change; confirm before paying.`;
-        else if (basket) advice = `Only one pharmacy has recent prices for every item on this list (${basket.cheapest.name}, GHS ${basket.cheapest.total.toFixed(2)}), so there is nothing to compare it with yet.`;
-        else advice = 'No single pharmacy has recent prices for every item, so a complete basket can\'t be compared. Per-medicine prices are shown below.';
+        const basisNote = basket && basket.cheapest.quotedItems
+          ? ' Some prices are pharmacy quotations, not yet confirmed by real bills.' : '';
+        if (basket && basket.comparable > 1) advice = `For this list, ${basket.cheapest.name} has been the cheapest at GHS ${basket.cheapest.total.toFixed(2)} — about GHS ${basket.savings.toFixed(2)} (${basket.savingsPercent}%) less than the dearest comparable pharmacy.${basisNote} Prices can change; confirm before paying.`;
+        else if (basket) advice = `Only one pharmacy has a price for every item on this list (${basket.cheapest.name}, GHS ${basket.cheapest.total.toFixed(2)}), so there is nothing to compare it with yet.${basisNote}`;
+        else advice = 'No single pharmacy has a price for every item, so a complete basket can\'t be compared. Per-medicine prices are shown below.';
       }
-      return { sinceDays: p.sinceDays, priceBasis: p.priceBasis, items: outItems, basket, notFound: missing, advice,
-        analytics: { medicines: items.length, withPrices: items.length - missing.length,
-          widestSpreadPercent: Math.max(0, ...items.map((i) => i.spreadPercent || 0)) } };
+      const both = priced.filter((r) => r.variancePercent != null);
+      const analytics = { medicines: items.length, withPrices: items.length - missing.length,
+        widestSpreadPercent: Math.max(0, ...items.map((i) => i.spreadPercent || 0)), quotedSharePercent: quotedShare };
+      if (ctx.surface !== 'patient') {
+        analytics.quoteVsBilled = both.length ? { pairs: both.length,
+          meanVariancePercent: round2(both.reduce((s, r) => s + r.variancePercent, 0) / both.length),
+          meanAbsVariancePercent: round2(both.reduce((s, r) => s + Math.abs(r.variancePercent), 0) / both.length) } : null;
+      }
+      return { priceSource: p.priceSource, sinceDays: p.sinceDays, priceBasis: p.priceBasis, items: outItems, basket, notFound: missing, advice, analytics };
     },
   },
 
