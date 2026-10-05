@@ -913,6 +913,7 @@ router.get('/metrics-library', (req, res) => {
 router.get('/products', async (req, res, next) => {
   try {
     let data = req.query.payerId ? await products.listByPayer(req.query.payerId) : await products.all();
+    if (!Array.isArray(data)) data = [];
     if (req.query.type) data = data.filter((p) => p.type === req.query.type);
     res.json({ data });
   } catch (e) { next(e); }

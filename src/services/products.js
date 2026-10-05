@@ -191,8 +191,14 @@ async function get(id) {
   return p;
 }
 
-const all = () => store.products.all();
-const listByPayer = (payerId) => store.products.listByPayer(payerId);
+const all = async () => {
+  if (!store.products) return [];
+  return await store.products.all();
+};
+const listByPayer = async (payerId) => {
+  if (!store.products) return [];
+  return await store.products.listByPayer(payerId);
+};
 
 module.exports = {
   TYPES, STATUSES,
