@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Composite Billing & Settlement Platform
-  version: 0.3.0
+  version: 0.4.0
   description: >
     The platform never custodies funds — it orchestrates, routes, and reconciles.
     Bills are settled by patient self-pay (to the clinic) or by a payer (insurer OR
@@ -340,11 +340,172 @@ paths:
         '401': { description: bad_signature }
         '422': { description: missing_from_or_text }
 
+  # ---- Solutions (configurable policy/analytics products built in Product Lab) ----
+  /api/v1/solutions:
+    get:
+      summary: Live solutions available to this hospital (surface = hospital)
+      security: [{ TenantKey: [] }]
+      responses: { '200': { description: 'data[] of solution views' } }
+  /api/v1/solutions/{id}/run:
+    post:
+      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId in input is ignored.
+      security: [{ TenantKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
+      responses: { '200': { description: Module result }, '404': { description: solution_not_found } }
+  /api/payer/solutions:
+    get:
+      summary: Live solutions applied to / available for this payer
+      security: [{ PayerKey: [] }]
+      responses: { '200': { description: 'data[] of solution views' } }
+  /api/payer/solutions/{id}/run:
+    post:
+      summary: Run a solution for the calling payer
+      security: [{ PayerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
+      responses: { '200': { description: Module result } }
+  /solutions/api:
+    get:
+      summary: Public list of live patient-facing solutions (no key; rate limited to 30 requests/min/IP)
+      responses: { '200': { description: 'data[]' }, '429': { description: rate_limited } }
+  /solutions/api/{id}:
+    get:
+      summary: Public view of one live patient-facing solution (404 unless status is live and the patient surface is enabled)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: solution_not_found } }
+  /solutions/api/{id}/run:
+    post:
+      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them; ids and variance are never returned.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
+      responses: { '200': { description: Patient-safe result }, '429': { description: rate_limited } }
+  /api/platform/solutions/modules:
+    get:
+      summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing, multi_funder, pharmacy_compare, reconciliation) with config schemas, plus funders
+      security: [{ PlatformKey: [] }]
+      responses: { '200': { description: OK } }
+  /api/platform/solutions/{id}/run:
+    post:
+      summary: Run any solution from Master Control (sandbox or live)
+      security: [{ PlatformKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Module result } }
+
+  # ---- SMS Dashboard (Master Control -> Messaging) ----
+  /api/platform/sms/overview:
+    get:
+      summary: Sandbox/live state, provider, 1000-per-request cap, callback URLs and analytics
+      security: [{ PlatformKey: [] }]
+      responses: { '200': { description: OK } }
+  /api/platform/sms/parse:
+    post:
+      summary: Validate pasted or uploaded numbers (normalises to +233, removes duplicates) without sending
+      security: [{ PlatformKey: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { numbers: { type: string } } } } } }
+      responses: { '200': { description: '{ valid, invalid[], duplicates, sample[] }' } }
+  /api/platform/sms/send:
+    post:
+      summary: Bulk send (max 1000 recipients per request, sent in chunks of 500, opted-out numbers skipped)
+      security: [{ PlatformKey: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [message, numbers], properties: { message: { type: string, maxLength: 1600 }, numbers: { type: string, description: 'Comma, semicolon or newline separated' } } } } }
+      responses: { '200': { description: '{ batchId, mode, requested, accepted, failed, skippedOptOut, invalid[], duplicatesRemoved, error }' }, '422': { description: 'message_required | message_too_long | no_valid_numbers | too_many_recipients_max_1000' } }
+  /api/platform/sms/logs:
+    get:
+      summary: Message log with search and pagination
+      security: [{ PlatformKey: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [sent, sandbox, delivered, failed, skipped_optout] } }
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer, maximum: 200 } }
+      responses: { '200': { description: '{ total, page, pages, pageSize, data[] }' } }
+  /api/platform/sms/logs.csv:
+    get: { summary: Export the (filtered) log as CSV, security: [{ PlatformKey: [] }], responses: { '200': { description: text/csv } } }
+  /api/platform/sms/inbox:
+    get: { summary: Inbound replies with search and pagination, security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+  /api/platform/sms/analytics:
+    get: { summary: 'Totals, delivery rate, cost, opt-outs and a daily series (?days=14)', security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+  /api/platform/sms/rotate-secret:
+    post: { summary: 'Rotate the secret in the callback URLs (old URLs stop working immediately)', security: [{ PlatformKey: [] }], responses: { '200': { description: New hookUrls } } }
+  /api/platform/sms/optouts:
+    get: { summary: List opted-out numbers, security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+    post:
+      summary: Add an opted-out number
+      security: [{ PlatformKey: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { phoneNumber: { type: string } } } } } }
+      responses: { '200': { description: OK }, '422': { description: invalid_phone } }
+  /api/platform/sms/optouts/{phone}:
+    delete:
+      summary: Remove an opted-out number
+      security: [{ PlatformKey: [] }]
+      parameters: [{ name: phone, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /sms-hooks/{secret}/delivery:
+    post:
+      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret in the path; wrong secret returns a bare 404.
+      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { id: { type: string }, status: { type: string }, phoneNumber: { type: string }, networkCode: { type: string }, failureReason: { type: string } } } } } }
+      responses: { '200': { description: '{ ok, matched, status }' }, '404': { description: unknown secret } }
+  /sms-hooks/{secret}/inbox:
+    post:
+      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical, campaign and verification reply handlers
+      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { from: { type: string }, text: { type: string }, to: { type: string }, id: { type: string }, linkId: { type: string }, date: { type: string } } } } } }
+      responses: { '200': { description: '{ ok, id }' }, '404': { description: unknown secret } }
+    get: { summary: "Probe used by Africa's Talking when saving the URL", parameters: [{ name: secret, in: path, required: true, schema: { type: string } }], responses: { '200': { description: '{ ok: true }' } } }
+  /sms-hooks/{secret}/optout:
+    post:
+      summary: Africa's Talking opt-out callback (form-urlencoded)
+      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { phoneNumber: { type: string } } } } } }
+      responses: { '200': { description: '{ ok, optedOut }' } }
+
+  # ---- Pharmacy price comparison: billed prices (claims) vs quoted prices (uploaded price lists) ----
+  /api/platform/pharmacy-pricing/unified:
+    get:
+      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available, or side by side. variance% = (billed - quoted) / quoted x 100.
+      security: [{ PlatformKey: [] }]
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: name, in: query, schema: { type: string } }
+        - { name: source, in: query, schema: { type: string, enum: [claims, quotes, best_available, side_by_side], default: side_by_side } }
+        - { name: basis, in: query, schema: { type: string, default: latest } }
+        - { name: sinceDays, in: query, schema: { type: integer } }
+        - { name: quoteMaxAgeDays, in: query, schema: { type: integer } }
+      responses: { '200': { description: OK } }
+  /api/platform/pharmacy-pricing/quote-accuracy:
+    get:
+      summary: Does each pharmacy bill what it quoted? Needs both a quote and real bills.
+      security: [{ PlatformKey: [] }]
+      parameters: [{ name: sinceDays, in: query, schema: { type: integer } }]
+      responses: { '200': { description: OK } }
+  /api/platform/pharmacy-quotes:
+    get: { summary: 'Uploaded price lists and a per-pharmacy summary', security: [{ PlatformKey: [] }], responses: { '200': { description: '{ uploads[], pharmacies[] }' } } }
+  /api/platform/pharmacy-quotes/template.csv:
+    get: { summary: CSV template for a price list, security: [{ PlatformKey: [] }], responses: { '200': { description: text/csv } } }
+  /api/platform/pharmacy-quotes/import:
+    post:
+      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX is read in the browser). Quotes are append-only; validFrom/validUntil bound their use.
+      security: [{ PlatformKey: [] }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { pharmacyName: { type: string }, tenantId: { type: string }, validFrom: { type: string, format: date }, validUntil: { type: string, format: date }, label: { type: string }, csv: { type: string }, table: { type: array, items: { type: array, items: {} } } } } } }
+      responses: { '201': { description: Import summary }, '422': { description: Validation error } }
+  /api/platform/pharmacy-quotes/uploads/{id}:
+    delete:
+      summary: Remove an uploaded price list
+      security: [{ PlatformKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
 components:
   securitySchemes:
     TenantKey: { type: apiKey, in: header, name: x-api-key }
     PayerKey: { type: apiKey, in: header, name: x-payer-key }
     AdminKey: { type: apiKey, in: header, name: x-admin-key }
+    PlatformKey: { type: apiKey, in: header, name: x-platform-key }
   schemas:
     CreateBill:
       type: object
