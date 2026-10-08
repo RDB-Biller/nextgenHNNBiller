@@ -69,7 +69,7 @@ function createBill(input) {
     id: `bill_${crypto.randomBytes(8).toString('hex')}`,
     createdAt: new Date().toISOString(),
     status: 'open', // open -> awaiting_payer | paid -> settled | rejected
-    settlementMethod: null, // patient_momo | patient_card | cash | payer_a2a
+    settlementMethod: null, // patient_momo | patient_card | cash | payer_a2a | insurecredit
     provider, patient, routing, currency: 'GHS', lineItems,
     // The payer the patient named (insurer or employer) + policy/sponsor info.
     coverage: {

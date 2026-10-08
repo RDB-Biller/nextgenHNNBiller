@@ -31,13 +31,13 @@ info:
     Check your own entitlement any time with `GET /api/v1/bills/edition`.
 
 
-    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+    **Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`
 
 
     _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
     to the ledger as receivables._'
 servers:
-- url: https://nextgenhnnbiller-production.up.railway.app
+- url: https://nextgenhnnbiller-production-bdf1.up.railway.app
   description: Production
 - url: http://localhost:3000
   description: Local

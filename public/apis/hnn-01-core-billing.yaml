@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: HNN Biller — Core Billing API
-  version: 1.0.0
+  version: 1.1.0
   description: 'Create itemised bills, take patient payment (Mobile Money, card, cash), and read the clinic
     dashboard. Available on **every** edition — this is the baseline any EMR/EHR can integrate against.
 
@@ -30,13 +30,13 @@ info:
     Check your own entitlement any time with `GET /api/v1/bills/edition`.
 
 
-    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`
+    **Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`
 
 
     _The platform never custodies funds: money moves account-to-account to the provider; fees are accrued
     to the ledger as receivables._'
 servers:
-- url: https://nextgenhnnbiller-production.up.railway.app
+- url: https://nextgenhnnbiller-production-bdf1.up.railway.app
   description: Production
 - url: http://localhost:3000
   description: Local
@@ -190,20 +190,20 @@ paths:
               - items
       responses:
         '201':
-          description: 'Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable).
-            A verification link is generated and sent to the patient automatically — the response
-            includes patientVerification:{status,link,channelsSent,channelErrors?} as a one-time snapshot
-            (not persisted onto the bill; the live record is read at GET /verify/api/{token}). See the
-            Payer & Claims API for how a payer can require verification before authorising. If this client
-            has SMS and/or WhatsApp verification enabled (see the Master Control API''s /api/platform/clients/{id}/verification-channels),
+          description: Bill with computed totals (subtotal, discount, net, payerShare, cashback, patientPayable).
+            A verification link is generated and sent to the patient automatically — the response includes
+            patientVerification:{status,link,channelsSent,channelErrors?} as a one-time snapshot (not
+            persisted onto the bill; the live record is read at GET /verify/api/{token}). See the Payer
+            & Claims API for how a payer can require verification before authorising. If this client has
+            SMS and/or WhatsApp verification enabled (see the Master Control API's /api/platform/clients/{id}/verification-channels),
             the same message also goes out on those channels with a one-time reply code the patient can
             text back instead of opening the link; channelErrors.sms / channelErrors.whatsapp report a
             specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported)
-            for any enabled channel that did not go out, so a missing channel is explained rather than just
-            absent from channelsSent. While the server is in sandbox mode, nothing above is ever sent for
-            real and the response also includes otpCodeSandbox so this can be demoed without a phone — see
-            the Messaging endpoints on the Master Control API for how a real provider is configured and
-            activated.'
+            for any enabled channel that did not go out, so a missing channel is explained rather than
+            just absent from channelsSent. While the server is in sandbox mode, nothing above is ever
+            sent for real and the response also includes otpCodeSandbox so this can be demoed without
+            a phone — see the Messaging endpoints on the Master Control API for how a real provider is
+            configured and activated.
     get:
       tags:
       - Bills
@@ -272,10 +272,10 @@ paths:
       tags:
       - Bills
       summary: Resend the patient's verification link
-      description: For hospital staff to nudge a patient who hasn't responded yet — reuses the same
-        token/link, so anywhere it was already shared stays valid. A previously disputed record is
-        reset to pending first, so a fresh look is possible once whatever was disputed has been
-        corrected. Counts and timestamps the reminder (remindersSent, lastRemindedAt).
+      description: For hospital staff to nudge a patient who hasn't responded yet — reuses the same token/link,
+        so anywhere it was already shared stays valid. A previously disputed record is reset to pending
+        first, so a fresh look is possible once whatever was disputed has been corrected. Counts and timestamps
+        the reminder (remindersSent, lastRemindedAt).
       security:
       - TenantKey: []
       parameters:
@@ -288,8 +288,8 @@ paths:
       responses:
         '200':
           description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox
-            while the server is in sandbox mode — reissuing re-sends on whichever channels are enabled and
-            generates a fresh reply code, invalidating any earlier one. channelErrors.sms / channelErrors.whatsapp
+            while the server is in sandbox mode — reissuing re-sends on whichever channels are enabled
+            and generates a fresh reply code, invalidating any earlier one. channelErrors.sms / channelErrors.whatsapp
             report a specific failure code for any enabled channel that did not go out this time.'
         '404':
           description: bill_not_found / verification_not_found
@@ -322,10 +322,10 @@ paths:
       tags:
       - Clinical
       summary: Manually record one clinical indicator for a patient (Value-Based-Care)
-      description: The tenant-authenticated counterpart to an EMR/EHR partner's own feed — for a clinic with no
-        EMR integration, or simply keying in today's reading by hand. Same validation and shape as the partner
-        feed; stored with source:manual_hospital. See the Product Lab tag in the Master Control API for the full
-        metric/condition list and how these feed Value-Based-Care scoring.
+      description: The tenant-authenticated counterpart to an EMR/EHR partner's own feed — for a clinic
+        with no EMR integration, or simply keying in today's reading by hand. Same validation and shape
+        as the partner feed; stored with source:manual_hospital. See the Product Lab tag in the Master
+        Control API for the full metric/condition list and how these feed Value-Based-Care scoring.
       security:
       - TenantKey: []
       requestBody:
@@ -349,8 +349,8 @@ paths:
                   - hypertension
                   - diabetes
                   - dyslipidemia
-                  description: Required if type is complication or followup_visit; blood_pressure/hba1c/ldl infer
-                    their condition automatically.
+                  description: Required if type is complication or followup_visit; blood_pressure/hba1c/ldl
+                    infer their condition automatically.
                 type:
                   type: string
                   enum:
@@ -384,8 +384,8 @@ paths:
       tags:
       - Clinical
       summary: This clinic's own manually-recorded observations for one member
-      description: Scoped to what THIS clinic recorded by hand (source:manual_hospital) — the EMR feed and other
-        clinics' entries for the same member aren't returned here.
+      description: Scoped to what THIS clinic recorded by hand (source:manual_hospital) — the EMR feed
+        and other clinics' entries for the same member aren't returned here.
       security:
       - TenantKey: []
       parameters:
@@ -409,11 +409,11 @@ paths:
       tags:
       - Clinical
       summary: Text a patient a code to set up their own check-ins by phone
-      description: 'Starts the same OTP phone<->member link a patient can self-initiate at the public /clinical/
-        portal — a clinic can kick it off during a visit, but the patient still has to confirm the code themselves
-        (reply with it, or enter it at /clinical/) before anything can be submitted from their side. Once active,
-        the patient can text in readings any time (e.g. "BP 130/85", "HBA1C 6.8", "LDL 110", "COMPLICATION",
-        "FOLLOWUP") or use the web page; STOP opts out immediately, from anyone.'
+      description: Starts the same OTP phone<->member link a patient can self-initiate at the public /clinical/
+        portal — a clinic can kick it off during a visit, but the patient still has to confirm the code
+        themselves (reply with it, or enter it at /clinical/) before anything can be submitted from their
+        side. Once active, the patient can text in readings any time (e.g. "BP 130/85", "HBA1C 6.8", "LDL
+        110", "COMPLICATION", "FOLLOWUP") or use the web page; STOP opts out immediately, from anyone.
       security:
       - TenantKey: []
       requestBody:
@@ -447,8 +447,8 @@ paths:
                   default: sms
       responses:
         '201':
-          description: '{ id, status: "pending", payerId, memberId, condition }. Never echoes the code — it only
-            goes to the patient''s phone.'
+          description: '{ id, status: "pending", payerId, memberId, condition }. Never echoes the code
+            — it only goes to the patient''s phone.'
         '404':
           description: unknown_payer
         '422':
@@ -503,11 +503,11 @@ paths:
     get:
       tags:
       - Dashboard
-      summary: Totals, recent bills, claims, notifications, and the pending patient-verification
-        follow-up queue
-      description: 'totals.pendingVerification is a count; pendingVerifications is the list (oldest
-        first) — each with patientName, provider, amount, status (pending|disputed), disputeReason,
-        and the verify link. Excludes anything already verified.'
+      summary: Totals, recent bills, claims, notifications, and the pending patient-verification follow-up
+        queue
+      description: totals.pendingVerification is a count; pendingVerifications is the list (oldest first)
+        — each with patientName, provider, amount, status (pending|disputed), disputeReason, and the verify
+        link. Excludes anything already verified.
       security:
       - TenantKey: []
       responses:
@@ -554,21 +554,21 @@ paths:
       - Bills
       summary: Inbound SMS/WhatsApp reply — bill verification, or a clinical check-in (x-webhook-secret)
       description: 'Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
-        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. Tried as a clinical
-        check-in FIRST (see /api/v1/clinical-observations/link below and GET clinical-observations tag) — a
-        keyword-led reading (e.g. "BP 130/85"), STOP, or HELP, or a bare numeric code unambiguously matching a
-        pending clinical link. Anything that isn''t falls straight through to bill-verification handling, unchanged:
-        a bare YES/CONFIRM/OK confirms only when exactly one verification is pending for that phone; otherwise the
-        patient can send the numeric reply code from their message instead, matched only within that phone''s own
-        pending verifications. A phone that has never used the clinical check-in feature sees no behaviour change
-        at all. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a
-        provider-specific request signature.'
+        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. Tried as a
+        clinical check-in FIRST (see /api/v1/clinical-observations/link below and GET clinical-observations
+        tag) — a keyword-led reading (e.g. "BP 130/85"), STOP, or HELP, or a bare numeric code unambiguously
+        matching a pending clinical link. Anything that isn''t falls straight through to bill-verification
+        handling, unchanged: a bare YES/CONFIRM/OK confirms only when exactly one verification is pending
+        for that phone; otherwise the patient can send the numeric reply code from their message instead,
+        matched only within that phone''s own pending verifications. A phone that has never used the clinical
+        check-in feature sees no behaviour change at all. Secured the same way as /api/v1/webhooks/collection
+        — a shared secret header, not a provider-specific request signature.'
       responses:
         '200':
-          description: '{ ok: true, outcome, verificationId, clinicalLinkId }. Bill-verification outcomes: confirmed,
-            ambiguous, wrong_code, locked, no_match, unrecognized. Clinical outcomes: recorded, confirmed, revoked,
-            help, wrong_code, locked, expired, no_match. Exactly one of verificationId/clinicalLinkId is set,
-            depending on which flow handled the message.'
+          description: '{ ok: true, outcome, verificationId, clinicalLinkId }. Bill-verification outcomes:
+            confirmed, ambiguous, wrong_code, locked, no_match, unrecognized. Clinical outcomes: recorded,
+            confirmed, revoked, help, wrong_code, locked, expired, no_match. Exactly one of verificationId/clinicalLinkId
+            is set, depending on which flow handled the message.'
         '401':
           description: bad_signature
         '422':
@@ -673,3 +673,54 @@ paths:
       responses:
         '200':
           description: '{ count:{total,nhis,demo}, data:[{code,name,category,price,unit,level}] }'
+  /api/v1/bills/{id}/insurecredit:
+    post:
+      summary: 'InsureCredit as a means of settlement: text the patient a micro-loan offer (up to GHS
+        2,000) for their share of this bill. Resend with {resend:true}. An approved loan covering the
+        share settles the bill (settlementMethod insurecredit).'
+      tags:
+      - Bills
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                resend:
+                  type: boolean
+      responses:
+        '201':
+          description: Offer created (applicationNo, link, sentVia, loanableAmount, overCap)
+        '404':
+          description: bill_not_found or default_insurecredit_missing
+        '409':
+          description: insurecredit_not_live
+        '422':
+          description: amount_invalid, patient_phone_required, amount_below_minimum
+    get:
+      summary: InsureCredit status for this bill (offered, status, approvedAmount, billStatus)
+      tags:
+      - Bills
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Status
+        '404':
+          description: bill_not_found

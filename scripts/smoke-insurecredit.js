@@ -341,5 +341,43 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   const os = (await runH(story.id, tenant, { action: 'offer', billId: billS.id })).result;
   ok(sms.length === smsBeforeS && os.sentVia.includes('sms') && os.sendResults.sms.sandbox === true, 'with messaging in sandbox, a live product still creates the application but nothing reaches the network');
 
+  // ===== 18. default product + InsureCredit as a means of settlement ==============================
+  await operatingMode.set({ messaging: { sandbox: false } });
+  const s18_dp = await credit.ensureDefaultProduct();
+  ok(s18_dp && s18_dp.name === credit.DEFAULT_NAME && s18_dp.status === 'live' && s18_dp.config.module === 'insurecredit', 'a default InsureCredit solution is created live');
+  const s18_dp2 = await credit.ensureDefaultProduct();
+  ok(s18_dp2.id === s18_dp.id, 'the default is created once, never duplicated');
+  await products.setStatus(s18_dp.id, 'sandbox');
+  ok((await credit.ensureDefaultProduct()).status === 'sandbox', 'an admin who pauses the default is not overridden');
+  await rejects(() => credit.offerAsSettlement({ tenant, billId: 'x' }), 409, 'a paused default cannot be offered');
+  await products.setStatus(s18_dp.id, 'live');
+  const s18_billD = await mkBill(T, { cost: 600, phone: '0244000321', copay: 100 });
+  const s18_smsD = sms.length;
+  const s18_od = await credit.offerAsSettlement({ tenant, billId: s18_billD.id });
+  ok(s18_od.applicationNo && s18_od.link && sms.length === s18_smsD + 1, 'settlement tab: texts the patient an offer for their share');
+  const s18_stD = await credit.settlementStatus(await store.bills.get(s18_billD.id));
+  ok(s18_stD.offered && s18_stD.status === 'offered' && s18_stD.billStatus === 'open', 'settlement status reports the offer, bill still open');
+  const s18_tokD = (await store.credits.byAppNo(s18_od.applicationNo)).token;
+  await credit.consent(s18_tokD, { scoring: true }); await credit.apply(s18_tokD, {});
+  await credit.recordDecision(s18_od.applicationNo, { decision: 'approved' });
+  const s18_billDa = await store.bills.get(s18_billD.id);
+  ok(s18_billDa.status === 'settled' && s18_billDa.settlementMethod === 'insurecredit', 'an approved loan covering the share settles the bill as insurecredit');
+  ok((await store.ledger.listByBill(s18_billD.id)).some((e) => e.type === 'insurecredit_loan' && e.cashMovement === false), 'the ledger records the loan with no cash movement booked');
+  const s18_billP = await mkBill(T, { cost: 600, phone: '0244000322', copay: 100 });
+  const s18_op = await credit.offerAsSettlement({ tenant, billId: s18_billP.id });
+  const s18_tokP = (await store.credits.byAppNo(s18_op.applicationNo)).token;
+  await credit.consent(s18_tokP, { scoring: true }); await credit.apply(s18_tokP, {});
+  await credit.recordDecision(s18_op.applicationNo, { decision: 'approved', approvedAmount: 200 });
+  const s18_billPa = await store.bills.get(s18_billP.id);
+  ok(s18_billPa.status !== 'settled' && s18_billPa.insurecredit.approvedAmount === 200, 'a part-approval does not settle the bill');
+  const s18_billQ = await mkBill(T, { cost: 600, phone: '0244000323', copay: 100 });
+  const s18_oq = await credit.offerAsSettlement({ tenant, billId: s18_billQ.id });
+  const s18_tokQ = (await store.credits.byAppNo(s18_oq.applicationNo)).token;
+  await credit.consent(s18_tokQ, { scoring: true }); await credit.apply(s18_tokQ, {});
+  await credit.recordDecision(s18_oq.applicationNo, { decision: 'declined' });
+  ok((await store.bills.get(s18_billQ.id)).status !== 'settled', 'a declined loan leaves the bill open');
+  await rejects(async () => credit.offerAsSettlement({ tenant: await store.tenants.get('tenant_nyaho'), billId: s18_billD.id }), 404, "a hospital cannot offer on another hospital's bill");
+  await operatingMode.set({ messaging: { sandbox: true } });
+
   console.log(`\nINSURECREDIT + MESSAGING CHECK: ${a} assertions${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);
 })().catch((e) => { console.error(e); process.exit(1); });

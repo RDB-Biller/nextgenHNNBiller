@@ -380,6 +380,16 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
       responses: { '200': { description: Patient-safe result }, '429': { description: rate_limited } }
+  /api/v1/bills/{id}/insurecredit:
+    post:
+      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS 2000) for their share of this bill. An approved loan covering the share settles the bill (settlementMethod insurecredit).
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { amount: { type: number }, resend: { type: boolean } } } } } }
+      responses: { '201': { description: Offer created }, '409': { description: insurecredit_not_live }, '422': { description: amount_invalid or patient_phone_required } }
+    get:
+      summary: InsureCredit status for this bill
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Status } }
   /api/platform/solutions/modules:
     get:
       summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing, multi_funder, pharmacy_compare, reconciliation, insurecredit) with config schemas, plus funders

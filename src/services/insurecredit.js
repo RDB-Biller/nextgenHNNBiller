@@ -8,6 +8,7 @@ const messaging = require('./messaging');
 const email = require('./email');
 const medicalReport = require('./medicalReport');
 const { notify } = require('./notifications');
+const ledger = require('./ledger');
 
 /**
  * InsureCredit -- micro-loans for the patient's out-of-pocket share.
@@ -541,6 +542,80 @@ async function shareView(shareToken) {
   };
 }
 
+
+// ---- the default InsureCredit product + "means of settlement" -----------------------
+
+const DEFAULT_NAME = 'InsureCredit (default)';
+
+/**
+ * Make sure the platform ships with one ready-to-use InsureCredit solution: live, every
+ * hospital, every setting at its default. Created once -- if an admin later edits,
+ * pauses or renames it we never recreate or revive it. It is what the "InsureCredit"
+ * settlement tab on the billing terminal uses.
+ */
+async function ensureDefaultProduct() {
+  const products = require('./products'); // lazy: products -> solutions -> this file
+  const all = await store.products.all();
+  const found = all.find((x) => x.type === 'solution' && x.config?.module === 'insurecredit' && x.name === DEFAULT_NAME);
+  if (found) return found;
+  const payers = await store.payers.all();
+  const sponsor = payers.find((x) => x.id === 'cosmopolitan') || payers[0];
+  if (!sponsor) return null;
+  const created = await products.create(sponsor.id, { type: 'solution', name: DEFAULT_NAME,
+    description: 'Default micro-loan settlement option shown on the billing terminal.',
+    config: { module: 'insurecredit', params: {}, surfaces: ['patient', 'hospital', 'payer'] } }, 'system');
+  await products.setStatus(created.id, 'sandbox', 'system');
+  return products.setStatus(created.id, 'live', 'system');
+}
+
+async function defaultProduct() {
+  const all = await store.products.all();
+  return all.find((x) => x.type === 'solution' && x.config?.module === 'insurecredit' && x.name === DEFAULT_NAME) || null;
+}
+
+/** Billing terminal: offer InsureCredit as the way to settle this bill. */
+async function offerAsSettlement({ tenant, billId, amount, resend: again }) {
+  const product = await defaultProduct();
+  if (!product) throw err(404, 'default_insurecredit_missing', 'no default InsureCredit solution exists');
+  if (product.status !== 'live') throw err(409, 'insurecredit_not_live', 'the default InsureCredit solution is not live');
+  const r = await createOffer({ product, ctx: { surface: 'hospital', tenant, payerId: product.payerId, product }, input: { billId, amount, resend: !!again } });
+  if (r.applicationNo) {
+    const app = await store.credits.byAppNo(r.applicationNo);
+    if (app && !app.settlement) { app.settlement = { billId: app.billId, viaTerminal: true }; await store.credits.update(app); }
+    const bill = await store.bills.get(app.billId);
+    if (bill && !bill.insurecredit) { bill.insurecredit = { applicationNo: app.appNo, status: 'offered' }; await store.bills.update(bill); }
+  }
+  return r;
+}
+
+/** Where is InsureCredit for this bill? (the terminal polls this) */
+async function settlementStatus(bill) {
+  const apps = await store.credits.byBill(bill.id);
+  const a = apps.sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))[0];
+  if (!a) return { offered: false, billStatus: bill.status };
+  return { offered: true, applicationNo: a.appNo, status: a.status, amount: a.amount, loanableAmount: a.loanable, overCap: a.overCap,
+    approvedAmount: a.decision?.approvedAmount ?? null, billStatus: bill.status, settlementMethod: bill.settlementMethod || null, to: maskPhone(a.patient?.phone) };
+}
+
+/** An approved loan that covers the patient's share settles the bill (money is disbursed by ConfirmU, so no cash movement is booked here). */
+async function settleBillOnApproval(app) {
+  if (!app.settlement || app.decision?.decision !== 'approved') return null;
+  return store.tx(async (t) => {
+    const bill = await t.bills.get(app.billId, { forUpdate: true });
+    if (!bill) return null;
+    bill.insurecredit = { applicationNo: app.appNo, status: 'approved', approvedAmount: app.decision.approvedAmount };
+    const covers = app.decision.approvedAmount + 0.005 >= round2(bill.totals.patientPayable);
+    if (covers && ['open', 'awaiting_payer'].includes(bill.status)) {
+      bill.status = 'settled'; bill.settlementMethod = 'insurecredit';
+      await t.ledger.insert(ledger.entry({ tenantId: bill.tenantId, billId: bill.id, type: 'insurecredit_loan',
+        source: { kind: 'lender', name: 'ConfirmU (InsureCredit)' }, amount: app.decision.approvedAmount, currency: bill.currency,
+        cashMovement: false, refs: { applicationNo: app.appNo, reference: app.decision.reference || null } }));
+    }
+    await t.bills.update(bill);
+    return bill;
+  });
+}
+
 // ---- scorer callbacks -----------------------------------------------------------
 
 async function recordDecision(appNoRaw, { decision, approvedAmount, reference, reason } = {}) {
@@ -556,6 +631,8 @@ async function recordDecision(appNoRaw, { decision, approvedAmount, reference, r
     reason: reason ? String(reason).slice(0, 200) : null, at: now() };
   addEvent(app, `decision_${d}`, { reference: app.decision.reference });
   await store.credits.update(app);
+  const settledBill = await settleBillOnApproval(app);
+  if (settledBill) addEvent(app, settledBill.status === 'settled' ? 'bill_settled' : 'bill_part_covered', { billId: settledBill.id });
   const tenant = await store.tenants.get(app.tenantId);
   const product = await productOf(app);
   const text = d === 'approved'
@@ -711,5 +788,6 @@ module.exports = {
   HARD_CAP, PARAMS, check, DESIGNS, SMS_STYLES, CONSENT_TEXT,
   getSettings, rotateSecret, checkSecret, hookUrls, parseAppNo, loanable, renderSms,
   createOffer, view, consent, apply, share, revokeShare, shareView, recordDecision, verifyByAppNo, ussd,
+  ensureDefaultProduct, defaultProduct, offerAsSettlement, settlementStatus, DEFAULT_NAME,
   list, run, patientStatus, runAutoSend, publicView, verificationPacket, _setPostImplForTests,
 };

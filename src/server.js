@@ -113,7 +113,7 @@ app.use('/api/v1', institutionsRoutes);
 app.use(errorHandler);
 
 if (require.main === module) {
-  store.init().then(() => campaigns.ensureSeedGroup()).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
+  store.init().then(() => campaigns.ensureSeedGroup()).then(() => insurecredit.ensureDefaultProduct().catch((e) => console.error('[insurecredit] default product:', e.message))).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
     const rail = (sandbox) => (sandbox ? 'sandbox' : 'LIVE');
     console.log(`Composite Billing Platform on :${config.port} `
       + `(settlement=${rail(mode.settlement.sandbox)}, messaging=${rail(mode.messaging.sandbox)}`

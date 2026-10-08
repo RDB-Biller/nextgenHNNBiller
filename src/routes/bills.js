@@ -10,6 +10,7 @@ const payerSlots = require('../services/payerSlots');
 const editions = require('../services/editions');
 const networks = require('../services/networks');
 const catalog = require('../services/catalog');
+const insurecredit = require('../services/insurecredit');
 
 const router = express.Router();
 async function ownBill(req) {
@@ -90,6 +91,22 @@ router.get('/:id', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try { res.json({ data: await store.bills.listByTenant(req.tenant.id) }); }
   catch (e) { next(e); }
+});
+
+// InsureCredit as a means of settlement: text the patient a micro-loan offer for their share of this bill.
+router.post('/:id/insurecredit', async (req, res, next) => {
+  try {
+    const bill = await ownBill(req);
+    if (!bill) return res.status(404).json({ error: 'bill_not_found' });
+    res.status(201).json(await insurecredit.offerAsSettlement({ tenant: req.tenant, billId: bill.id, amount: req.body?.amount, resend: req.body?.resend === true }));
+  } catch (e) { next(e); }
+});
+router.get('/:id/insurecredit', async (req, res, next) => {
+  try {
+    const bill = await ownBill(req);
+    if (!bill) return res.status(404).json({ error: 'bill_not_found' });
+    res.json(await insurecredit.settlementStatus(bill));
+  } catch (e) { next(e); }
 });
 
 router.post('/:id/route', async (req, res, next) => {

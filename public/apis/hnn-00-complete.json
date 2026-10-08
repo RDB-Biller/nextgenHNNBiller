@@ -1,13 +1,13 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "HNN Biller \u2014 Complete API",
-    "version": "1.0.0",
-    "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip \u2014 no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production.up.railway.app`"
+    "title": "HNN Biller — Complete API",
+    "version": "1.1.0",
+    "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`"
   },
   "servers": [
     {
-      "url": "https://nextgenhnnbiller-production.up.railway.app"
+      "url": "https://nextgenhnnbiller-production-bdf1.up.railway.app"
     },
     {
       "url": "http://localhost:3000"
@@ -207,7 +207,7 @@
                     "properties": {
                       "copayPercent": {
                         "type": "number",
-                        "description": "Patient share of net (0 = payers cover all). Explicit \u2014 no implicit default."
+                        "description": "Patient share of net (0 = payers cover all). Explicit — no implicit default."
                       },
                       "cashbackPercent": {
                         "type": "number"
@@ -326,7 +326,7 @@
         "tags": [
           "Bills"
         ],
-        "summary": "List this clinic\u2019s bills",
+        "summary": "List this clinic’s bills",
         "security": [
           {
             "TenantKey": []
@@ -417,7 +417,7 @@
             "description": "Single: { claim, payerLink, mode:\"single\" }. Split: { claims:[{claimId,payerId,payerName,amount,payerLink}], split, mode:\"split\" }."
           },
           "403": {
-            "description": "payer_not_available (another facility\u2019s slot)"
+            "description": "payer_not_available (another facility’s slot)"
           },
           "422": {
             "description": "invalid_split / split_amounts_do_not_match_payer_share / missing_member_id / unknown_payer"
@@ -827,7 +827,7 @@
                     },
                     "repriced": {
                       "type": "boolean",
-                      "description": "True if the payer\u2019s approved price list governed this claim"
+                      "description": "True if the payer’s approved price list governed this claim"
                     }
                   }
                 }
@@ -1022,7 +1022,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       },
@@ -1096,7 +1096,7 @@
             "description": "Created"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           },
           "422": {
             "description": "nhisAmount_required / provider_required"
@@ -1138,7 +1138,7 @@
             "description": "{ received, created, duplicates, errors[] }"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1159,7 +1159,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1191,7 +1191,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1201,7 +1201,7 @@
         "tags": [
           "ClaimIt"
         ],
-        "summary": "Record the refund received \u2192 cashback + margin",
+        "summary": "Record the refund received → cashback + margin",
         "security": [
           {
             "TenantKey": []
@@ -1237,10 +1237,10 @@
         },
         "responses": {
           "200": {
-            "description": "Idempotent \u2014 replaying returns the same record"
+            "description": "Idempotent — replaying returns the same record"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1272,7 +1272,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1306,7 +1306,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1370,7 +1370,7 @@
             "description": "Created"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1402,7 +1402,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1488,7 +1488,7 @@
                   },
                   "partPayment": {
                     "type": "number",
-                    "description": "hospital_credit only \u2014 paid now, remainder on credit"
+                    "description": "hospital_credit only — paid now, remainder on credit"
                   },
                   "reportId": {
                     "type": "string"
@@ -1503,7 +1503,7 @@
             "description": "Created"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           },
           "409": {
             "description": "request_in_progress"
@@ -1538,7 +1538,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1570,7 +1570,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1591,7 +1591,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1623,7 +1623,7 @@
             "description": "OK"
           },
           "402": {
-            "description": "upgrade_required \u2014 this feature needs the commercial edition"
+            "description": "upgrade_required — this feature needs the commercial edition"
           }
         }
       }
@@ -1676,7 +1676,7 @@
           "Revenue rules"
         ],
         "summary": "Rule types, modes, caps, allowed charge targets",
-        "description": "Drive your own configuration UI from this \u2014 caps and targets are authoritative and enforced server-side.",
+        "description": "Drive your own configuration UI from this — caps and targets are authoritative and enforced server-side.",
         "security": [
           {
             "ConsoleKey": []
@@ -1733,7 +1733,7 @@
           "Revenue rules"
         ],
         "summary": "Program a rule",
-        "description": "Percentage rules: `expedited_settlement` (cap 15%), `discount_fee` (cap 15%), `claimit_margin` (cap 100% of cashback) \u2014 send `rate` (0\u20131 or 0\u2013100; clamped to the cap).\n\nFlat \"other charges\": `report_fee_mini`, `report_fee_standard` \u2014 send `amount` in GHS.",
+        "description": "Percentage rules: `expedited_settlement` (cap 15%), `discount_fee` (cap 15%), `claimit_margin` (cap 100% of cashback) — send `rate` (0–1 or 0–100; clamped to the cap).\n\nFlat \"other charges\": `report_fee_mini`, `report_fee_standard` — send `amount` in GHS.",
         "security": [
           {
             "ConsoleKey": []
@@ -1823,7 +1823,7 @@
         "tags": [
           "Revenue rules"
         ],
-        "summary": "Preview a fee \u2014 writes nothing",
+        "summary": "Preview a fee — writes nothing",
         "security": [
           {
             "ConsoleKey": []
@@ -2100,7 +2100,7 @@
         "tags": [
           "Edition"
         ],
-        "summary": "Redeem an upgrade key (non-commercial \u2192 commercial)",
+        "summary": "Redeem an upgrade key (non-commercial → commercial)",
         "security": [
           {
             "ConsoleKey": []
@@ -2792,7 +2792,7 @@
         "tags": [
           "NNEST"
         ],
-        "summary": "Set a provider\u2019s expedited settlement terms",
+        "summary": "Set a provider’s expedited settlement terms",
         "security": [
           {
             "PayerKey": []
@@ -2881,7 +2881,7 @@
         "tags": [
           "NNEST"
         ],
-        "summary": "Suspend a provider\u2019s terms",
+        "summary": "Suspend a provider’s terms",
         "security": [
           {
             "PayerKey": []
@@ -2944,7 +2944,7 @@
         "tags": [
           "Bills"
         ],
-        "summary": "This facility\u2019s expedited settlement (NNEST) terms, as set by each payer",
+        "summary": "This facility’s expedited settlement (NNEST) terms, as set by each payer",
         "security": [
           {
             "TenantKey": []
@@ -3060,7 +3060,7 @@
         "tags": [
           "Submissions"
         ],
-        "summary": "Approve a submission \u2014 triggers the Stanbic A2A transfer to the provider and settles",
+        "summary": "Approve a submission — triggers the Stanbic A2A transfer to the provider and settles",
         "description": "Runs the same guarded, idempotent authorisation path the payer uses. The provider is paid account-to-account; the platform never holds funds; a ledger entry is written.",
         "security": [
           {
@@ -3271,7 +3271,7 @@
         "tags": [
           "Licensing"
         ],
-        "summary": "Renew a client\u2019s licence for another term (default 6 months)",
+        "summary": "Renew a client’s licence for another term (default 6 months)",
         "description": "Extends from the later of now or current expiry. feeAmount records what was charged (0 while free).",
         "security": [
           {
@@ -3624,7 +3624,7 @@
         "tags": [
           "Price Lists"
         ],
-        "summary": "Toggle whether a payer\u2019s price list governs settlement (default off)",
+        "summary": "Toggle whether a payer’s price list governs settlement (default off)",
         "description": "When enabled, claims routed to this payer are repriced to its approved prices (facility-specific first, then default, else the billed price). The patient absorbs any gap between billed and approved. Default off = the list is reference-only and the billed price governs.",
         "security": [
           {
@@ -3658,6 +3658,442 @@
         "responses": {
           "200": {
             "description": "{ payerId, repriceClaims }"
+          }
+        }
+      }
+    },
+    "/api/v1/bills/{id}/insurecredit": {
+      "post": {
+        "summary": "InsureCredit as a means of settlement: text the patient a micro-loan offer (up to GHS 2,000) for their share of this bill. Resend with {resend:true}. An approved loan covering the share settles the bill (settlementMethod insurecredit).",
+        "tags": [
+          "Bills"
+        ],
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number"
+                  },
+                  "resend": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Offer created (applicationNo, link, sentVia, loanableAmount, overCap)"
+          },
+          "404": {
+            "description": "bill_not_found or default_insurecredit_missing"
+          },
+          "409": {
+            "description": "insurecredit_not_live"
+          },
+          "422": {
+            "description": "amount_invalid, patient_phone_required, amount_below_minimum"
+          }
+        }
+      },
+      "get": {
+        "summary": "InsureCredit status for this bill (offered, status, approvedAmount, billStatus)",
+        "tags": [
+          "Bills"
+        ],
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status"
+          },
+          "404": {
+            "description": "bill_not_found"
+          }
+        }
+      }
+    },
+    "/credit/api/{token}": {
+      "get": {
+        "summary": "Applicant offer (design, amount, USSD instructions, micro medical report). First name only. The token in the SMS link is the credential.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offer view"
+          },
+          "404": {
+            "description": "offer_not_found"
+          }
+        }
+      }
+    },
+    "/credit/api/{token}/consent": {
+      "post": {
+        "summary": "Record consent to credit scoring (stores text version, IP, channel)",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scoring": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated offer view"
+          },
+          "410": {
+            "description": "offer_expired"
+          }
+        }
+      }
+    },
+    "/credit/api/{token}/apply": {
+      "post": {
+        "summary": "Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying ref, amount, source and the report link.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "redirectUrl",
+            "applicationNo": null,
+            "amount": null
+          },
+          "409": {
+            "description": "consent_required or above_loan_limit"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
+    "/credit/api/{token}/share": {
+      "post": {
+        "summary": "Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's consent. Max 3 recipients per application.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "consent"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "relationship": {
+                    "type": "string"
+                  },
+                  "consent": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated offer view with masked recipients"
+          },
+          "422": {
+            "description": "consent_required or recipient_required or invalid_email or invalid_phone"
+          },
+          "429": {
+            "description": "rate_limited or share_limit_reached"
+          }
+        }
+      }
+    },
+    "/credit/api/{token}/shares/{shareId}/revoke": {
+      "post": {
+        "summary": "Withdraw a note already sent to a funder",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated offer view"
+          }
+        }
+      }
+    },
+    "/credit/api/share/{shareToken}": {
+      "get": {
+        "summary": "What the funder opens - the justification note. Counted per view; expires and can be withdrawn.",
+        "parameters": [
+          {
+            "name": "shareToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Justification note"
+          },
+          "404": {
+            "description": "note_not_found"
+          },
+          "410": {
+            "description": "note_withdrawn or note_expired"
+          }
+        }
+      }
+    },
+    "/ussd/{secret}": {
+      "post": {
+        "summary": "Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode, text). Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret is a bare 404.",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/plain USSD reply"
+          },
+          "404": {
+            "description": "Bad secret"
+          }
+        }
+      }
+    },
+    "/insurecredit-hooks/{secret}/decision": {
+      "post": {
+        "summary": "ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount? }. The patient is texted the outcome.",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recorded"
+          },
+          "404": {
+            "description": "Bad secret"
+          },
+          "409": {
+            "description": "application_not_submitted"
+          },
+          "422": {
+            "description": "decision_must_be_approved_or_declined or approved_amount_invalid"
+          }
+        }
+      }
+    },
+    "/insurecredit-hooks/{secret}/applications/{no}": {
+      "get": {
+        "summary": "Verification packet for an application number - need checks against the micro medical report (report present, micro, signed off, amount within patient share, bill status, bill verification, consent on file)",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": false,
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification packet"
+          },
+          "404": {
+            "description": "application_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/insurecredit/overview": {
+      "get": {
+        "summary": "Callback URLs, hard cap and the applications summary",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/insurecredit/rotate-secret": {
+      "post": {
+        "summary": "Rotate the callback secret (old USSD and ConfirmU URLs stop working)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New hookUrls"
+          }
+        }
+      }
+    },
+    "/api/platform/insurecredit/run-auto-send": {
+      "post": {
+        "summary": "Run the auto-send sweep now (live products with autoSend; idempotent per bill and product)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sweep result"
+          }
+        }
+      }
+    },
+    "/api/platform/insurecredit/applications/{appNo}": {
+      "get": {
+        "summary": "Verification packet for an application number",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "appNo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification packet"
+          },
+          "404": {
+            "description": "application_not_found"
           }
         }
       }

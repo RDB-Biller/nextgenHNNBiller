@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: HNN Biller — Complete API
-  version: 1.0.0
+  version: 1.1.0
   description: 'Every endpoint across all feature groups.
 
 
@@ -29,9 +29,9 @@ info:
     Check your own entitlement any time with `GET /api/v1/bills/edition`.
 
 
-    **Base URL:** `https://nextgenhnnbiller-production.up.railway.app`'
+    **Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`'
 servers:
-- url: https://nextgenhnnbiller-production.up.railway.app
+- url: https://nextgenhnnbiller-production-bdf1.up.railway.app
 - url: http://localhost:3000
 components:
   securitySchemes:
@@ -2266,3 +2266,274 @@ paths:
       responses:
         '200':
           description: '{ payerId, repriceClaims }'
+  /api/v1/bills/{id}/insurecredit:
+    post:
+      summary: 'InsureCredit as a means of settlement: text the patient a micro-loan offer (up to GHS
+        2,000) for their share of this bill. Resend with {resend:true}. An approved loan covering the
+        share settles the bill (settlementMethod insurecredit).'
+      tags:
+      - Bills
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                resend:
+                  type: boolean
+      responses:
+        '201':
+          description: Offer created (applicationNo, link, sentVia, loanableAmount, overCap)
+        '404':
+          description: bill_not_found or default_insurecredit_missing
+        '409':
+          description: insurecredit_not_live
+        '422':
+          description: amount_invalid, patient_phone_required, amount_below_minimum
+    get:
+      summary: InsureCredit status for this bill (offered, status, approvedAmount, billStatus)
+      tags:
+      - Bills
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Status
+        '404':
+          description: bill_not_found
+  /credit/api/{token}:
+    get:
+      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only.
+        The token in the SMS link is the credential.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Offer view
+        '404':
+          description: offer_not_found
+  /credit/api/{token}/consent:
+    post:
+      summary: Record consent to credit scoring (stores text version, IP, channel)
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scoring:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated offer view
+        '410':
+          description: offer_expired
+  /credit/api/{token}/apply:
+    post:
+      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying
+        ref, amount, source and the report link.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: redirectUrl
+          applicationNo: null
+          amount: null
+        '409':
+          description: consent_required or above_loan_limit
+        '429':
+          description: rate_limited
+  /credit/api/{token}/share:
+    post:
+      summary: Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's
+        consent. Max 3 recipients per application.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - consent
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+                relationship:
+                  type: string
+                consent:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated offer view with masked recipients
+        '422':
+          description: consent_required or recipient_required or invalid_email or invalid_phone
+        '429':
+          description: rate_limited or share_limit_reached
+  /credit/api/{token}/shares/{shareId}/revoke:
+    post:
+      summary: Withdraw a note already sent to a funder
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: shareId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Updated offer view
+  /credit/api/share/{shareToken}:
+    get:
+      summary: What the funder opens - the justification note. Counted per view; expires and can be withdrawn.
+      parameters:
+      - name: shareToken
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Justification note
+        '404':
+          description: note_not_found
+        '410':
+          description: note_withdrawn or note_expired
+  /ussd/{secret}:
+    post:
+      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode,
+        text). Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret
+        is a bare 404.
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/plain USSD reply
+        '404':
+          description: Bad secret
+  /insurecredit-hooks/{secret}/decision:
+    post:
+      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount?
+        }. The patient is texted the outcome.
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recorded
+        '404':
+          description: Bad secret
+        '409':
+          description: application_not_submitted
+        '422':
+          description: decision_must_be_approved_or_declined or approved_amount_invalid
+  /insurecredit-hooks/{secret}/applications/{no}:
+    get:
+      summary: Verification packet for an application number - need checks against the micro medical report
+        (report present, micro, signed off, amount within patient share, bill status, bill verification,
+        consent on file)
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: false
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verification packet
+        '404':
+          description: application_not_found
+  /api/platform/insurecredit/overview:
+    get:
+      summary: Callback URLs, hard cap and the applications summary
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/insurecredit/rotate-secret:
+    post:
+      summary: Rotate the callback secret (old USSD and ConfirmU URLs stop working)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: New hookUrls
+  /api/platform/insurecredit/run-auto-send:
+    post:
+      summary: Run the auto-send sweep now (live products with autoSend; idempotent per bill and product)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: Sweep result
+  /api/platform/insurecredit/applications/{appNo}:
+    get:
+      summary: Verification packet for an application number
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: appNo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verification packet
+        '404':
+          description: application_not_found

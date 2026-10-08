@@ -366,6 +366,28 @@ async function routeSplit(){
     claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div>${sendRow('claim',c.claimId,'')}<a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
   toast('Split routed to '+claims.length+' payers');reset();
 }
+// InsureCredit as a means of settlement: the patient gets an SMS to apply for a micro-loan covering their share.
+async function offerInsureCredit(again){
+  // Settling by loan means the patient is paying: if no patient share was set, treat the whole bill as theirs.
+  if(!billId&&$('patientPays')&&!$('patientPays').checked&&!($('splitPays')&&$('splitPays').checked)){$('patientPays').checked=true;$('copay').value='100';onWhoPays();}
+  const id=await ensureBill();if(!id)return;
+  if(!$('pphone').value){toast('Patient phone number is needed to send the InsureCredit offer');return;}
+  const r=await fetch(`/api/v1/bills/${id}/insurecredit`,{method:'POST',headers:hdr(),body:JSON.stringify({resend:again===true})});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok){toast('InsureCredit: '+(o.message||o.error||r.status));return;}
+  const sent=(o.sentVia||[]).length>0;
+  $('result').innerHTML=`<span class="pill awaiting_payer">InsureCredit offered</span> Application <b>${esc(o.applicationNo)}</b> · ${o.overCap?'bill is above the GHS 2,000 loan limit, so the patient was offered a medical justification note instead':'up to GHS '+num(o.loanableAmount)}
+    <p class="muted" style="margin:6px 0 0;font-size:13px">${sent?'Offer texted to '+esc(o.to||'the patient')+'.':'Offer created but the text did not go out (messaging may be in sandbox or not configured).'} ${o.reused?'An offer already existed for this bill. ':''}The bill settles automatically when the loan is approved.</p>
+    ${o.link?`<div class="linkbox">${esc(o.link)}</div>`:''}
+    <p style="margin:8px 0 0"><button onclick="offerInsureCredit(true)">Send again</button> <button onclick="checkInsureCredit()">Check status</button></p>`;
+  toast('InsureCredit offer '+(sent?'sent':'created'));
+}
+async function checkInsureCredit(){
+  if(!billId){toast('No bill yet');return;}
+  const r=await fetch(`/api/v1/bills/${billId}/insurecredit`,{headers:hdr()});const o=await r.json().catch(()=>({}));
+  if(!r.ok||!o.offered){toast('No InsureCredit offer on this bill yet');return;}
+  toast(`InsureCredit ${o.applicationNo}: ${String(o.status).replace(/_/g,' ')}${o.billStatus==='settled'?' · bill settled':''}`);
+}
 async function routePayer(payerId){
   if($('splitPays')&&$('splitPays').checked){ return routeSplit(); }
   if(!$('member').value){toast('Member/Policy ID required to route');return;}
@@ -444,7 +466,8 @@ async function loadPayers(){
     PAYERS=data;
     const btn=(p)=>`<button class="${p.id===DEFAULT_PAYER_ID?'accent':''}" onclick="routePayer('${esc(p.id)}')" title="${p.id===DEFAULT_PAYER_ID?'Default payer · ':''}${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
     const ins=data.filter(p=>p.group==='insurer'), emp=data.filter(p=>p.group==='employer');
-    $('insurerTabs').innerHTML=ins.map(btn).join('')||'<span class="muted">None configured</span>';
+    const icBtn=`<button class="accent" id="icTab" onclick="offerInsureCredit()" title="Text the patient a micro-loan offer (up to GHS 2,000) for their share of this bill">InsureCredit</button>`;
+    $('insurerTabs').innerHTML=(ins.map(btn).join('')||'<span class="muted">None configured</span>')+icBtn;
     $('employerTabs').innerHTML=emp.map(btn).join('')||'<span class="muted">None configured</span>';
     renderSplit();
   }catch(e){ $('insurerTabs').innerHTML='<span class="muted">Could not load payers</span>'; }
