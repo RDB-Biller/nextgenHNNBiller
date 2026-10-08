@@ -69,6 +69,9 @@ app.use('/clinical', express.static(PUBLIC, { index: 'clinical.html' }));
 app.use('/solutions/api', solutionsPortalRoutes);
 app.use('/solutions', express.static(PUBLIC, { index: 'solutions.html' }));
 // InsureCredit: applicant/funder pages (token links) and the USSD + ConfirmU callbacks (secret-in-path).
+// Short links used in SMS/email (long query strings were being broken up in transit).
+app.get('/c/:t', (req, res) => res.redirect(`/credit/?t=${encodeURIComponent(req.params.t)}`));
+app.get('/n/:t', (req, res) => res.redirect(`/credit/?s=${encodeURIComponent(req.params.t)}`));
 app.use('/credit/api', creditPortalRoutes);
 app.use('/credit', express.static(PUBLIC, { index: 'credit.html' }));
 app.use('/ussd', creditHooks.ussd);

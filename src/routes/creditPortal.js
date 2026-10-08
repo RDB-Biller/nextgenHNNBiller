@@ -32,6 +32,11 @@ router.get('/share/:shareToken', async (req, res, next) => {
   try { res.json(await credit.shareView(req.params.shareToken)); } catch (e) { next(e); }
 });
 
+// Fallback for a link that got broken in transit: application number + the phone it was sent to.
+router.post('/lookup', strict, async (req, res, next) => {
+  try { res.json(await credit.lookup({ applicationNo: req.body?.applicationNo, phone: req.body?.phone })); } catch (e) { next(e); }
+});
+
 router.get('/:token', async (req, res, next) => {
   try { res.json(await credit.view(req.params.token)); } catch (e) { next(e); }
 });

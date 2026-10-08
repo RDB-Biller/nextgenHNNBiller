@@ -81,7 +81,7 @@ const PARAMS = [
     help: 'Tokens: {name} {amount} {facility} {link} {appNo} {ussd} {cap}. Must contain {link}.' },
   { key: 'channel', label: 'Send the offer by', type: 'select', options: ['sms', 'whatsapp', 'both'], default: 'sms' },
   { key: 'ussdEnabled', label: 'Offer USSD application', type: 'boolean', default: true },
-  { key: 'ussdCode', label: 'USSD short code', type: 'text', default: '*713*55#',
+  { key: 'ussdCode', label: 'USSD short code', type: 'text', default: '*789*963#',
     help: 'Shown in the SMS. It must match the code provisioned on your Africa\'s Talking account.' },
   { key: 'confirmuUrl', label: 'ConfirmU application page', type: 'text', default: 'https://confirmu.com', pattern: '^https://', help: 'Where the patient is sent after consenting.' },
   { key: 'scorerWebhookUrl', label: 'ConfirmU webhook (optional)', type: 'text', default: '', pattern: '^(https://.*)?$',
@@ -101,7 +101,7 @@ function check(p) {
     if (!p.smsTemplate || !p.smsTemplate.includes('{link}')) throw err(422, 'param_invalid', 'smsTemplate must contain {link} when wording is custom');
     if (p.smsTemplate.length > 320) throw err(422, 'param_invalid', 'smsTemplate must be 320 characters or fewer');
   }
-  if (p.ussdEnabled && !/^\*\d[\d*]*#$/.test(String(p.ussdCode || ''))) throw err(422, 'param_invalid', 'ussdCode must look like *713*55#');
+  if (p.ussdEnabled && !/^\*\d[\d*]*#$/.test(String(p.ussdCode || ''))) throw err(422, 'param_invalid', 'ussdCode must look like *789*963#');
   for (const k of ['brandName', 'headline', 'buttonLabel', 'termsNote', 'footnote']) {
     if (p[k] && String(p[k]).length > 160) throw err(422, 'param_invalid', `${k} must be 160 characters or fewer`);
   }
@@ -140,6 +140,14 @@ async function productOf(app) {
   return p;
 }
 const paramsOf = (product) => product.config.params;
+
+// Link tokens: short, letters and digits only (no '-' or '_', no look-alike characters). Long mixed tokens
+// were being split by spaces on some phones/carriers, which broke the link. 12 chars from 32 symbols = 60 bits,
+// and every route is rate limited.
+const TOKEN_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+function shortToken(n = 12) { let t = ''; for (let i = 0; i < n; i++) t += TOKEN_CHARS[crypto.randomInt(TOKEN_CHARS.length)]; return t; }
+const offerLink = (token) => `${base()}/c/${token}`;
+const noteLink = (token) => `${base()}/n/${token}`;
 
 async function newAppNo() {
   for (let i = 0; i < 20; i++) {
@@ -299,7 +307,7 @@ async function createOffer({ product, ctx, input = {} }) {
   const l = loanable(p, amount);
   const tenant = await store.tenants.get(bill.tenantId);
   const appNoPreview = product.status === 'live' ? await newAppNo() : '(assigned when live)';
-  const ctxSms = { first: firstName(bill.patient?.name), amount, facility: bill.provider, link: `${base()}/credit/?t=…`, appNo: appNoPreview, cap: l.cap, overCap: l.overCap };
+  const ctxSms = { first: firstName(bill.patient?.name), amount, facility: bill.provider, link: `${base()}/c/…`, appNo: appNoPreview, cap: l.cap, overCap: l.overCap };
 
   if (product.status !== 'live') {
     return { preview: true, notice: 'Test mode: nothing was stored or sent. Move the product to live to send real offers.',
@@ -318,7 +326,7 @@ async function createOffer({ product, ctx, input = {} }) {
   const report = await medicalReport.generate({ bill, kind: 'micro', diagnosis: bill.clinical?.diagnosis, qa,
     amountRequested: amount, loanType: 'momo_loan', clinicianName: bill.clinical?.clinician });
   const app = {
-    id: rid('ic', 8), appNo: appNoPreview, token: crypto.randomBytes(18).toString('base64url'),
+    id: rid('ic', 8), appNo: appNoPreview, token: shortToken(),
     productId: product.id, payerId: product.payerId, tenantId: bill.tenantId, billId: bill.id,
     status: 'offered', amount, loanable: l.loanable, overCap: l.overCap, cap: l.cap, currency: bill.currency,
     facility: bill.provider, patient: { name: bill.patient?.name || null, phone },
@@ -334,7 +342,7 @@ async function createOffer({ product, ctx, input = {} }) {
 
 async function dispatch(app, product, tenant, channelOverride) {
   const p = paramsOf(product);
-  const link = `${base()}/credit/?t=${app.token}`;
+  const link = offerLink(app.token);
   const body = renderSms(p, { first: firstName(app.patient?.name), amount: app.amount, facility: app.facility, link, appNo: app.appNo, cap: app.cap, overCap: app.overCap });
   const channel = ['sms', 'whatsapp', 'both'].includes(channelOverride) ? channelOverride : p.channel;
   const r = await sendText(channel, app.patient.phone, body, tenant);
@@ -360,7 +368,7 @@ async function summary(app, { withLink = false, resent = false } = {}) {
     createdAt: app.createdAt,
   };
   if (resent) out.resent = true;
-  if (withLink) out.link = `${base()}/credit/?t=${app.token}`;
+  if (withLink) out.link = offerLink(app.token);
   return out;
 }
 
@@ -380,6 +388,18 @@ async function liveProduct(app) {
 function assertOpen(app) {
   if (TERMINAL.includes(app.status)) throw err(409, 'application_closed', app.status);
   if (new Date(app.expiresAt) < new Date() && app.status !== 'submitted_to_scorer') throw err(410, 'offer_expired');
+}
+
+/**
+ * Fallback when the SMS link got mangled: the applicant types the application number and the phone it was sent to.
+ * Both must match, so the 8-digit number alone opens nothing.
+ */
+async function lookup({ applicationNo, phone } = {}) {
+  const n = parseAppNo(applicationNo);
+  const app = n ? await store.credits.byAppNo(n) : null;
+  const want = messaging.normalizePhone(phone);
+  if (!app || !want || messaging.normalizePhone(app.patient?.phone) !== want) throw err(404, 'application_not_found');
+  return { token: app.token };
 }
 
 async function view(token) { return publicView(await byTokenOrThrow(token), { markOpened: true }); }
@@ -476,14 +496,14 @@ async function share(token, { name, email: to, phone, relationship, consent: agr
   if (!mail && !tel) throw err(422, 'recipient_required', p.funderChannels === 'email' ? 'an email address is needed' : p.funderChannels === 'sms' ? 'a phone number is needed' : 'an email address or phone number is needed');
 
   const s = {
-    id: rid('shr', 5), token: crypto.randomBytes(18).toString('base64url'),
+    id: rid('shr', 5), token: shortToken(),
     recipientName: String(name || '').slice(0, 80) || null, relationship: String(relationship || '').slice(0, 60) || null,
     recipientHint: [mail ? maskEmail(mail) : null, tel ? maskPhone(tel) : null].filter(Boolean).join(' · '),
     recipientHash: crypto.createHash('sha256').update(`${mail}|${tel}`).digest('hex').slice(0, 16),
     channels: [], sentAt: null, expiresAt: new Date(Date.now() + p.shareTtlDays * 86400000).toISOString(),
     accessCount: 0, lastAccessAt: null, revoked: false, createdAt: now(), errors: {},
   };
-  const link = `${base()}/credit/?s=${s.token}`;
+  const link = noteLink(s.token);
   const patient = app.patient?.name || 'A patient';
   const until = s.expiresAt.slice(0, 10);
   const tenant = await store.tenants.get(app.tenantId);
@@ -557,7 +577,13 @@ async function ensureDefaultProduct() {
   const products = require('./products'); // lazy: products -> solutions -> this file
   const all = await store.products.all();
   const found = all.find((x) => x.type === 'solution' && x.config?.module === 'insurecredit' && x.name === DEFAULT_NAME);
-  if (found) return found;
+  if (found) {
+    // The default's USSD code changed from *713*55# to *789*963#: move a default product that was never customised.
+    if (found.config?.params?.ussdCode === '*713*55#') {
+      return products.update(found.id, { config: { ...found.config, params: { ...found.config.params, ussdCode: '*789*963#' } } }, 'system');
+    }
+    return found;
+  }
   const payers = await store.payers.all();
   const sponsor = payers.find((x) => x.id === 'cosmopolitan') || payers[0];
   if (!sponsor) return null;
@@ -724,7 +750,7 @@ async function run(ctx, p, input) {
     const amount = Number(input.amount || 0);
     if (!(amount > 0)) throw err(422, 'amount_invalid');
     const l = loanable(p, amount);
-    const sms = renderSms(p, { first: firstName(input.name) || 'Ama', amount, facility: input.facility || 'City Clinic', link: `${base()}/credit/?t=…`, appNo: '48291736', cap: l.cap, overCap: l.overCap });
+    const sms = renderSms(p, { first: firstName(input.name) || 'Ama', amount, facility: input.facility || 'City Clinic', link: `${base()}/c/…`, appNo: '48291736', cap: l.cap, overCap: l.overCap });
     return { preview: true, amount, loanableAmount: l.loanable, overCap: l.overCap, loanCap: l.cap, sms, smsLength: sms.length, design: designOf(p, product),
       ussd: p.ussdEnabled ? p.ussdCode : null };
   }
@@ -788,6 +814,6 @@ module.exports = {
   HARD_CAP, PARAMS, check, DESIGNS, SMS_STYLES, CONSENT_TEXT,
   getSettings, rotateSecret, checkSecret, hookUrls, parseAppNo, loanable, renderSms,
   createOffer, view, consent, apply, share, revokeShare, shareView, recordDecision, verifyByAppNo, ussd,
-  ensureDefaultProduct, defaultProduct, offerAsSettlement, settlementStatus, DEFAULT_NAME,
+  lookup, ensureDefaultProduct, defaultProduct, offerAsSettlement, settlementStatus, DEFAULT_NAME,
   list, run, patientStatus, runAutoSend, publicView, verificationPacket, _setPostImplForTests,
 };

@@ -11,7 +11,7 @@
   async function api(path, body) {
     const r = await fetch('/credit/api/' + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error(j.message || j.error || 'Something went wrong'); e.code = j.error; throw e; }
+    if (!r.ok) { const e = new Error(j.message || j.error || 'Something went wrong'); e.code = (j.error && j.error !== 'error') ? j.error : j.message; throw e; }
     return j;
   }
 
@@ -21,7 +21,7 @@
     return { demo: true, applicationNo: '55731792', status: 'opened', facility: 'Sample Hospital', currency: 'GHS', patientFirstName: 'Ama', amount, loanCap: 2000, overCap: over, loanableAmount: over ? 0 : amount,
       overCapPolicy: 'share_only', live: true, funderChannels: 'email_or_sms', consent: { scoring: false, texts: { scoring: 'I agree that HNN Biller may send my application number, the amount and my micro medical report to ConfirmU so it can assess my credit.', report_share: 'I agree that HNN Biller may send my micro medical report to the person below.' } },
       design: { variant: Q.get('design') || 'classic', accent: Q.get('accent') || '#0E5C4A', brand: Q.get('brand') || 'InsureCredit', headline: Q.get('headline') || 'Need help with this bill?', buttonLabel: Q.get('button') || 'Apply now', termsNote: Q.get('terms') || '', footnote: Q.get('foot') || '' },
-      ussd: { code: Q.get('ussd') || '*713*55#', instructions: 'Dial *713*55# and enter application number 55731792.' }, report: DEMO_REPORT, shares: [], decision: null };
+      ussd: { code: Q.get('ussd') || '*789*963#', instructions: 'Dial *789*963# and enter application number 55731792.' }, report: DEMO_REPORT, shares: [], decision: null };
   }
 
   function reportHtml(r) {
@@ -152,15 +152,31 @@
       <div class="ic-card">${reportHtml(n.report)}</div><p class="ic-note">${esc(n.statement)}</p>`;
   }
 
+  // Fallback: open the offer with the application number and the phone it was sent to.
+  function lookupForm(msg) {
+    root.className = 'wrap ic';
+    root.innerHTML = `<div class="ic-card"><div class="ic-brand">InsureCredit</div>
+      <p class="muted" style="font-size:14px">${esc(msg || 'Open your offer with the application number from your text message.')}</p>
+      <div class="field"><label>Application number (8 digits)</label><input id="lk_no" inputmode="numeric" autocomplete="off"/></div>
+      <div class="field"><label>Phone number the text was sent to</label><input id="lk_ph" type="tel" autocomplete="off"/></div>
+      <button class="ic-btn" id="lk_go" type="button">Open my offer</button></div>`;
+    root.querySelector('#lk_go').addEventListener('click', async () => {
+      try {
+        const r = await api('lookup', { applicationNo: root.querySelector('#lk_no').value, phone: root.querySelector('#lk_ph').value });
+        location.href = '/credit/?t=' + encodeURIComponent(r.token);
+      } catch (e) { toast(e.code === 'application_not_found' ? 'Those details do not match an offer' : e.message); }
+    });
+  }
   async function boot(el) {
     root = el;
     try {
       if (Q.get('demo') === '1') return paint(demoView());
       if (Q.get('s')) return funderPaint(await api('share/' + encodeURIComponent(Q.get('s'))));
-      if (!Q.get('t')) { root.innerHTML = '<div class="ic-card"><b>InsureCredit</b><p class="muted">Open the link from your SMS, or dial the USSD code in it.</p></div>'; return; }
+      if (!Q.get('t')) return lookupForm();
       paint(await api(encodeURIComponent(Q.get('t'))));
     } catch (e) {
       const m = { offer_not_found: 'This link was not found.', note_not_found: 'This note was not found.', note_withdrawn: 'The sender has withdrawn this note.', note_expired: 'This note has expired.' }[e.code] || e.message;
+      if (e.code === 'offer_not_found') return lookupForm('This link did not work (it may have been cut short in the text message). Open your offer with your application number instead.');
       root.innerHTML = `<div class="ic-card"><b>InsureCredit</b><p style="color:var(--bad)">${esc(m)}</p></div>`;
     }
   }

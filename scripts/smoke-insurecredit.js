@@ -110,7 +110,7 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   await rejects(() => mkProduct('acacia', 'x', { ussdCode: '713' }), 422, 'a malformed USSD code is rejected');
 
   // ===== 2. design variants live side by side ===================================
-  const story = await mkProduct('acacia', 'Story variant', { design: 'story', accentColor: '#b45309', headline: 'We can help with that bill', ussdCode: '*713*55#' });
+  const story = await mkProduct('acacia', 'Story variant', { design: 'story', accentColor: '#b45309', headline: 'We can help with that bill', ussdCode: '*789*963#' });
   const compact = await mkProduct('acacia', 'Compact variant', { design: 'compact', smsStyle: 'short', loanCap: 1500, overCapPolicy: 'partial_and_share' });
   await goLive(story); await goLive(compact);
   ok((await store.products.get(story.id)).status === 'live' && (await store.products.get(compact.id)).status === 'live',
@@ -130,7 +130,7 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   ok(/^\d{8}$/.test(res.applicationNo) && res.status === 'offered' && res.amount === 420 && res.overCap === false && res.loanableAmount === 420, 'offer returns an 8-digit application number and the amount');
   ok(sms.length === smsBeforeOffer + 1 && lastSms().to === '+233244000222', 'the offer SMS went to the patient through Africa\'s Talking');
   const body = lastSms().message;
-  ok(body.includes(res.link) && body.includes(res.applicationNo) && body.includes('*713*55#') && body.includes('420.00') && body.includes('2000'), 'SMS carries the link, application number, USSD code, amount and the limit');
+  ok(body.includes(res.link) && body.includes(res.applicationNo) && body.includes('*789*963#') && body.includes('420.00') && body.includes('2000'), 'SMS carries the link, application number, USSD code, amount and the limit');
   ok(!body.includes('Mensah') && !body.includes('appendicitis') && !body.includes('ACA-00123'), 'SMS carries first name only: no surname, diagnosis or member id');
   ok(res.sentVia.includes('sms') && res.to.endsWith('0222'), 'response reports the channel and a masked number');
   const stored = await store.credits.byAppNo(res.applicationNo);
@@ -156,14 +156,14 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   const sStd = await pv('standard'); const sShort = await pv('short'); const sFriendly = await pv('friendly');
   const sCustom = await pv('custom', { smsTemplate: 'Kofi, GHS {amount} at {facility}. Apply {link} no {appNo} or {ussd}' });
   ok(new Set([sStd, sShort, sFriendly, sCustom]).size === 4 && sShort.length < sStd.length, 'four SMS wordings produce four different messages (short is shorter)');
-  ok(sCustom.startsWith('Kofi, GHS 350.00 at City Clinic. Apply ') && sCustom.includes('*713*55#'), 'custom template tokens are filled in');
+  ok(sCustom.startsWith('Kofi, GHS 350.00 at City Clinic. Apply ') && sCustom.includes('*789*963#'), 'custom template tokens are filled in');
 
   // ===== 6. applicant page data ========================================================
   const v1 = await credit.view(stored.token);
   ok(v1.status === 'opened' && v1.design.variant === 'story' && v1.design.accent === '#b45309' && v1.design.headline === 'We can help with that bill', 'opening the link marks it opened and serves THIS product\'s design');
   ok(v1.patientFirstName === 'Ama' && !JSON.stringify(v1).includes('Mensah') && !JSON.stringify(v1).includes('ACA-00123') && !JSON.stringify(v1).includes('0244000222'), 'applicant view: first name only, no surname, member id or full phone');
   ok(v1.report && v1.report.kind === 'micro' && v1.report.diagnosis === 'Acute appendicitis' && v1.report.signedOff === false && /sign-off/i.test(v1.report.disclaimer), 'the micro medical report is embedded and flagged as needing clinician sign-off');
-  ok(v1.ussd.code === '*713*55#' && v1.ussd.instructions.includes(res.applicationNo), 'USSD instructions include the code and this application number');
+  ok(v1.ussd.code === '*789*963#' && v1.ussd.instructions.includes(res.applicationNo), 'USSD instructions include the code and this application number');
 
   // ===== 7. consent -> apply -> ConfirmU =================================================
   await rejects(() => credit.apply(stored.token), 409, 'cannot apply before consenting to credit scoring');
@@ -238,12 +238,12 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   const sh = await credit.share(tokB, { name: 'Grace', email: 'hr@company.example', phone: '0209998877', relationship: 'HR manager', consent: true, ip: '10.0.0.2' });
   const funderMail = mails.slice(mailsB).find((m) => m.body.to[0] === 'hr@company.example');
   ok(!!funderMail && funderMail.body.subject.includes('Esi Owusu'), 'the funder is emailed the justification note');
-  ok(sms.length === smsB + 1 && lastSms().to === '+233209998877' && lastSms().message.includes('/credit/?s='), 'the funder is also texted when a phone is given');
+  ok(sms.length === smsB + 1 && lastSms().to === '+233209998877' && lastSms().message.includes('/n/'), 'the funder is also texted when a phone is given');
   ok(sh.shares.length === 1 && sh.shares[0].channels.length === 2 && sh.shares[0].to.includes('***@company.example') && !JSON.stringify(sh).includes('hr@company.example'), 'applicant view shows masked recipients only');
   const appB = await store.credits.byAppNo(ob.applicationNo);
   ok(appB.status === 'funder_report_sent' && appB.consents.some((c) => c.type === 'report_share' && c.recipient && c.textVersion), 'status updated and the report_share consent (with recipient and text version) is on file');
   const shareToken = appB.shares[0].token;
-  ok(funderMail.body.text.includes(`/credit/?s=${shareToken}`), 'the email links to the funder note');
+  ok(funderMail.body.text.includes(`/n/${shareToken}`), 'the email links to the funder note');
   const note = await credit.shareView(shareToken);
   ok(note.kind === 'justification_note' && note.requestedBy === 'Esi Owusu' && note.report.kind === 'micro' && note.requestedAmount === 2600 && /consent/i.test(note.statement), 'the funder sees the micro medical report as a justification note, with the consent statement');
   ok(!JSON.stringify(note).includes('ACA-00123') && !('phone' in note), 'the note carries no member id or phone number');
@@ -377,6 +377,18 @@ const runH = (id, tenant, input) => solutions.run(id, 'hospital', { tenant, inpu
   await credit.recordDecision(s18_oq.applicationNo, { decision: 'declined' });
   ok((await store.bills.get(s18_billQ.id)).status !== 'settled', 'a declined loan leaves the bill open');
   await rejects(async () => credit.offerAsSettlement({ tenant: await store.tenants.get('tenant_nyaho'), billId: s18_billD.id }), 404, "a hospital cannot offer on another hospital's bill");
+
+  // ===== 19. short links, lookup fallback, USSD default migration ================================
+  const s19app = await store.credits.byAppNo(s18_od.applicationNo);
+  ok(/^[a-hj-km-np-z2-9]{12}$/.test(s19app.token) && s18_od.link.endsWith(`/c/${s19app.token}`) && !s18_od.link.includes('?'), 'offer links are short, letters and digits only, with no query string');
+  ok((await credit.lookup({ applicationNo: s18_od.applicationNo, phone: '0244000321' })).token === s19app.token, 'a mangled link can be recovered with application number + phone');
+  await rejects(() => credit.lookup({ applicationNo: s18_od.applicationNo, phone: '0244999999' }), 404, 'the application number alone (wrong phone) opens nothing');
+  const dprod = await credit.defaultProduct();
+  ok(dprod.config.params.ussdCode === '*789*963#', 'the default product uses USSD code *789*963#');
+  await products.update(dprod.id, { config: { ...dprod.config, params: { ...dprod.config.params, ussdCode: '*713*55#' } } }, 'test');
+  ok((await credit.ensureDefaultProduct()).config.params.ussdCode === '*789*963#', 'an uncustomised default with the old USSD code is migrated to the new one');
+  await products.update(dprod.id, { config: { ...dprod.config, params: { ...dprod.config.params, ussdCode: '*500#' } } }, 'test');
+  ok((await credit.ensureDefaultProduct()).config.params.ussdCode === '*500#', 'a customised USSD code is never overwritten');
   await operatingMode.set({ messaging: { sandbox: true } });
 
   console.log(`\nINSURECREDIT + MESSAGING CHECK: ${a} assertions${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);

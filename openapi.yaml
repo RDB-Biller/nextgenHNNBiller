@@ -2,238 +2,686 @@ openapi: 3.0.3
 info:
   title: Composite Billing & Settlement Platform
   version: 0.5.0
-  description: >
-    The platform never custodies funds — it orchestrates, routes, and reconciles.
-    Bills are settled by patient self-pay (to the clinic) or by a payer (insurer OR
-    employer) moving money A2A from its Stanbic account to the clinic over the SBG rail.
-servers: [{ url: http://localhost:4000 }]
-paths:
-  /health: { get: { summary: Liveness, responses: { '200': { description: OK } } } }
+  description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are
+    settled by patient self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from
+    its Stanbic account to the clinic over the SBG rail.
 
+    '
+servers:
+- url: http://localhost:4000
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        '200':
+          description: OK
   /api/v1/bills:
     post:
       summary: Create a bill
-      security: [{ TenantKey: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateBill' } } } }
-      responses: { '201': { description: 'Created. A patient verification link is generated and sent automatically — response includes patientVerification:{status,link,channelsSent,channelErrors?}, not persisted onto the bill itself. If the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels), the same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp reports a specific failure code for any enabled channel that didn''t go out. While the server is in sandbox mode, nothing is ever sent for real and the response additionally includes otpCodeSandbox so the flow can be demoed without a phone — see the Master Control API''s Messaging endpoints for how a real Twilio/Africa''s Talking/Hubtel provider is configured and activated.', content: { application/json: { schema: { $ref: '#/components/schemas/Bill' } } } } }
-    get: { summary: List bills, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
+      security:
+      - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBill'
+      responses:
+        '201':
+          description: Created. A patient verification link is generated and sent automatically — response
+            includes patientVerification:{status,link,channelsSent,channelErrors?}, not persisted onto
+            the bill itself. If the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels),
+            the same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp
+            reports a specific failure code for any enabled channel that didn't go out. While the server
+            is in sandbox mode, nothing is ever sent for real and the response additionally includes otpCodeSandbox
+            so the flow can be demoed without a phone — see the Master Control API's Messaging endpoints
+            for how a real Twilio/Africa's Talking/Hubtel provider is configured and activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bill'
+    get:
+      summary: List bills
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
   /api/v1/bills/{id}:
     get:
       summary: Get a bill
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: Not found } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not found
   /api/v1/bills/{id}/route:
     post:
       summary: Route a bill to a payer (insurer or employer) — creates claim + secure link
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { payerId: { type: string, example: acacia } } } } } }
-      responses: { '201': { description: Claim created }, '422': { description: Unknown payer or missing member id } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payerId:
+                  type: string
+                  example: acacia
+      responses:
+        '201':
+          description: Claim created
+        '422':
+          description: Unknown payer or missing member id
   /api/v1/bills/{id}/verification/reissue:
     post:
       summary: Resend the patient verification link (same token) — resets a disputed record to pending
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox while the server is in sandbox mode — reissuing also generates a fresh reply code, invalidating any earlier one. channelErrors.sms/whatsapp reports a specific failure code for any enabled channel that didn''t go out this time' }, '409': { description: verification_not_pending } }
-
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox
+            while the server is in sandbox mode — reissuing also generates a fresh reply code, invalidating
+            any earlier one. channelErrors.sms/whatsapp reports a specific failure code for any enabled
+            channel that didn''t go out this time'
+        '409':
+          description: verification_not_pending
   /api/v1/payments/intents:
     post:
       summary: Patient self-pay intent
-      security: [{ TenantKey: [] }]
+      security:
+      - TenantKey: []
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [billId],
-          properties: { billId: { type: string }, method: { type: string, enum: [mtn-momo, card, cash] }, payerPhone: { type: string } } } } }
-      responses: { '201': { description: Created } }
-
-  /api/v1/claims: { get: { summary: List claims raised by the clinic, security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
-  /api/v1/dashboard: { get: { summary: 'Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[] (oldest first), the patient bill-verification follow-up queue', security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
-  /api/v1/institutions: { get: { summary: Receiving institutions (SBG proxy), security: [{ TenantKey: [] }], responses: { '200': { description: OK } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                method:
+                  type: string
+                  enum:
+                  - mtn-momo
+                  - card
+                  - cash
+                payerPhone:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /api/v1/claims:
+    get:
+      summary: List claims raised by the clinic
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/dashboard:
+    get:
+      summary: Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[]
+        (oldest first), the patient bill-verification follow-up queue
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/institutions:
+    get:
+      summary: Receiving institutions (SBG proxy)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
   /api/v1/account-validation:
     get:
       summary: Validate a beneficiary account (SBG proxy)
-      security: [{ TenantKey: [] }]
+      security:
+      - TenantKey: []
       parameters:
-        - { name: serviceRoutingCode, in: query, required: true, schema: { type: string } }
-        - { name: beneficiaryAccount, in: query, required: true, schema: { type: string } }
-      responses: { '200': { description: OK } }
-
-  # ---- Payer API: insurer RX / employer HR systems integrate directly ----
-  /api/payer/me: { get: { summary: Payer identity, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } } }
-  /api/payer/summary: { get: { summary: Payer KPIs, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } } }
+      - name: serviceRoutingCode
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: beneficiaryAccount
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /api/payer/me:
+    get:
+      summary: Payer identity
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: OK
+  /api/payer/summary:
+    get:
+      summary: Payer KPIs
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: OK
   /api/payer/claims:
     get:
       summary: Claims addressed to this payer
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: status, in: query, schema: { type: string, enum: [pending, settled, rejected, authorized] } }]
-      responses: { '200': { description: OK } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - pending
+          - settled
+          - rejected
+          - authorized
+      responses:
+        '200':
+          description: OK
   /api/payer/claims/{id}:
     get:
       summary: Claim detail
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: Not found } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not found
   /api/payer/claims/{id}/authorize:
     post:
       summary: Authorise the A2A transfer (payer -> clinic via SBG)
       description: Accepts an optional `Idempotency-Key` header to dedupe retries.
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Settled or authorised }, '409': { description: 'patient_verification_pending — this payer has requirePatientVerification on and the patient has not yet confirmed the bill (see /verify/api)' } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Settled or authorised
+        '409':
+          description: patient_verification_pending — this payer has requirePatientVerification on and
+            the patient has not yet confirmed the bill (see /verify/api)
   /api/payer/claims/{id}/reject:
     post:
       summary: Decline the claim
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
-      responses: { '200': { description: Rejected } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Rejected
   /api/payer/claims/{id}/verification/reissue:
     post:
       summary: Resend the patient's verification link — nudge instead of override
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Updated claim view }, '409': { description: verification_not_pending } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Updated claim view
+        '409':
+          description: verification_not_pending
   /api/payer/claims/{id}/verification/override:
     post:
-      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital, or a prior approval on file)
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string }, priorApprovalId: { type: string, description: 'One of your own active prior approvals for this member' } } } } } }
-      responses: { '200': { description: Updated claim view }, '409': { description: 'verification_not_pending / prior_approval_not_active' } }
+      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital,
+        or a prior approval on file)
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                priorApprovalId:
+                  type: string
+                  description: One of your own active prior approvals for this member
+      responses:
+        '200':
+          description: Updated claim view
+        '409':
+          description: verification_not_pending / prior_approval_not_active
   /api/payer/prior-approvals:
-    get: { summary: List your prior approvals, security: [{ PayerKey: [] }], responses: { '200': { description: OK } } }
+    get:
+      summary: List your prior approvals
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: OK
     post:
       summary: Record a pre-authorization for a member — reference it later via .../verification/override
-      security: [{ PayerKey: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [memberId], properties: { memberId: { type: string }, patientName: { type: string }, description: { type: string }, amountCap: { type: number }, expiresAt: { type: string } } } } } }
-      responses: { '201': { description: Created }, '422': { description: member_id_required } }
+      security:
+      - PayerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - memberId
+              properties:
+                memberId:
+                  type: string
+                patientName:
+                  type: string
+                description:
+                  type: string
+                amountCap:
+                  type: number
+                expiresAt:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '422':
+          description: member_id_required
   /api/payer/prior-approvals/{id}:
     delete:
       summary: Revoke a prior approval (only the payer who created it can)
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Revoked }, '404': { description: prior_approval_not_found } }
-
-  # ---- Secure link portal (no key, token-scoped) ----
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Revoked
+        '404':
+          description: prior_approval_not_found
   /claim/api/{token}:
     get:
       summary: View a claim by secure token
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: Not found } }
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not found
   /claim/api/{token}/authorize:
-    post: { summary: Authorise via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    post:
+      summary: Authorise via secure link
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /claim/api/{token}/reject:
-    post: { summary: Decline via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    post:
+      summary: Decline via secure link
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /claim/api/{token}/verification/reissue:
-    post: { summary: Resend the patient's verification link via secure link, parameters: [{ name: token, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK }, '409': { description: verification_not_pending } } }
+    post:
+      summary: Resend the patient's verification link via secure link
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '409':
+          description: verification_not_pending
   /claim/api/{token}/verification/override:
     post:
       summary: Mark verified without the patient's own confirmation, via secure link
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string }, priorApprovalId: { type: string } } } } } }
-      responses: { '200': { description: OK }, '409': { description: 'verification_not_pending / prior_approval_not_active' } }
-
-  # ---- Patient bill verification (no key, token-scoped) ----
-  # A verification is created automatically the moment a bill is created (see /api/v1/bills)
-  # and never blocks billing itself. A payer only enforces it if it opts in via
-  # /api/platform/payers/{id}/require-verification (default off).
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                priorApprovalId:
+                  type: string
+      responses:
+        '200':
+          description: OK
+        '409':
+          description: verification_not_pending / prior_approval_not_active
   /verify/api/{token}:
     get:
       summary: View a bill by its verification token (patient-facing)
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: verification_not_found } }
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: verification_not_found
   /verify/api/{token}/confirm:
     post:
       summary: Patient confirms the bill is accurate
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: 'Verified' }, '409': { description: 'verification_not_pending — already verified or disputed' } }
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verified
+        '409':
+          description: verification_not_pending — already verified or disputed
   /verify/api/{token}/dispute:
     post:
       summary: Patient flags the bill as inaccurate — notifies the provider
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
-      responses: { '200': { description: 'Disputed' }, '409': { description: 'verification_not_pending — already verified or disputed' } }
-
-  # ---- Optional financing of the patient share ----
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Disputed
+        '409':
+          description: verification_not_pending — already verified or disputed
   /api/v1/financing/questions:
     get:
       summary: Clinical Q&A template (micro | detailed)
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: kind, in: query, schema: { type: string, enum: [micro, detailed] } }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - micro
+          - detailed
+      responses:
+        '200':
+          description: OK
   /api/v1/financing/reports:
     post:
       summary: Generate a medical report from a bill + diagnosis + Q&A
-      security: [{ TenantKey: [] }]
+      security:
+      - TenantKey: []
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [billId],
-          properties: { billId: { type: string }, kind: { type: string, enum: [micro, detailed] },
-          diagnosis: { type: string }, loanType: { type: string }, amountRequested: { type: number },
-          clinicianName: { type: string }, qa: { type: array, items: { type: object, properties: { id: { type: string }, a: { type: string } } } } } } } }
-      responses: { '201': { description: Created } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              properties:
+                billId:
+                  type: string
+                kind:
+                  type: string
+                  enum:
+                  - micro
+                  - detailed
+                diagnosis:
+                  type: string
+                loanType:
+                  type: string
+                amountRequested:
+                  type: number
+                clinicianName:
+                  type: string
+                qa:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      a:
+                        type: string
+      responses:
+        '201':
+          description: Created
   /api/v1/financing/reports/{id}:
     get:
       summary: Fetch a report
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /api/v1/financing:
     post:
       summary: Create financing for the patient share (loan / credit / grant)
       description: Accepts an optional `Idempotency-Key` header to dedupe retries.
-      security: [{ TenantKey: [] }]
+      security:
+      - TenantKey: []
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [billId, type],
-          properties: { billId: { type: string },
-          type: { type: string, enum: [momo_loan, bank_loan, employer_loan, grant, hospital_credit] },
-          financierId: { type: string }, employerId: { type: string }, amount: { type: number },
-          partPayment: { type: number }, reportId: { type: string } } } } }
-      responses: { '201': { description: Created }, '422': { description: Unknown financier/employer } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - billId
+              - type
+              properties:
+                billId:
+                  type: string
+                type:
+                  type: string
+                  enum:
+                  - momo_loan
+                  - bank_loan
+                  - employer_loan
+                  - grant
+                  - hospital_credit
+                financierId:
+                  type: string
+                employerId:
+                  type: string
+                amount:
+                  type: number
+                partPayment:
+                  type: number
+                reportId:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '422':
+          description: Unknown financier/employer
   /api/v1/financing/{id}:
     get:
       summary: Financing status
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /report/api/{token}:
     get:
       summary: Lender views the medical report by share token
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: Not found } }
-
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not found
   /api/v1/ledger:
     get:
       summary: Append-only money ledger entries
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: limit, in: query, schema: { type: integer } }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
   /api/v1/ledger/summary:
     get:
       summary: Reconciliation totals by movement type (cash vs credit)
-      security: [{ TenantKey: [] }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
   /api/v1/ledger/bill/{billId}:
     get:
       summary: Ledger entries for one bill
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: billId, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
-
+      security:
+      - TenantKey: []
+      parameters:
+      - name: billId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /api/v1/claimit:
     get:
       summary: Tracked NHIS ClaimIt claims
-      security: [{ TenantKey: [] }]
-      responses: { '200': { description: OK } }
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
     post:
       summary: Track an NHIS claim (routed via billId, or external claim data)
-      description: >
-        Two modes. Routed - pass billId for a bill raised here. External - the claim was
-        submitted/settled in your EMR or the ClaimIt portal; send the claim data only.
-        Idempotent on nhisClaimNumber.
-      security: [{ TenantKey: [] }]
+      description: 'Two modes. Routed - pass billId for a bill raised here. External - the claim was submitted/settled
+        in your EMR or the ClaimIt portal; send the claim data only. Idempotent on nhisClaimNumber.
+
+        '
+      security:
+      - TenantKey: []
       requestBody:
         required: true
         content:
@@ -241,404 +689,1180 @@ paths:
             schema:
               type: object
               properties:
-                billId: { type: string, description: routed mode }
-                nhisClaimNumber: { type: string }
-                nhisAmount: { type: number, description: amount being claimed (required for external) }
-                provider: { type: string }
-                patientName: { type: string }
-                memberId: { type: string }
-                refundPercent: { type: number, default: 100 }
-                refundedBy: { type: string, default: acacia }
+                billId:
+                  type: string
+                  description: routed mode
+                nhisClaimNumber:
+                  type: string
+                nhisAmount:
+                  type: number
+                  description: amount being claimed (required for external)
+                provider:
+                  type: string
+                patientName:
+                  type: string
+                memberId:
+                  type: string
+                refundPercent:
+                  type: number
+                  default: 100
+                refundedBy:
+                  type: string
+                  default: acacia
                 refundDestination:
                   type: string
-                  enum: [provider, member]
+                  enum:
+                  - provider
+                  - member
                   default: provider
-                  description: >
-                    Who receives the insurer's refund. provider - lands with the clinic, so a
-                    member-charged margin is netted from the cashback and the balance is owed on.
+                  description: 'Who receives the insurer''s refund. provider - lands with the clinic,
+                    so a member-charged margin is netted from the cashback and the balance is owed on.
                     member - the insurer pays the member directly, so the margin is invoiced instead.
-                externalRef: { type: string, description: your EMR's own id }
-                claimedAt: { type: string }
-      responses: { '201': { description: Created }, '422': { description: Missing amount/provider } }
+
+                    '
+                externalRef:
+                  type: string
+                  description: your EMR's own id
+                claimedAt:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '422':
+          description: Missing amount/provider
   /api/v1/claimit/ingest:
     post:
       summary: Bulk intake of externally settled NHIS claims from an EMR export
-      security: [{ TenantKey: [] }]
-      requestBody:
-        required: true
-        content: { application/json: { schema: { type: object, properties: { claims: { type: array, items: { type: object } } } } } }
-      responses: { '201': { description: Ingest result (created / duplicates / errors) } }
-  /api/v1/claimit/summary:
-    get: { summary: ClaimIt totals (routed vs external, cashback, margin), security: [{ TenantKey: [] }], responses: { '200': { description: OK } } }
-  /api/v1/claimit/{id}/refund:
-    post:
-      summary: Record the refund received - computes cashback and accrues the margin
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { amount: { type: number }, reference: { type: string } } } } } }
-      responses: { '200': { description: OK } }
-
-  /api/v1/bills/payers:
-    get:
-      summary: Payers this facility can route to (global + its active programmed slots)
-      security: [{ TenantKey: [] }]
-      responses: { '200': { description: OK } }
-  /api/admin/payer-slots/{tenantId}:
-    get:
-      summary: Agnostic payer slots for a facility (3 insurer + 3 corporate)
-      security: [{ AdminKey: [] }]
-      parameters: [{ name: tenantId, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
-  /api/admin/payer-slots/{tenantId}/{kind}/{index}:
-    put:
-      summary: Program an agnostic payer slot (facility self-service)
-      security: [{ AdminKey: [] }]
-      parameters:
-        - { name: tenantId, in: path, required: true, schema: { type: string } }
-        - { name: kind, in: path, required: true, schema: { type: string, enum: [insurer, corporate] } }
-        - { name: index, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 3 } }
+      security:
+      - TenantKey: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
               properties:
-                name: { type: string }
-                sourceAccount: { type: string, description: Stanbic account the payer settles from }
-                contactEmail: { type: string }
-                expiresAt: { type: string, description: optional, time-box a pilot }
-                enabled: { type: boolean, default: true }
-      responses: { '200': { description: Programmed (returns the slot payer API key) }, '422': { description: Invalid slot or missing name } }
+                claims:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '201':
+          description: Ingest result (created / duplicates / errors)
+  /api/v1/claimit/summary:
+    get:
+      summary: ClaimIt totals (routed vs external
+      cashback: null
+      margin): null
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/claimit/{id}/refund:
+    post:
+      summary: Record the refund received - computes cashback and accrues the margin
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                reference:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/v1/bills/payers:
+    get:
+      summary: Payers this facility can route to (global + its active programmed slots)
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: OK
+  /api/admin/payer-slots/{tenantId}:
+    get:
+      summary: Agnostic payer slots for a facility (3 insurer + 3 corporate)
+      security:
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /api/admin/payer-slots/{tenantId}/{kind}/{index}:
+    put:
+      summary: Program an agnostic payer slot (facility self-service)
+      security:
+      - AdminKey: []
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - insurer
+          - corporate
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                sourceAccount:
+                  type: string
+                  description: Stanbic account the payer settles from
+                contactEmail:
+                  type: string
+                expiresAt:
+                  type: string
+                  description: optional
+                  time-box a pilot: null
+                enabled:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Programmed (returns the slot payer API key)
+        '422':
+          description: Invalid slot or missing name
     delete:
       summary: Release a slot for reuse (past claims unaffected)
-      security: [{ AdminKey: [] }]
+      security:
+      - AdminKey: []
       parameters:
-        - { name: tenantId, in: path, required: true, schema: { type: string } }
-        - { name: kind, in: path, required: true, schema: { type: string } }
-        - { name: index, in: path, required: true, schema: { type: integer } }
-      responses: { '200': { description: Released } }
-
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Released
   /api/v1/webhooks/collection:
-    post: { summary: Collection gateway confirms a patient self-pay (gateway-signed), responses: { '200': { description: OK } } }
+    post:
+      summary: Collection gateway confirms a patient self-pay (gateway-signed)
+      responses:
+        '200':
+          description: OK
   /api/v1/webhooks/messaging-inbound:
     post:
       summary: Inbound SMS/WhatsApp reply to a patient verification message (shared-secret signed)
-      description: >
-        Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
-        with channel inferred from Twilio's whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK
-        confirms only when exactly one verification is pending for that phone; otherwise (or always) the patient
-        can send the numeric reply code from their message instead, matched only within that phone's own pending
-        verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a
-        provider-specific request signature (header x-webhook-secret, not modeled as a securityScheme here —
-        same as /api/v1/webhooks/collection).
-      requestBody:
-        content: { application/json: { schema: { type: object, properties: { from: { type: string }, text: { type: string }, channel: { type: string, enum: [sms, whatsapp] } } } } }
-      responses:
-        '200': { description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code, locked, no_match, unrecognized.' }
-        '401': { description: bad_signature }
-        '422': { description: missing_from_or_text }
+      description: 'Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
+        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK
+        confirms only when exactly one verification is pending for that phone; otherwise (or always) the
+        patient can send the numeric reply code from their message instead, matched only within that phone''s
+        own pending verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret
+        header, not a provider-specific request signature (header x-webhook-secret, not modeled as a securityScheme
+        here — same as /api/v1/webhooks/collection).
 
-  # ---- Solutions (configurable policy/analytics products built in Product Lab) ----
+        '
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                text:
+                  type: string
+                channel:
+                  type: string
+                  enum:
+                  - sms
+                  - whatsapp
+      responses:
+        '200':
+          description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous,
+            wrong_code, locked, no_match, unrecognized.'
+        '401':
+          description: bad_signature
+        '422':
+          description: missing_from_or_text
   /api/v1/solutions:
     get:
       summary: Live solutions available to this hospital (surface = hospital)
-      security: [{ TenantKey: [] }]
-      responses: { '200': { description: 'data[] of solution views' } }
+      security:
+      - TenantKey: []
+      responses:
+        '200':
+          description: data[] of solution views
   /api/v1/solutions/{id}/run:
     post:
-      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId in input is ignored.
-      security: [{ TenantKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
-      responses: { '200': { description: Module result }, '404': { description: solution_not_found } }
+      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId
+        in input is ignored.
+      security:
+      - TenantKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+      responses:
+        '200':
+          description: Module result
+        '404':
+          description: solution_not_found
   /api/payer/solutions:
     get:
       summary: Live solutions applied to / available for this payer
-      security: [{ PayerKey: [] }]
-      responses: { '200': { description: 'data[] of solution views' } }
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: data[] of solution views
   /api/payer/solutions/{id}/run:
     post:
       summary: Run a solution for the calling payer
-      security: [{ PayerKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
-      responses: { '200': { description: Module result } }
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+      responses:
+        '200':
+          description: Module result
   /solutions/api:
     get:
       summary: Public list of live patient-facing solutions (no key; rate limited to 30 requests/min/IP)
-      responses: { '200': { description: 'data[]' }, '429': { description: rate_limited } }
+      responses:
+        '200':
+          description: data[]
+        '429':
+          description: rate_limited
   /solutions/api/{id}:
     get:
-      summary: Public view of one live patient-facing solution (404 unless status is live and the patient surface is enabled)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK }, '404': { description: solution_not_found } }
+      summary: Public view of one live patient-facing solution (404 unless status is live and the patient
+        surface is enabled)
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: solution_not_found
   /solutions/api/{id}/run:
     post:
-      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them; ids and variance are never returned.
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { input: { type: object } } } } } }
-      responses: { '200': { description: Patient-safe result }, '429': { description: rate_limited } }
+      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them;
+        ids and variance are never returned.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+      responses:
+        '200':
+          description: Patient-safe result
+        '429':
+          description: rate_limited
   /api/v1/bills/{id}/insurecredit:
     post:
-      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS 2000) for their share of this bill. An approved loan covering the share settles the bill (settlementMethod insurecredit).
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { amount: { type: number }, resend: { type: boolean } } } } } }
-      responses: { '201': { description: Offer created }, '409': { description: insurecredit_not_live }, '422': { description: amount_invalid or patient_phone_required } }
+      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS
+        2000) for their share of this bill. An approved loan covering the share settles the bill (settlementMethod
+        insurecredit).
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                resend:
+                  type: boolean
+      responses:
+        '201':
+          description: Offer created
+        '409':
+          description: insurecredit_not_live
+        '422':
+          description: amount_invalid or patient_phone_required
     get:
       summary: InsureCredit status for this bill
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Status } }
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Status
   /api/platform/solutions/modules:
     get:
-      summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing, multi_funder, pharmacy_compare, reconciliation, insurecredit) with config schemas, plus funders
-      security: [{ PlatformKey: [] }]
-      responses: { '200': { description: OK } }
+      summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing,
+        multi_funder, pharmacy_compare, reconciliation, insurecredit) with config schemas, plus funders
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
   /api/platform/solutions/{id}/run:
     post:
       summary: Run any solution from Master Control (sandbox or live)
-      security: [{ PlatformKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Module result } }
-
-  # ---- InsureCredit (micro-loan offers, ConfirmU hand-off, funder justification notes) ----
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Module result
   /credit/api/{token}:
     get:
-      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only. The token in the SMS link is the credential.
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Offer view }, '404': { description: offer_not_found } }
+      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only.
+        The token in the SMS link is the credential.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Offer view
+        '404':
+          description: offer_not_found
   /credit/api/{token}/consent:
     post:
       summary: Record consent to credit scoring (stores text version, IP, channel)
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { scoring: { type: boolean } } } } } }
-      responses: { '200': { description: Updated offer view }, '410': { description: offer_expired } }
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scoring:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated offer view
+        '410':
+          description: offer_expired
   /credit/api/{token}/apply:
     post:
-      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying ref, amount, source and the report link.
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: redirectUrl, applicationNo, amount }, '409': { description: consent_required or above_loan_limit }, '429': { description: rate_limited } }
+      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying
+        ref, amount, source and the report link.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: redirectUrl
+          applicationNo: null
+          amount: null
+        '409':
+          description: consent_required or above_loan_limit
+        '429':
+          description: rate_limited
   /credit/api/{token}/share:
     post:
-      summary: Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's consent. Max 3 recipients per application.
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, required: [consent], properties: { name: { type: string }, email: { type: string }, phone: { type: string }, relationship: { type: string }, consent: { type: boolean } } } } } }
-      responses: { '200': { description: Updated offer view with masked recipients }, '422': { description: consent_required or recipient_required or invalid_email or invalid_phone }, '429': { description: rate_limited or share_limit_reached } }
+      summary: Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's
+        consent. Max 3 recipients per application.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - consent
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+                relationship:
+                  type: string
+                consent:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated offer view with masked recipients
+        '422':
+          description: consent_required or recipient_required or invalid_email or invalid_phone
+        '429':
+          description: rate_limited or share_limit_reached
   /credit/api/{token}/shares/{shareId}/revoke:
     post:
       summary: Withdraw a note already sent to a funder
-      parameters: [{ name: token, in: path, required: true, schema: { type: string } }, { name: shareId, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Updated offer view } }
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: shareId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Updated offer view
   /credit/api/share/{shareToken}:
     get:
       summary: What the funder opens - the justification note. Counted per view; expires and can be withdrawn.
-      parameters: [{ name: shareToken, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Justification note }, '404': { description: note_not_found }, '410': { description: note_withdrawn or note_expired } }
+      parameters:
+      - name: shareToken
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Justification note
+        '404':
+          description: note_not_found
+        '410':
+          description: note_withdrawn or note_expired
   /ussd/{secret}:
     post:
-      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode, text). Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret is a bare 404.
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: text/plain USSD reply }, '404': { description: Bad secret } }
+      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode,
+        text). Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret
+        is a bare 404.
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/plain USSD reply
+        '404':
+          description: Bad secret
   /insurecredit-hooks/{secret}/decision:
     post:
-      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount? }. The patient is texted the outcome.
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Recorded }, '404': { description: Bad secret }, '409': { description: application_not_submitted }, '422': { description: decision_must_be_approved_or_declined or approved_amount_invalid } }
+      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount?
+        }. The patient is texted the outcome.
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recorded
+        '404':
+          description: Bad secret
+        '409':
+          description: application_not_submitted
+        '422':
+          description: decision_must_be_approved_or_declined or approved_amount_invalid
   /insurecredit-hooks/{secret}/applications/{no}:
     get:
-      summary: Verification packet for an application number - need checks against the micro medical report (report present, micro, signed off, amount within patient share, bill status, bill verification, consent on file)
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }, { name: no, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Verification packet }, '404': { description: application_not_found } }
+      summary: Verification packet for an application number - need checks against the micro medical report
+        (report present, micro, signed off, amount within patient share, bill status, bill verification,
+        consent on file)
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: false
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verification packet
+        '404':
+          description: application_not_found
   /api/platform/insurecredit/overview:
     get:
       summary: Callback URLs, hard cap and the applications summary
-      security: [{ PlatformKey: [] }]
-      responses: { '200': { description: OK } }
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
   /api/platform/insurecredit/rotate-secret:
     post:
       summary: Rotate the callback secret (old USSD and ConfirmU URLs stop working)
-      security: [{ PlatformKey: [] }]
-      responses: { '200': { description: New hookUrls } }
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: New hookUrls
   /api/platform/insurecredit/run-auto-send:
     post:
       summary: Run the auto-send sweep now (live products with autoSend; idempotent per bill and product)
-      security: [{ PlatformKey: [] }]
-      responses: { '200': { description: Sweep result } }
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: Sweep result
   /api/platform/insurecredit/applications/{appNo}:
     get:
       summary: Verification packet for an application number
-      security: [{ PlatformKey: [] }]
-      parameters: [{ name: appNo, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: Verification packet }, '404': { description: application_not_found } }
-
-  # ---- SMS Dashboard (Master Control -> Messaging) ----
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: appNo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verification packet
+        '404':
+          description: application_not_found
   /api/platform/sms/overview:
     get:
       summary: Sandbox/live state, provider, 1000-per-request cap, callback URLs and analytics
-      security: [{ PlatformKey: [] }]
-      responses: { '200': { description: OK } }
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
   /api/platform/sms/parse:
     post:
       summary: Validate pasted or uploaded numbers (normalises to +233, removes duplicates) without sending
-      security: [{ PlatformKey: [] }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { numbers: { type: string } } } } } }
-      responses: { '200': { description: '{ valid, invalid[], duplicates, sample[] }' } }
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                numbers:
+                  type: string
+      responses:
+        '200':
+          description: '{ valid, invalid[], duplicates, sample[] }'
   /api/platform/sms/send:
     post:
       summary: Bulk send (max 1000 recipients per request, sent in chunks of 500, opted-out numbers skipped)
-      security: [{ PlatformKey: [] }]
+      security:
+      - PlatformKey: []
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [message, numbers], properties: { message: { type: string, maxLength: 1600 }, numbers: { type: string, description: 'Comma, semicolon or newline separated' } } } } }
-      responses: { '200': { description: '{ batchId, mode, requested, accepted, failed, skippedOptOut, invalid[], duplicatesRemoved, error }' }, '422': { description: 'message_required | message_too_long | no_valid_numbers | too_many_recipients_max_1000' } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - message
+              - numbers
+              properties:
+                message:
+                  type: string
+                  maxLength: 1600
+                numbers:
+                  type: string
+                  description: Comma, semicolon or newline separated
+      responses:
+        '200':
+          description: '{ batchId, mode, requested, accepted, failed, skippedOptOut, invalid[], duplicatesRemoved,
+            error }'
+        '422':
+          description: message_required | message_too_long | no_valid_numbers | too_many_recipients_max_1000
   /api/platform/sms/logs:
     get:
       summary: Message log with search and pagination
-      security: [{ PlatformKey: [] }]
+      security:
+      - PlatformKey: []
       parameters:
-        - { name: q, in: query, schema: { type: string } }
-        - { name: status, in: query, schema: { type: string, enum: [sent, sandbox, delivered, failed, skipped_optout] } }
-        - { name: page, in: query, schema: { type: integer } }
-        - { name: pageSize, in: query, schema: { type: integer, maximum: 200 } }
-      responses: { '200': { description: '{ total, page, pages, pageSize, data[] }' } }
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - sent
+          - sandbox
+          - delivered
+          - failed
+          - skipped_optout
+      - name: page
+        in: query
+        schema:
+          type: integer
+      - name: pageSize
+        in: query
+        schema:
+          type: integer
+          maximum: 200
+      responses:
+        '200':
+          description: '{ total, page, pages, pageSize, data[] }'
   /api/platform/sms/logs.csv:
-    get: { summary: Export the (filtered) log as CSV, security: [{ PlatformKey: [] }], responses: { '200': { description: text/csv } } }
+    get:
+      summary: Export the (filtered) log as CSV
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: text/csv
   /api/platform/sms/inbox:
-    get: { summary: Inbound replies with search and pagination, security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+    get:
+      summary: Inbound replies with search and pagination
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
   /api/platform/sms/analytics:
-    get: { summary: 'Totals, delivery rate, cost, opt-outs and a daily series (?days=14)', security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+    get:
+      summary: Totals, delivery rate, cost, opt-outs and a daily series (?days=14)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
   /api/platform/sms/rotate-secret:
-    post: { summary: 'Rotate the secret in the callback URLs (old URLs stop working immediately)', security: [{ PlatformKey: [] }], responses: { '200': { description: New hookUrls } } }
+    post:
+      summary: Rotate the secret in the callback URLs (old URLs stop working immediately)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: New hookUrls
   /api/platform/sms/optouts:
-    get: { summary: List opted-out numbers, security: [{ PlatformKey: [] }], responses: { '200': { description: OK } } }
+    get:
+      summary: List opted-out numbers
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
     post:
       summary: Add an opted-out number
-      security: [{ PlatformKey: [] }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { phoneNumber: { type: string } } } } } }
-      responses: { '200': { description: OK }, '422': { description: invalid_phone } }
+      security:
+      - PlatformKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phoneNumber:
+                  type: string
+      responses:
+        '200':
+          description: OK
+        '422':
+          description: invalid_phone
   /api/platform/sms/optouts/{phone}:
     delete:
       summary: Remove an opted-out number
-      security: [{ PlatformKey: [] }]
-      parameters: [{ name: phone, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: phone
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
   /sms-hooks/{secret}/delivery:
     post:
-      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret in the path; wrong secret returns a bare 404.
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { id: { type: string }, status: { type: string }, phoneNumber: { type: string }, networkCode: { type: string }, failureReason: { type: string } } } } } }
-      responses: { '200': { description: '{ ok, matched, status }' }, '404': { description: unknown secret } }
+      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret
+        in the path; wrong secret returns a bare 404.
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                status:
+                  type: string
+                phoneNumber:
+                  type: string
+                networkCode:
+                  type: string
+                failureReason:
+                  type: string
+      responses:
+        '200':
+          description: '{ ok, matched, status }'
+        '404':
+          description: unknown secret
   /sms-hooks/{secret}/inbox:
     post:
-      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical, campaign and verification reply handlers
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { from: { type: string }, text: { type: string }, to: { type: string }, id: { type: string }, linkId: { type: string }, date: { type: string } } } } } }
-      responses: { '200': { description: '{ ok, id }' }, '404': { description: unknown secret } }
-    get: { summary: "Probe used by Africa's Talking when saving the URL", parameters: [{ name: secret, in: path, required: true, schema: { type: string } }], responses: { '200': { description: '{ ok: true }' } } }
+      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical,
+        campaign and verification reply handlers
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                text:
+                  type: string
+                to:
+                  type: string
+                id:
+                  type: string
+                linkId:
+                  type: string
+                date:
+                  type: string
+      responses:
+        '200':
+          description: '{ ok, id }'
+        '404':
+          description: unknown secret
+    get:
+      summary: Probe used by Africa's Talking when saving the URL
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: '{ ok: true }'
   /sms-hooks/{secret}/optout:
     post:
       summary: Africa's Talking opt-out callback (form-urlencoded)
-      parameters: [{ name: secret, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { phoneNumber: { type: string } } } } } }
-      responses: { '200': { description: '{ ok, optedOut }' } }
-
-  # ---- Pharmacy price comparison: billed prices (claims) vs quoted prices (uploaded price lists) ----
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                phoneNumber:
+                  type: string
+      responses:
+        '200':
+          description: '{ ok, optedOut }'
   /api/platform/pharmacy-pricing/unified:
     get:
-      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available, or side by side. variance% = (billed - quoted) / quoted x 100.
-      security: [{ PlatformKey: [] }]
+      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available,
+        or side by side. variance% = (billed - quoted) / quoted x 100.
+      security:
+      - PlatformKey: []
       parameters:
-        - { name: code, in: query, schema: { type: string } }
-        - { name: name, in: query, schema: { type: string } }
-        - { name: source, in: query, schema: { type: string, enum: [claims, quotes, best_available, side_by_side], default: side_by_side } }
-        - { name: basis, in: query, schema: { type: string, default: latest } }
-        - { name: sinceDays, in: query, schema: { type: integer } }
-        - { name: quoteMaxAgeDays, in: query, schema: { type: integer } }
-      responses: { '200': { description: OK } }
+      - name: code
+        in: query
+        schema:
+          type: string
+      - name: name
+        in: query
+        schema:
+          type: string
+      - name: source
+        in: query
+        schema:
+          type: string
+          enum:
+          - claims
+          - quotes
+          - best_available
+          - side_by_side
+          default: side_by_side
+      - name: basis
+        in: query
+        schema:
+          type: string
+          default: latest
+      - name: sinceDays
+        in: query
+        schema:
+          type: integer
+      - name: quoteMaxAgeDays
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
   /api/platform/pharmacy-pricing/quote-accuracy:
     get:
       summary: Does each pharmacy bill what it quoted? Needs both a quote and real bills.
-      security: [{ PlatformKey: [] }]
-      parameters: [{ name: sinceDays, in: query, schema: { type: integer } }]
-      responses: { '200': { description: OK } }
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: sinceDays
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
   /api/platform/pharmacy-quotes:
-    get: { summary: 'Uploaded price lists and a per-pharmacy summary', security: [{ PlatformKey: [] }], responses: { '200': { description: '{ uploads[], pharmacies[] }' } } }
+    get:
+      summary: Uploaded price lists and a per-pharmacy summary
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ uploads[], pharmacies[] }'
   /api/platform/pharmacy-quotes/template.csv:
-    get: { summary: CSV template for a price list, security: [{ PlatformKey: [] }], responses: { '200': { description: text/csv } } }
+    get:
+      summary: CSV template for a price list
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: text/csv
   /api/platform/pharmacy-quotes/import:
     post:
-      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX is read in the browser). Quotes are append-only; validFrom/validUntil bound their use.
-      security: [{ PlatformKey: [] }]
+      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX
+        is read in the browser). Quotes are append-only; validFrom/validUntil bound their use.
+      security:
+      - PlatformKey: []
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { pharmacyName: { type: string }, tenantId: { type: string }, validFrom: { type: string, format: date }, validUntil: { type: string, format: date }, label: { type: string }, csv: { type: string }, table: { type: array, items: { type: array, items: {} } } } } } }
-      responses: { '201': { description: Import summary }, '422': { description: Validation error } }
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pharmacyName:
+                  type: string
+                tenantId:
+                  type: string
+                validFrom:
+                  type: string
+                  format: date
+                validUntil:
+                  type: string
+                  format: date
+                label:
+                  type: string
+                csv:
+                  type: string
+                table:
+                  type: array
+                  items:
+                    type: array
+                    items: {}
+      responses:
+        '201':
+          description: Import summary
+        '422':
+          description: Validation error
   /api/platform/pharmacy-quotes/uploads/{id}:
     delete:
       summary: Remove an uploaded price list
-      security: [{ PlatformKey: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: OK } }
-
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /credit/api/lookup:
+    post:
+      summary: Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both
+        must match. Returns { token }.
+      responses:
+        '200':
+          description: token
+        '404':
+          description: application_not_found
+        '429':
+          description: rate_limited
+  /c/{token}:
+    get:
+      summary: Short offer link used in SMS; redirects to /credit/?t={token}
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect
+  /n/{token}:
+    get:
+      summary: Short funder-note link; redirects to /credit/?s={token}
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect
 components:
   securitySchemes:
-    TenantKey: { type: apiKey, in: header, name: x-api-key }
-    PayerKey: { type: apiKey, in: header, name: x-payer-key }
-    AdminKey: { type: apiKey, in: header, name: x-admin-key }
-    PlatformKey: { type: apiKey, in: header, name: x-platform-key }
+    TenantKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+    PayerKey:
+      type: apiKey
+      in: header
+      name: x-payer-key
+    AdminKey:
+      type: apiKey
+      in: header
+      name: x-admin-key
+    PlatformKey:
+      type: apiKey
+      in: header
+      name: x-platform-key
   schemas:
     CreateBill:
       type: object
-      required: [provider, items]
+      required:
+      - provider
+      - items
       properties:
-        provider: { type: string }
-        patient: { type: object, properties: { name: { type: string }, phone: { type: string } } }
+        provider:
+          type: string
+        patient:
+          type: object
+          properties:
+            name:
+              type: string
+            phone:
+              type: string
         items:
           type: array
-          items: { type: object, properties: { code: { type: string }, name: { type: string }, cost: { type: number } } }
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              name:
+                type: string
+              cost:
+                type: number
         adjustments:
           type: object
-          properties: { copayPercent: { type: number }, cashbackPercent: { type: number }, discountCode: { type: string } }
+          properties:
+            copayPercent:
+              type: number
+            cashbackPercent:
+              type: number
+            discountCode:
+              type: string
         insurance:
           type: object
           description: Coverage info; payer chosen here or at /route.
           properties:
-            payerId: { type: string, example: acacia }
-            memberId: { type: string }
-            employer: { type: object, properties: { name: { type: string }, email: { type: string } } }
+            payerId:
+              type: string
+              example: acacia
+            memberId:
+              type: string
+            employer:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
     Bill:
       type: object
       properties:
-        id: { type: string }
-        status: { type: string, enum: [open, awaiting_payer, settled, rejected] }
-        settlementMethod: { type: string, enum: [patient_momo, patient_card, cash, payer_a2a] }
-        provider: { type: string }
-        currency: { type: string, example: GHS }
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+          - open
+          - awaiting_payer
+          - settled
+          - rejected
+        settlementMethod:
+          type: string
+          enum:
+          - patient_momo
+          - patient_card
+          - cash
+          - payer_a2a
+        provider:
+          type: string
+        currency:
+          type: string
+          example: GHS
         totals:
           type: object
           properties:
-            subtotal: { type: number }
-            discount: { type: number }
-            net: { type: number }
-            payerShare: { type: number }
-            cashback: { type: number }
-            patientPayable: { type: number }
+            subtotal:
+              type: number
+            discount:
+              type: number
+            net:
+              type: number
+            payerShare:
+              type: number
+            cashback:
+              type: number
+            patientPayable:
+              type: number
         patientVerification:
           type: object
           description: One-time snapshot returned on creation only — the live record lives at /verify/api/{token}.
           properties:
-            status: { type: string, enum: [pending, verified, disputed] }
-            link: { type: string, example: '/verify/?token=abc123' }
+            status:
+              type: string
+              enum:
+              - pending
+              - verified
+              - disputed
+            link:
+              type: string
+              example: /verify/?token=abc123
             channelsSent:
               type: array
-              items: { type: string, enum: [sms, whatsapp] }
-              description: Which channels this verification also went out on, in addition to the link (empty unless the client enabled them — see /api/platform/clients/{id}/verification-channels).
+              items:
+                type: string
+                enum:
+                - sms
+                - whatsapp
+              description: Which channels this verification also went out on, in addition to the link
+                (empty unless the client enabled them — see /api/platform/clients/{id}/verification-channels).
             channelErrors:
               type: object
-              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp carry a specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported, provider_whatsapp_not_verified, messaging_provider_not_configured) so a missing channel is explained rather than just absent from channelsSent.
+              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp
+                carry a specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported,
+                provider_whatsapp_not_verified, messaging_provider_not_configured) so a missing channel
+                is explained rather than just absent from channelsSent.
               properties:
-                sms: { type: string }
-                whatsapp: { type: string }
+                sms:
+                  type: string
+                whatsapp:
+                  type: string
             otpCodeSandbox:
               type: string
-              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply code, echoed back here purely so the flow can be demoed without a real phone or a configured provider. Never present, and never returned by any patient-facing endpoint, once MESSAGING_SANDBOX is turned off.
+              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply
+                code, echoed back here purely so the flow can be demoed without a real phone or a configured
+                provider. Never present, and never returned by any patient-facing endpoint, once MESSAGING_SANDBOX
+                is turned off.

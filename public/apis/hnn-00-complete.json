@@ -4097,6 +4097,62 @@
           }
         }
       }
+    },
+    "/credit/api/lookup": {
+      "post": {
+        "summary": "Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both must match. Returns { token }.",
+        "responses": {
+          "200": {
+            "description": "token"
+          },
+          "404": {
+            "description": "application_not_found"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
+    "/c/{token}": {
+      "get": {
+        "summary": "Short offer link used in SMS; redirects to /credit/?t={token}",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect"
+          }
+        }
+      }
+    },
+    "/n/{token}": {
+      "get": {
+        "summary": "Short funder-note link; redirects to /credit/?s={token}",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect"
+          }
+        }
+      }
     }
   }
 }
