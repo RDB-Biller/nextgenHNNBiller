@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS pharmacy_quotes (id text PRIMARY KEY, upload_id text,
 CREATE INDEX IF NOT EXISTS idx_pharmacy_quotes_upload ON pharmacy_quotes(upload_id);
 CREATE TABLE IF NOT EXISTS sms_inbox (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 -- InsureCredit micro-loan applications (services/insurecredit.js). app_no is the
--- numeric application number given to the client (also dialled on USSD); token is
+-- numeric application number given to the client (also dialled on USSD), and token is
 -- the unguessable part of the SMS link. Funder shares live inside the JSONB.
 CREATE TABLE IF NOT EXISTS credit_applications (id text PRIMARY KEY, app_no text UNIQUE, token text UNIQUE, status text, tenant_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_credit_applications_tenant ON credit_applications(tenant_id);
@@ -743,7 +743,8 @@ if (usePg) {
     // Run schema statements one at a time, tables first, so a single ordering
     // issue can't abort the whole boot. All statements are IF NOT EXISTS / IF EXISTS,
     // so this is safe to re-run on an existing database.
-    const statements = SCHEMA.split(';').map((s) => s.trim()).filter(Boolean);
+    // Strip -- comment lines first: a ';' inside a comment must never split a statement.
+    const statements = SCHEMA.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n').split(';').map((s) => s.trim()).filter(Boolean);
     const isTable = (s) => /^CREATE TABLE/i.test(s);
     const ordered = [...statements.filter(isTable), ...statements.filter((s) => !isTable(s))];
     for (const stmt of ordered) {
