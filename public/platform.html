@@ -460,6 +460,13 @@
       <div id="pd_run_out" style="margin-top:10px"></div>
     </div>
 
+    <div class="card" style="margin-bottom:14px" id="ic_card"><h2>InsureCredit &mdash; applications &amp; ConfirmU callbacks</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Give these URLs to Africa's Talking (USSD) and ConfirmU. The secret is part of each URL, so treat them like passwords; rotating it invalidates the old ones.</p>
+      <div id="ic_hooks" class="muted" style="font-size:13px">Loading…</div>
+      <div class="row" style="margin:10px 0"><button class="ghost mini" onclick="icLoad()">Refresh</button><button class="ghost mini" onclick="icRotate()">Rotate secret</button><button class="ghost mini" onclick="icAutoSend()">Run auto-send now</button></div>
+      <div id="ic_apps"></div>
+    </div>
+
     <div class="card"><h2>Preview &amp; accrue</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Preview runs the scoring/reward engine and shows what it <i>would</i> pay out for a period — nothing is saved. Accrue runs the same engine and writes those figures to the ledger below it. Run each period once; accrual history shows what's already been recorded.</p>
       <div class="row">
@@ -1238,7 +1245,7 @@ async function loadProducts(){
         ${p.status==='draft'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Move to sandbox</button>`:''}
         ${p.status==='sandbox'?`<button class="accent mini" onclick="setProductStatus('${esc(p.id)}','live')">Publish live</button> <button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','draft')">Back to draft</button>`:''}
         ${p.status==='live'?`<button class="ghost mini" onclick="setProductStatus('${esc(p.id)}','sandbox')">Pause to sandbox</button>`:''}
-        ${p.type==='solution'?`<button class="ghost mini" onclick="pdEditSolution('${esc(p.id)}')">Edit</button> <button class="ghost mini" onclick="pdTrySolution('${esc(p.id)}')">Try</button>`:`<button class="ghost mini" onclick="pdSelectForMeasure('${esc(p.id)}')">Measure</button>`}
+        ${p.type==='solution'?`<button class="ghost mini" onclick="pdEditSolution('${esc(p.id)}')">Edit</button> <button class="ghost mini" onclick="pdTrySolution('${esc(p.id)}')">Try</button>${p.config.module==='insurecredit'?` <button class="ghost mini" onclick="pdDupSolution('${esc(p.id)}')">Duplicate as variation</button>`:''}`:`<button class="ghost mini" onclick="pdSelectForMeasure('${esc(p.id)}')">Measure</button>`}
       </td></tr>`).join('')+`</tbody></table>`
     :'<p class="muted">No products yet — build one above.</p>';
   if(window.pdAfterProducts)pdAfterProducts();
@@ -1451,7 +1458,7 @@ async function setRegStatus(id,status){
 }
 
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();
+boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();
   loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();if(window.smsBoot)smsBoot();};
 
 // ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====

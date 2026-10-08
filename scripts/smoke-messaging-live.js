@@ -157,7 +157,7 @@ async function resolveSenderAndSendChecks() {
     'whatsapp text send targets the confirmed chat.africastalking.com endpoint');
   ok(calls[calls.length - 1].opts.headers.apikey === 'at-key', 'whatsapp send authenticates with the apikey header, not Authorization');
   let sentBody = JSON.parse(calls[calls.length - 1].opts.body);
-  ok(sentBody.waNumber === '+254711000111' && sentBody.phoneNumber === '0244000222'
+  ok(sentBody.waNumber === '+254711000111' && sentBody.phoneNumber === '+233244000222' // local 024... is rewritten to international form at the send seam
     && sentBody.body.message === 'your bill is ready',
     'whatsapp text send JSON body matches the documented {username, waNumber, phoneNumber, body:{message}} shape');
 

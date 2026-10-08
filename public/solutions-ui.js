@@ -17,6 +17,7 @@ const SolUI=(()=>{
     return h+`<p class="muted" style="font-size:12px;margin-top:8px">Based on what pharmacies charged in the last ${d.sinceDays} days. Prices change — confirm before paying.</p>`;
   }
   function render(mod,d){
+    if(mod==='insurecredit'&&d.applicationNo&&d.status)return `<p>Application <b>${esc(d.applicationNo)}</b> · ${esc(String(d.status).replace(/_/g,' '))}</p><p class="muted" style="margin:0">${esc(d.facility||'')} · bill GHS ${n2(d.amount)}${d.overCap?' (above the micro-loan limit)':' · loan up to GHS '+n2(d.loanableAmount)}</p>`+(d.decision?`<p><b>${esc(d.decision.decision)}</b>${d.decision.approvedAmount?' · GHS '+n2(d.decision.approvedAmount):''}</p>`:'');
     if(mod==='pharmacy_compare')return pharmacy(d);
     if(mod==='auth_threshold')return `<p>Claims up to <b>GHS ${n2(d.thresholdMaxAmount)}</b> are ${d.enabled?'authorized automatically':'<b>not</b> auto-authorized'}.</p>`
       +(d.check?`<p>GHS ${n2(d.check.amount)} → <b>${d.check.autoAuthorized?'approved automatically':'goes to manual review'}</b></p>`:'');
@@ -35,9 +36,11 @@ const SolUI=(()=>{
   }
   /** Draws title/intro/inputs/Run button/result into `el`. run(input) must resolve to the API's run response. */
   function mount(el,view,surface,run){
-    const fields=(view.inputs||[]).filter(f=>!f.surface||f.surface===surface);
+    const fields=(view.inputs||[]).filter(f=>(f.surfaces?f.surfaces.includes(surface):(!f.surface||f.surface===surface)));
     el.innerHTML=`<h2 style="margin-top:0">${esc(view.title)}</h2>${view.intro?`<p class="muted" style="margin-top:0">${esc(view.intro)}</p>`:''}`
-      +fields.map(f=>`<div class="field"><label>${esc(f.label)}</label>`+(f.type==='textarea'
+      +fields.map(f=>`<div class="field"><label>${esc(f.label)}</label>`+(f.type==='select'
+        ?`<select data-k="${esc(f.key)}">${(f.options||[]).map(o=>`<option>${esc(o)}</option>`).join('')}</select>`
+        :f.type==='textarea'
         ?`<textarea data-k="${esc(f.key)}" rows="4" placeholder="Amoxicillin&#10;Paracetamol"></textarea>`
         :`<input data-k="${esc(f.key)}" type="${f.type==='number'?'number':'text'}"/>`)+'</div>').join('')
       +'<button class="primary">Run</button><div class="solout" style="margin-top:12px"></div>';

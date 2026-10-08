@@ -116,6 +116,12 @@ CREATE INDEX IF NOT EXISTS idx_sms_log_provider ON sms_log((data->>'providerMess
 CREATE TABLE IF NOT EXISTS pharmacy_quotes (id text PRIMARY KEY, upload_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_pharmacy_quotes_upload ON pharmacy_quotes(upload_id);
 CREATE TABLE IF NOT EXISTS sms_inbox (id text PRIMARY KEY, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+-- InsureCredit micro-loan applications (services/insurecredit.js). app_no is the
+-- numeric application number given to the client (also dialled on USSD); token is
+-- the unguessable part of the SMS link. Funder shares live inside the JSONB.
+CREATE TABLE IF NOT EXISTS credit_applications (id text PRIMARY KEY, app_no text UNIQUE, token text UNIQUE, status text, tenant_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_credit_applications_tenant ON credit_applications(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_credit_applications_bill ON credit_applications((data->>'billId'));
 -- Public trial sign-ups (register.html / routes/registerPortal.js), whether
 -- from the campaign "YES" reply link or a direct visit to /register/.
 CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
@@ -390,6 +396,16 @@ function pgRepo(exec) {
       get: (id) => one('SELECT data FROM sms_log WHERE id=$1', [id]),
       byProviderId: (pid) => one("SELECT data FROM sms_log WHERE data->>'providerMessageId'=$1 ORDER BY created_at DESC LIMIT 1", [pid]),
       all: (limit = 5000) => many('SELECT data FROM sms_log ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
+    credits: {
+      get: (id) => one('SELECT data FROM credit_applications WHERE id=$1', [id]),
+      byAppNo: (n) => one('SELECT data FROM credit_applications WHERE app_no=$1', [n]),
+      byToken: (tk) => one('SELECT data FROM credit_applications WHERE token=$1', [tk]),
+      byShareToken: (tk) => one('SELECT data FROM credit_applications WHERE data->\'shares\' @> $1::jsonb', [JSON.stringify([{ token: tk }])]),
+      byBill: (billId) => many("SELECT data FROM credit_applications WHERE data->>'billId'=$1 ORDER BY created_at DESC", [billId]),
+      insert: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
+      update: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
+      all: (limit = 5000) => many('SELECT data FROM credit_applications ORDER BY created_at DESC LIMIT $1', [limit]),
     },
     smsInbox: {
       insert: (m) => exec(upsert('sms_inbox', []), [m.id, m]),
@@ -666,6 +682,16 @@ function memRepo(M) {
       byProviderId: async (pid) => [...M.smsLog.values()].reverse().find((m) => m.providerMessageId === pid) || null,
       all: async (limit = 5000) => [...M.smsLog.values()].reverse().slice(0, limit),
     },
+    credits: {
+      get: async (id) => M.credits.get(id) || null,
+      byAppNo: async (n) => [...M.credits.values()].find((a) => a.appNo === n) || null,
+      byToken: async (tk) => [...M.credits.values()].find((a) => a.token === tk) || null,
+      byShareToken: async (tk) => [...M.credits.values()].find((a) => (a.shares || []).some((s) => s.token === tk)) || null,
+      byBill: async (billId) => [...M.credits.values()].filter((a) => a.billId === billId).reverse(),
+      insert: async (a) => { M.credits.set(a.id, a); },
+      update: async (a) => { M.credits.set(a.id, a); },
+      all: async (limit = 5000) => [...M.credits.values()].reverse().slice(0, limit),
+    },
     smsInbox: {
       insert: async (m) => { M.smsInbox.set(m.id, m); },
       all: async (limit = 5000) => [...M.smsInbox.values()].reverse().slice(0, limit),
@@ -743,7 +769,7 @@ if (usePg) {
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(),
     funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);

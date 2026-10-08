@@ -59,6 +59,24 @@ function normalizePhone(phone) {
   return digits.slice(-9);
 }
 
+
+/**
+ * Clinics type numbers the way patients write them ("0241234567"), but
+ * providers (Africa's Talking in particular) want international format. A
+ * recognisable Ghanaian number is rewritten to +233XXXXXXXXX; anything else
+ * (an already-international number, a "whatsapp:"-prefixed one, a foreign
+ * number) is passed through untouched rather than guessed at.
+ */
+function toDialable(raw) {
+  const s = String(raw).trim();
+  if (s.startsWith('+') || s.includes(':')) return s;
+  let d = s.replace(/\D/g, '');
+  if (d.startsWith('233')) d = d.slice(3);
+  else if (d.startsWith('0')) d = d.slice(1);
+  else return s;
+  return d.length === 9 && /^[2-9]/.test(d) ? `+233${d}` : s;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP transport — a tiny wrapper so adapters don't each reimplement it, and
 // tests can substitute a fake instead of reaching the real network.
@@ -77,6 +95,7 @@ function httpRequest(url, { method = 'POST', headers = {}, body } = {}) {
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
     });
+    req.setTimeout(12000, () => req.destroy(new Error('request_timeout')));
     req.on('error', reject);
     if (body) req.write(body);
     req.end();
@@ -369,6 +388,7 @@ async function resolveSender(tenant) {
  */
 async function send({ channel, to, body, tenant } = {}) {
   if (!to) return { ok: false, error: 'no_recipient' };
+  to = toDialable(to);
   // A rich (object) body only means anything to the WhatsApp adapters that
   // document one (Africa's Talking — see its own comment above); catching a
   // mismatched shape here, before dispatch, means a caller mistake fails
@@ -478,7 +498,7 @@ async function sendBulk({ to, body, tenant } = {}) {
 
 module.exports = {
   sendBulk,
-  send, genOtp, normalizePhone, resolveSender, isSandbox, PROVIDER_NAMES, PROVIDER_META,
+  send, genOtp, normalizePhone, toDialable, resolveSender, isSandbox, PROVIDER_NAMES, PROVIDER_META,
   get PROVIDER() { return config.messaging.provider; },
   _setRequestImplForTests,
 };

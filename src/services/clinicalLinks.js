@@ -153,7 +153,9 @@ async function request({ payerId, memberId, phone, condition, tenantId, createdB
   const sendChannel = channel === 'whatsapp' ? 'whatsapp' : 'sms';
   const body = `HNN Biller: your code to confirm clinical check-ins by text is ${link.otpCode}. `
     + 'Reply with this code, or enter it on the page. Ignore this if you did not request it.';
-  const r = await messaging.send({ channel: sendChannel, to: phone, body });
+  // A hospital-initiated link texts through that hospital's own sender when it has one.
+  const tenant = link.tenantId ? await store.tenants.get(link.tenantId).catch(() => null) : null;
+  const r = await messaging.send({ channel: sendChannel, to: phone, body, tenant });
   link.channelsSent = r.ok ? [sendChannel] : [];
   if (!r.ok) link.lastSendError = r.error || null; else delete link.lastSendError;
 

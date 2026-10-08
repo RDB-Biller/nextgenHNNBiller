@@ -8,6 +8,7 @@ const networks = require('./networks');
 const funders = require('./funders');
 const pharmacyPricing = require('./pharmacyPricing');
 const reconciliation = require('./reconciliation');
+const insurecredit = require('./insurecredit');
 
 /**
  * Solutions -- the 8 "gaps from the call" turned into Product Lab products.
@@ -320,6 +321,21 @@ const MODULES = {
       };
     },
   },
+
+  insurecredit: {
+    label: 'InsureCredit micro-loan',
+    description: 'Texts the patient a link (and USSD instructions) to apply for a micro-loan of up to GHS 2,000 for their out-of-pocket share, scored by ConfirmU, with a micro medical report attached. Above the limit it offers to send the report to a funder (e.g. HR) as a justification note.',
+    scope: 'none',
+    surfaces: ['patient', 'hospital', 'payer'],
+    params: insurecredit.PARAMS,
+    check: insurecredit.check,
+    async apply() { return null; },
+    async revert() {},
+    async run(ctx, p, input) {
+      if (ctx.surface === 'patient') return insurecredit.patientStatus(ctx.product, input);
+      return insurecredit.run({ ...ctx, surface: ctx.surface }, p, input);
+    },
+  },
 };
 
 /** Same decision function claims use in production, fed a hypothetical payer policy and a synthetic bill. */
@@ -350,6 +366,7 @@ function coerceParams(mod, input = {}) {
       if (d.options && !d.options.includes(v)) throw err(422, 'param_invalid_option', `${d.key}: ${d.options.join('|')}`);
       v = String(v);
     } else v = String(v);
+    if (d.pattern && !new RegExp(d.pattern).test(String(v))) throw err(422, 'param_invalid_format', d.key);
     out[d.key] = v;
   }
   return out;
@@ -368,6 +385,7 @@ function validateConfig(input = {}, existing = {}) {
   }
   const sameModule = key === existing.module;
   const params = coerceParams(mod, input.params !== undefined ? input.params : (sameModule ? existing.params : {}));
+  if (mod.check) mod.check(params);
   const tenantIds = input.tenantIds !== undefined ? input.tenantIds : existing.tenantIds;
   return {
     module: key, surfaces: [...new Set(surfaces)], params,
@@ -460,6 +478,14 @@ const INPUTS = {
   multi_funder: [],
   pharmacy_compare: [{ key: 'items', label: 'Medicines (one per line)', type: 'textarea', required: true }],
   reconciliation: [{ key: 'tenantId', label: 'Provider id', type: 'text', surface: 'payer' }, { key: 'since', label: 'From (YYYY-MM-DD)', type: 'text' }],
+  insurecredit: [
+    { key: 'applicationNo', label: 'Application number', type: 'text', surfaces: ['patient', 'hospital', 'payer'] },
+    { key: 'phone', label: 'Phone number you applied with', type: 'text', surfaces: ['patient'] },
+    { key: 'action', label: 'What to do', type: 'select', options: ['list', 'offer', 'preview', 'verify', 'resend'], surfaces: ['hospital', 'payer'] },
+    { key: 'billId', label: 'Bill id (for an offer)', type: 'text', surfaces: ['hospital', 'payer'] },
+    { key: 'amount', label: 'Amount in GHS (optional; defaults to the patient share)', type: 'number', surfaces: ['hospital', 'payer'] },
+    { key: 'name', label: 'Patient first name (preview only)', type: 'text', surfaces: ['hospital', 'payer'] },
+  ],
 };
 
 async function listFor(surface, { tenant, payerId } = {}) {

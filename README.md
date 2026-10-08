@@ -943,3 +943,28 @@ for settlement), and **desktop / Microsoft Store** (packaged app, local DB, offl
   A fourth provider, e.g. Meta's WhatsApp Cloud API, is a one-function addition to
   `messaging.js` once needed. Email delivery status is still unbuilt.
 - Payer remittance statements and clinic payout reports.
+
+## InsureCredit (micro-loan offers) and messaging changes
+
+**InsureCredit** is a Product Lab solution (module `insurecredit`). An insurer or hospital programs it; the
+patient gets an SMS with a link (and a USSD code plus an 8-digit application number) to apply for a micro-loan
+of up to GHS 2,000 towards their out-of-pocket share. The micro medical report is generated with the offer and
+travels with the application to ConfirmU; the application number lets the backend verify need
+(`GET /insurecredit-hooks/<secret>/applications/<no>`). Above the limit the patient is offered a
+justification note instead: with their consent the report is emailed/texted to a funder (e.g. HR) through an
+expiring, revocable link (max 3 recipients per application).
+
+- **Design variations:** `design` = classic / stepper / compact / story, plus colour, brand, headline,
+  button, SMS style/template and more. Product Lab shows a live preview; "Duplicate as variation" copies a
+  product so several can run side by side.
+- **Callbacks:** Master Control -> Product Lab -> InsureCredit panel shows the USSD and ConfirmU URLs
+  (secret in the path; rotatable). A USSD short code must be provisioned with Africa's Talking.
+- **ConfirmU contract:** the webhook (HMAC `x-hnn-signature`), decision callback and verification packet are
+  HNN's own shapes - align them with ConfirmU before going live.
+- **Sandbox:** a non-live product only previews. A live product creates real records; the global messaging
+  sandbox still stops SMS/email leaving the building.
+
+**Messaging changes shipped with it:** `notify()` now really dispatches (SMS/WhatsApp/email) instead of only
+logging; local numbers (`024…`) are normalised to `+233…` at the send seam; a provider-agnostic email
+transport (`EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`; Resend or SendGrid); outbound requests time out
+after 12s; hospital-initiated clinical links use that hospital's sender. Smoke: `npm run smoke:insurecredit`.

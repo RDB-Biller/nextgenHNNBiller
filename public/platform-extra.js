@@ -210,9 +210,48 @@ function pdSolModuleChanged(preset){
     if(p.type==='boolean')inp=`<select class="solParam" data-k="${p.key}"><option value="true" ${v===true||v==='true'?'selected':''}>Yes</option><option value="false" ${v===false||v==='false'?'selected':''}>No</option></select>`;
     else if(p.type==='select'){const opts=p.optionsFrom==='funders'?SOL_FUNDERS.map(f=>[f.id,f.name]):(p.options||[]).map(o=>[o,o]);
       inp=`<select class="solParam" data-k="${p.key}">${opts.map(o=>`<option value="${esc(o[0])}" ${o[0]===v?'selected':''}>${esc(o[1])}</option>`).join('')}</select>`;}
+    else if(p.type==='textarea')inp=`<textarea class="solParam" data-k="${p.key}" rows="3">${esc(v??'')}</textarea>`;
+    else if(p.type==='color')inp=`<input class="solParam" data-k="${p.key}" type="color" value="${esc(/^#[0-9a-fA-F]{6}$/.test(v||'')?v:'#0E5C4A')}" style="height:40px;padding:3px"/>`;
     else inp=`<input class="solParam" data-k="${p.key}" type="${p.type==='number'?'number':'text'}" ${p.min!=null?`min="${p.min}"`:''} ${p.max!=null?`max="${p.max}"`:''} value="${esc(v??'')}"/>`;
     return `<div class="field"><label>${esc(p.label)}</label>${inp}${p.help?`<span class="muted" style="font-size:11px">${esc(p.help)}</span>`:''}</div>`;
   }).join('');
+  pdSolPreviewInit(m);
+}
+// InsureCredit: a live design preview (the real applicant page in demo mode) that follows the form fields.
+function pdSolPreviewInit(m){
+  let box=$('pd_sol_preview');
+  if(!m||m.key!=='insurecredit'){if(box)box.style.display='none';return;}
+  if(!box){box=document.createElement('div');box.id='pd_sol_preview';box.className='field';$('pd_sol_params').after(box);}
+  box.style.display='';
+  box.innerHTML=`<label>Design preview (sample data) <label style="display:inline;font-weight:400;margin-left:10px"><input type="checkbox" id="pd_prev_over" style="width:auto"/> show a bill above the limit</label></label>
+    <iframe id="pd_prev_frame" title="InsureCredit preview" style="width:100%;max-width:400px;height:560px;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>`;
+  document.querySelectorAll('.solParam').forEach(e=>{e.addEventListener('input',pdSolPreview);e.addEventListener('change',pdSolPreview);});
+  $('pd_prev_over').addEventListener('change',pdSolPreview);
+  pdSolPreview();
+}
+let _pvT=null;
+function pdSolPreview(){
+  clearTimeout(_pvT);_pvT=setTimeout(()=>{
+    const f=$('pd_prev_frame');if(!f)return;
+    const g=(k)=>{const e=document.querySelector(`.solParam[data-k="${k}"]`);return e?e.value:'';};
+    const q=new URLSearchParams({demo:'1',design:g('design'),accent:g('accentColor'),brand:g('brandName'),headline:g('headline'),button:g('buttonLabel'),terms:g('termsNote'),foot:g('footnote'),ussd:g('ussdCode')});
+    if($('pd_prev_over')&&$('pd_prev_over').checked)q.set('over','1');
+    f.src='/credit/?'+q.toString();
+  },250);
+}
+// Duplicate a solution as a new draft (the quick way to make a design variation).
+async function pdDupSolution(id){
+  const p=PRODUCTS.find(x=>x.id===id);if(!p)return;
+  PD_EDIT=null;$('pd_type').value='solution';pdTypeChanged();await pdSolInit();
+  $('pd_payer').disabled=false;$('pd_type').disabled=false;$('pd_payer').value=p.payerId;
+  $('pd_sol_module').value=p.config.module;$('pd_sol_module').disabled=false;
+  pdSolModuleChanged(p.config);
+  $('pd_name').value=p.name+' (variation)';$('pd_desc').value=p.description||'';
+  $('pd_sol_title').value=p.config.title||'';$('pd_sol_intro').value=p.config.intro||'';
+  document.querySelectorAll('.pdProv').forEach(c=>{c.checked=(p.config.tenantIds||[]).includes(c.dataset.id);});
+  $('pd_create_btn').textContent='Create as draft';$('pd_cancel_edit').style.display='';
+  $('pd_create_status').textContent='Copied from "'+p.name+'". Change the design, then create it as a new draft.';
+  $('pd_name').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function pdSolConfig(){
   const params={};document.querySelectorAll('.solParam').forEach(e=>{params[e.dataset.k]=e.value;});
@@ -258,7 +297,8 @@ const SOL_INPUTS={
   auth_threshold:[['amount','Claim amount (GHS)','number']],
   auto_adjudication:[['diagnosis','Diagnosis','text'],['itemCodes','Item codes (comma-separated)','text'],['amount','Amount (GHS)','number']],
   claim_expiry:[],settlement_cycle:[['tenantId','Provider id (optional)','text']],daily_billing:[['tenantId','Provider id','text']],multi_funder:[],
-  pharmacy_compare:[['items','Medicines (one per line)','textarea']],reconciliation:[['tenantId','Provider id','text'],['since','From (YYYY-MM-DD)','text']],
+  pharmacy_compare:[['items','Medicines (one per line)','textarea']],
+  insurecredit:[['action','What to do','select',['list','verify','preview']],['applicationNo','Application number (for verify)','text'],['amount','Amount in GHS (for preview)','number'],['name','Patient first name (for preview)','text']],reconciliation:[['tenantId','Provider id','text'],['since','From (YYYY-MM-DD)','text']],
 };
 function pdAfterProducts(){
   const sols=PRODUCTS.filter(p=>p.type==='solution');
@@ -271,14 +311,21 @@ function pdAfterProducts(){
 function pdRunFields(){
   const p=PRODUCTS.find(x=>x.id===$('pd_run_sol').value);if(!p){$('pd_run_inputs').innerHTML='';return;}
   $('pd_run_inputs').innerHTML=(SOL_INPUTS[p.config.module]||[]).map(f=>`<div class="field"><label>${esc(f[1])}</label>`
-    +(f[2]==='textarea'?`<textarea class="solIn" data-k="${f[0]}" rows="4" placeholder="Amoxicillin&#10;Paracetamol"></textarea>`:`<input class="solIn" data-k="${f[0]}" type="${f[2]}"/>`)+'</div>').join('');
+    +(f[2]==='select'?`<select class="solIn" data-k="${f[0]}">${f[3].map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:f[2]==='textarea'?`<textarea class="solIn" data-k="${f[0]}" rows="4" placeholder="Amoxicillin&#10;Paracetamol"></textarea>`:`<input class="solIn" data-k="${f[0]}" type="${f[2]}"/>`)+'</div>').join('');
 }
 function pdTrySolution(id){$('pd_run_sol').value=id;pdRunFields();$('pd_run_card').scrollIntoView({behavior:'smooth'});}
 function solTable(rows,cols){
   if(!rows||!rows.length)return '<p class="muted" style="font-size:13px">None.</p>';
   return `<table><thead><tr>${cols.map(c=>`<th>${esc(c[1])}</th>`).join('')}</tr></thead><tbody>`+rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(typeof c[2]==='function'?c[2](r):r[c[0]])}</td>`).join('')}</tr>`).join('')+'</tbody></table>';
 }
+function solInsureCredit(d){
+  if(d.preview)return `<p><b>SMS preview</b> <span class="muted" style="font-size:12px">(${d.smsLength} characters)</span></p><p style="background:var(--brand-soft);padding:10px;border-radius:8px">${esc(d.sms)}</p><p class="muted" style="font-size:13px">${d.overCap?`Above the GHS ${n2(d.loanCap)} limit: offers the justification note instead of a loan.`:`Loanable: GHS ${n2(d.loanableAmount)} (limit GHS ${n2(d.loanCap)}).`}${d.ussd?` USSD ${esc(d.ussd)}.`:''}</p>`;
+  if(d.checks)return `<p>Application <b>${esc(d.applicationNo||'')}</b> · need check <b>${d.checks.passed?'passed':'NOT passed'}</b></p><pre style="white-space:pre-wrap;font-size:12px">${esc(JSON.stringify(d.checks,null,2))}</pre>`;
+  if(d.rows)return `<p><b>${d.total}</b> applications · requested GHS ${n2(d.requestedTotal)} · approved GHS ${n2(d.approvedTotal)} · notes shared ${d.sharedNotes}</p>`+solTable(d.rows,[['applicationNo','App no.'],['status','Status'],['amount','Bill'],['loanableAmount','Loanable'],['facility','Facility'],['to','Phone'],['createdAt','Created']]);
+  return `<pre style="white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre>`;
+}
 function solRender(mod,d){
+  if(mod==='insurecredit')return solInsureCredit(d);
   if(mod==='pharmacy_compare')return solPharmacy(d);
   if(mod==='auth_threshold')return `<p>Auto-authorize ${d.enabled?'<b>on</b>':'off'} up to <b>GHS ${n2(d.thresholdMaxAmount)}</b>.</p>`+(d.check?`<p>GHS ${n2(d.check.amount)} → <b>${d.check.autoAuthorized?'authorized automatically':'goes to manual review'}</b></p>`:'');
   if(mod==='auto_adjudication')return `<p>Rules active: <b>${d.activeRules.length}</b> (master switch ${d.masterEnabled?'on':'OFF'}).</p>`+solTable(d.activeRules,[['diagnosisKeyword','Diagnosis'],['requiredItemCodes','Needs',r=>(r.requiredItemCodes||[]).join(', ')],['maxAmount','Cap']])+(d.whatIf?`<p style="margin-top:8px">What-if: <b>${d.whatIf.autoClear?'auto-clears ('+esc(d.whatIf.method)+')':'manual review'}</b></p>`:'');
@@ -378,3 +425,22 @@ async function pqAccuracy(){
     +`<p class="muted" style="font-size:12px">Positive variance = the pharmacy has been billing more than it quoted.</p>`;
 }
 const _pqBoot=window.smsBoot;window.smsBoot=function(){if(_pqBoot)_pqBoot();pqLoad();};
+
+// ======================= InsureCredit panel (Master Control) =======================
+async function icLoad(){
+  try{
+    const r=await fetch('/api/platform/insurecredit/overview',{headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error||'Failed');
+    const u=o.hookUrls||{};
+    $('ic_hooks').innerHTML=['ussd','decision','verify'].map(k=>`<div style="margin:4px 0"><b>${k==='ussd'?'USSD callback (Africa\'s Talking)':k==='decision'?'ConfirmU decision callback':'ConfirmU verification lookup'}</b><br><code style="font-size:12px;word-break:break-all">${esc(u[k]||'')}</code></div>`).join('')
+      +`<div class="muted" style="font-size:12px;margin-top:6px">Hard cap GHS ${n2(o.hardCap)}. Application numbers are 8 digits.</div>`;
+    const s=o.summary||{};
+    $('ic_apps').innerHTML=`<p style="font-size:13px"><b>${s.total||0}</b> applications · requested GHS ${n2(s.requestedTotal)} · approved GHS ${n2(s.approvedTotal)} · notes shared ${s.sharedNotes||0}</p>`+solTable(s.rows||[],[['applicationNo','App no.'],['status','Status'],['amount','Bill'],['loanableAmount','Loanable'],['facility','Facility'],['to','Phone'],['createdAt','Created']]);
+  }catch(e){$('ic_hooks').textContent=e.message;}
+}
+async function icRotate(){
+  if(!confirm('Rotate the callback secret? The USSD and ConfirmU URLs in use today will stop working until you update them.'))return;
+  try{const r=await fetch('/api/platform/insurecredit/rotate-secret',{method:'POST',headers:H()});if(!r.ok)throw new Error('Failed');toast('Secret rotated');icLoad();}catch(e){toast(e.message);}
+}
+async function icAutoSend(){
+  try{const r=await fetch('/api/platform/insurecredit/run-auto-send',{method:'POST',headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error);toast('Auto-send: '+JSON.stringify(o).slice(0,120));icLoad();}catch(e){toast(e.message);}
+}

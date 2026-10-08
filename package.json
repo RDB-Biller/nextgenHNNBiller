@@ -10,6 +10,7 @@
     "smoke": "node scripts/smoke.js",
     "smoke:verification": "node scripts/smoke-verification.js",
     "smoke:messaging-live": "node scripts/smoke-messaging-live.js",
+    "smoke:insurecredit": "node scripts/smoke-insurecredit.js",
     "smoke:operating-mode": "node scripts/smoke-operating-mode.js",
     "smoke:payer-commercial": "node scripts/smoke-payer-commercial.js",
     "smoke:pde": "node scripts/smoke-pde.js",

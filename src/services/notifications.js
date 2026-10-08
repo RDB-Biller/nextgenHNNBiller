@@ -2,17 +2,64 @@
 
 const crypto = require('crypto');
 const store = require('../store');
+const messaging = require('./messaging');
+const email = require('./email');
 
-/** Fan-out log. References, amounts, and links only — never member IDs or clinical detail. */
-async function notify({ party, channel = 'email', to, subject, body, claimId, billId, verificationId }) {
+/**
+ * Fan-out log AND dispatch. References, amounts, and links only -- never member IDs or clinical detail.
+ *
+ * Until now this only wrote a log row: the patient/insurer/provider messages
+ * it describes ("claim submitted", "payment received", "financing approved"...)
+ * were recorded as delivered but nothing was ever sent. It now also hands
+ * sms / whatsapp messages to the messaging seam (sandbox/live switch, tenant or
+ * platform credentials, number normalisation all apply) and email to the email
+ * transport, and records the honest outcome on the row. It is best-effort: a
+ * delivery failure NEVER throws or blocks the billing step that raised it.
+ *
+ * `dispatch: false` records without sending, for callers that already send
+ * their own richer message (patient bill verification does).
+ */
+async function notify({ party, channel = 'email', to, subject, body, claimId, billId, verificationId, dispatch = true, tenant }) {
   const n = {
     id: `ntf_${crypto.randomBytes(5).toString('hex')}`,
     party, channel, to: mask(to), subject, body,
     claimId: claimId || null, billId: billId || null, verificationId: verificationId || null,
     createdAt: new Date().toISOString(), delivered: true,
   };
+  if (dispatch && to) {
+    try {
+      const r = await deliver({ channel, to, subject, body, billId, tenant });
+      n.delivery = { status: r.status, error: r.error || null, providerMessageId: r.providerMessageId || null };
+      n.delivered = r.status === 'sent' || r.status === 'sandbox';
+    } catch (e) {
+      n.delivery = { status: 'failed', error: e.message || 'delivery_error', providerMessageId: null };
+      n.delivered = false;
+    }
+  } else if (dispatch && !to) {
+    n.delivery = { status: 'no_recipient', error: null, providerMessageId: null };
+    n.delivered = false;
+  }
   await store.notifications.insert(n);
   return n;
+}
+
+async function deliver({ channel, to, subject, body, billId, tenant }) {
+  if (channel === 'email') {
+    const r = await email.send({ to, subject, text: body });
+    return { status: r.ok ? (r.sandbox ? 'sandbox' : 'sent') : (r.error === 'email_provider_not_configured' ? 'not_configured' : 'failed'),
+      error: r.error, providerMessageId: r.providerMessageId };
+  }
+  if (channel === 'sms' || channel === 'whatsapp') {
+    let t = tenant || null;
+    if (!t && billId) {
+      const bill = await store.bills.get(billId);
+      if (bill?.tenantId) t = await store.tenants.get(bill.tenantId);
+    }
+    const r = await messaging.send({ channel, to, body, tenant: t });
+    return { status: r.ok ? (r.sandbox ? 'sandbox' : 'sent') : (r.error === 'messaging_provider_not_configured' ? 'not_configured' : 'failed'),
+      error: r.error, providerMessageId: r.providerMessageId };
+  }
+  return { status: 'logged_only', error: null };
 }
 
 /** Ask the patient to verify a freshly-created bill, right away. */
@@ -21,7 +68,7 @@ async function notifyPatientVerification(verification, bill) {
   await notify({ party: 'patient', channel: 'sms', to: bill.patient?.phone,
     subject: 'Please verify your bill',
     body: `Please verify your bill of ${amount} at ${bill.provider}. This confirms the charges are correct before your insurer or other payer is asked to pay: ${verification.link}`,
-    billId: bill.id, verificationId: verification.id });
+    billId: bill.id, verificationId: verification.id, dispatch: false });
 }
 
 /** Tell the provider when a patient disputes their bill instead of verifying it. */

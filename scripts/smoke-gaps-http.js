@@ -57,7 +57,7 @@ const P = { 'x-platform-key': PKEY };
 
   // ---- solutions over HTTP: Master Control -> patient / hospital / payer
   const mods = await call('GET', '/api/platform/solutions/modules', { headers: P });
-  ok(mods.json.modules.length === 8, 'module registry served to Master Control');
+  ok(mods.json.modules.length === 9, 'module registry served to Master Control');
 
   // a classified pharmacy needs real bills; create two via the hospital API if possible, else skip data assertions
   const create = await call('POST', '/api/platform/products', { headers: P, body: { payerId: 'acacia', type: 'solution', name: 'HTTP pharmacy compare',

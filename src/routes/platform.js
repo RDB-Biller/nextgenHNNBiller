@@ -37,6 +37,7 @@ const funders = require('../services/funders');
 const pharmacyPricing = require('../services/pharmacyPricing');
 const pharmacyQuotes = require('../services/pharmacyQuotes');
 const reconciliation = require('../services/reconciliation');
+const insurecredit = require('../services/insurecredit');
 const smsDashboard = require('../services/smsDashboard');
 const solutions = require('../services/solutions');
 
@@ -1165,6 +1166,26 @@ router.post('/sms/optouts', async (req, res, next) => {
 });
 router.delete('/sms/optouts/:phone', async (req, res, next) => {
   try { res.json(await smsDashboard.removeOptOut(req.params.phone)); } catch (e) { next(e); }
+});
+
+// ---- InsureCredit (micro-loans for out-of-pocket) ------------------------------
+// Applications, callback URLs (USSD for Africa's Talking, decision/verify for
+// ConfirmU) and a manual trigger for the auto-send pass. Offers themselves are
+// sent through the solution runner (POST /solutions/:id/run, action "offer").
+router.get('/insurecredit/overview', async (req, res, next) => {
+  try {
+    res.json({ hookUrls: await insurecredit.hookUrls(baseUrl(req)), hardCap: insurecredit.HARD_CAP,
+      summary: await insurecredit.list({ status: req.query.status, productId: req.query.productId, limit: Number(req.query.limit) || 50 }) });
+  } catch (e) { next(e); }
+});
+router.post('/insurecredit/rotate-secret', async (req, res, next) => {
+  try { await insurecredit.rotateSecret(); res.json({ hookUrls: await insurecredit.hookUrls(baseUrl(req)) }); } catch (e) { next(e); }
+});
+router.post('/insurecredit/run-auto-send', async (req, res, next) => {
+  try { res.json(await insurecredit.runAutoSend()); } catch (e) { next(e); }
+});
+router.get('/insurecredit/applications/:appNo', async (req, res, next) => {
+  try { res.json(await insurecredit.verifyByAppNo(req.params.appNo)); } catch (e) { next(e); }
 });
 
 module.exports = router;

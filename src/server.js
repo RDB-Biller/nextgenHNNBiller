@@ -31,6 +31,9 @@ const registerPortalRoutes = require('./routes/registerPortal');
 const smsHooksRoutes = require('./routes/smsHooks');
 const solutionsPortalRoutes = require('./routes/solutionsPortal');
 const solutionsApiRoutes = require('./routes/solutionsApi');
+const creditPortalRoutes = require('./routes/creditPortal');
+const creditHooks = require('./routes/creditHooks');
+const insurecredit = require('./services/insurecredit');
 const campaigns = require('./services/campaigns');
 const claimExpiry = require('./services/claimExpiry');
 const settlementBatches = require('./services/settlementBatches');
@@ -65,6 +68,11 @@ app.use('/clinical/api', clinicalPortalRoutes);
 app.use('/clinical', express.static(PUBLIC, { index: 'clinical.html' }));
 app.use('/solutions/api', solutionsPortalRoutes);
 app.use('/solutions', express.static(PUBLIC, { index: 'solutions.html' }));
+// InsureCredit: applicant/funder pages (token links) and the USSD + ConfirmU callbacks (secret-in-path).
+app.use('/credit/api', creditPortalRoutes);
+app.use('/credit', express.static(PUBLIC, { index: 'credit.html' }));
+app.use('/ussd', creditHooks.ussd);
+app.use('/insurecredit-hooks', creditHooks.hooks);
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 // Public trial sign-up — the link a prospecting campaign's "YES" reply sends
@@ -128,6 +136,7 @@ if (require.main === module) {
     const runSweeps = () => {
       claimExpiry.runExpiryPass().catch((e) => console.error('[claimExpiry] sweep failed:', e));
       settlementBatches.runDue().catch((e) => console.error('[settlementBatches] sweep failed:', e));
+      insurecredit.runAutoSend().catch((e) => console.error('[insurecredit] auto-send failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
     setInterval(runSweeps, SWEEP_INTERVAL_MS);
