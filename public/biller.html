@@ -374,7 +374,7 @@ async function offerInsureCredit(again){
   if(!$('pphone').value){toast('Patient phone number is needed to send the InsureCredit offer');return;}
   const r=await fetch(`/api/v1/bills/${id}/insurecredit`,{method:'POST',headers:hdr(),body:JSON.stringify({resend:again===true})});
   const o=await r.json().catch(()=>({}));
-  if(!r.ok){toast('InsureCredit: '+(o.message||o.error||r.status));return;}
+  if(!r.ok){toast('InsureCredit: '+(o.message||o.error||r.status)+(o.detail?' — '+o.detail:'')+(o.error==='error'||o.message==='amount_below_minimum'?' (change it in Product Lab → InsureCredit (default) → Edit)':''));return;}
   const sent=(o.sentVia||[]).length>0;
   $('result').innerHTML=`<span class="pill awaiting_payer">InsureCredit offered</span> Application <b>${esc(o.applicationNo)}</b> · ${o.overCap?'bill is above the GHS 2,000 loan limit, so the patient was offered a medical justification note instead':'up to GHS '+num(o.loanableAmount)}
     <p class="muted" style="margin:6px 0 0;font-size:13px">${sent?'Offer texted to '+esc(o.to||'the patient')+'.':'Offer created but the text did not go out (messaging may be in sandbox or not configured).'} ${o.reused?'An offer already existed for this bill. ':''}The bill settles automatically when the loan is approved.</p>

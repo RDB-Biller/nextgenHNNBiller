@@ -53,6 +53,7 @@ async function requireLicense(req, res, next) {
 function errorHandler(err, req, res, _next) {
   const status = err.status || 502;
   const payload = { error: err.code || 'error', message: err.message };
+  if (err.detail && status < 500) payload.detail = err.detail;
   if (err.body) payload.upstream = err.body;
   if (status >= 500) console.error(err);
   res.status(status).json(payload);
