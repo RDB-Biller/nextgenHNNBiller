@@ -458,6 +458,8 @@ let PAYERS=[];
 // Billing-terminal default: highlighted in the payer row and pre-ticked in the split panel.
 // Display only -- nothing is routed until the user clicks a payer; the payer list itself comes from the API/seed.
 const DEFAULT_PAYER_ID='cosmopolitan';
+// InsureCredit settlement tab: always drawn, even if the payer list fails to load (it does not depend on it).
+const IC_BTN=`<button class="accent" id="icTab" onclick="offerInsureCredit()" title="Text the patient a micro-loan offer (up to GHS 2,000) for their share of this bill">InsureCredit</button>`;
 async function loadPayers(){
   try{
     const r=await fetch('/api/v1/bills/payers',{headers:hdr()});
@@ -466,11 +468,10 @@ async function loadPayers(){
     PAYERS=data;
     const btn=(p)=>`<button class="${p.id===DEFAULT_PAYER_ID?'accent':''}" onclick="routePayer('${esc(p.id)}')" title="${p.id===DEFAULT_PAYER_ID?'Default payer · ':''}${p.provisional?'Facility-programmed'+(p.expiresAt?' · expires '+esc(String(p.expiresAt).slice(0,10)):''):''}">${esc(p.name)}${p.provisional?' <span style="opacity:.6;font-size:11px">•</span>':''}</button>`;
     const ins=data.filter(p=>p.group==='insurer'), emp=data.filter(p=>p.group==='employer');
-    const icBtn=`<button class="accent" id="icTab" onclick="offerInsureCredit()" title="Text the patient a micro-loan offer (up to GHS 2,000) for their share of this bill">InsureCredit</button>`;
-    $('insurerTabs').innerHTML=(ins.map(btn).join('')||'<span class="muted">None configured</span>')+icBtn;
+    $('insurerTabs').innerHTML=(ins.map(btn).join('')||'<span class="muted">None configured</span>')+IC_BTN;
     $('employerTabs').innerHTML=emp.map(btn).join('')||'<span class="muted">None configured</span>';
     renderSplit();
-  }catch(e){ $('insurerTabs').innerHTML='<span class="muted">Could not load payers</span>'; }
+  }catch(e){ $('insurerTabs').innerHTML='<span class="muted">Could not load payers (check the API key above)</span>'+IC_BTN; }
 }
 
 // ---- who pays: explicit copay + multi-payer split ----
