@@ -556,6 +556,83 @@ async function bridgeWithInsureCredit(record, { billId, tenant } = {}) {
   return r;
 }
 
+// ---- public self-signup (Afriyie app / general population) ----------------------------------------
+//
+// Anyone can start a plan from the Afriyie app without a hospital visit. The phone is the identity:
+// a one-time code is texted, and only a verified phone can create or list plans. The plan is
+// attached to the hospital the person chooses (any hospital with a live programme; the default
+// programme covers them all), so the biller sees it like any plan it enrolled itself.
+
+const OTP_TTL_MS = 10 * 60000; const OTP_MAX = 5;
+const otpKey = (phone) => `savings_otp:${messaging.normalizePhone(phone)}`;
+
+async function facilities() {
+  const tenants = await store.tenants.all();
+  const out = [];
+  for (const t of tenants) { const p = await productFor(t.id); if (p) out.push({ id: t.id, name: t.name, programme: paramsOf(p).brandName, partner: paramsOf(p).partnerName }); }
+  return out;
+}
+
+/** Text a one-time code to the phone. Returns nothing identifying; in messaging sandbox the code is echoed for demos. */
+async function startVerification(phoneRaw, { purpose = 'signup' } = {}) {
+  const phone = messaging.toDialable(phoneRaw || '');
+  if (!/^\+\d{8,15}$/.test(phone)) throw err(422, 'phone_invalid');
+  const code = messaging.genOtp();
+  await store.settings.set(otpKey(phone), { phone, code, purpose, attempts: 0, expiresAt: new Date(Date.now() + OTP_TTL_MS).toISOString() });
+  const r = await messaging.send({ channel: 'sms', to: phone, body: `Your TrimesterSave / BirthPrep code is ${code}. It expires in 10 minutes. Ignore this if you did not request it.`, tenant: null });
+  const out = { sent: !!r.ok, sandbox: !!r.sandbox, to: maskPhone(phone), expiresInMinutes: 10 };
+  if (r.sandbox) out.codeSandbox = code; // never present once messaging is live
+  return out;
+}
+async function checkVerification(phoneRaw, code, { consume = true } = {}) {
+  const phone = messaging.toDialable(phoneRaw || '');
+  const rec = await store.settings.get(otpKey(phone));
+  if (!rec || new Date(rec.expiresAt) < new Date()) throw err(401, 'code_expired_or_missing');
+  if (rec.attempts >= OTP_MAX) throw err(429, 'too_many_attempts');
+  if (String(code || '').trim() !== rec.code) { rec.attempts++; await store.settings.set(otpKey(phone), rec); throw err(401, 'code_invalid'); }
+  if (consume) await store.settings.set(otpKey(phone), { ...rec, expiresAt: new Date(0).toISOString() }); // one use
+  return phone;
+}
+
+/**
+ * Verify a code and hand back a signed receipt. Lets another system (the TMS Afriyie backend) treat
+ * the phone as verified by the biller's own SMS provider (Africa's Talking) instead of running its
+ * own: receipt = HMAC-SHA256(phone|verifiedAt, PHONE_VERIFY_SIGNING_KEY). The key is shared with that
+ * backend; it falls back to the partner hook secret when unset.
+ */
+async function signingKey() { return process.env.PHONE_VERIFY_SIGNING_KEY || (await getSettings()).hookSecret; }
+async function verifyAndReceipt(phoneRaw, code) {
+  const phone = await checkVerification(phoneRaw, code);
+  const verifiedAt = now();
+  const receipt = crypto.createHmac('sha256', await signingKey()).update(`${phone}|${verifiedAt}`).digest('hex');
+  return { verified: true, phone, verifiedAt, receipt, provider: 'africastalking' };
+}
+async function checkReceipt({ phone, verifiedAt, receipt }) {
+  const want = crypto.createHmac('sha256', await signingKey()).update(`${messaging.toDialable(phone || '')}|${verifiedAt}`).digest('hex');
+  const a = Buffer.from(String(receipt || '')); const b = Buffer.from(want);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** Create a plan from the public app: { name, phone, code, facilityId, goal, horizon, other, answers, facts } */
+async function selfEnrol(input = {}) {
+  const phone = await checkVerification(input.phone, input.code, { consume: false });
+  const tenant = await store.tenants.get(String(input.facilityId || ''));
+  if (!tenant) throw err(422, 'facility_required', 'choose the hospital you plan to use');
+  const product = await productFor(tenant.id);
+  if (!product) throw err(404, 'no_live_savings_programme');
+  await checkVerification(input.phone, input.code); // burn the code only once the request is valid
+  const rec = await enrol({ tenant, product, input: { ...input, patient: { name: input.name, phone, memberId: input.memberId || null }, useHistory: true }, by: 'patient_app' });
+  return { planNo: rec.planNo, token: rec.token, link: planLink(rec.token), plan: await publicView(rec) };
+}
+
+/** All plans for a verified phone (every hospital): what the Afriyie app shows after sign-in. */
+async function myPlans(phoneRaw, code) {
+  const phone = await checkVerification(phoneRaw, code);
+  const ph = messaging.normalizePhone(phone);
+  const rows = (await store.savingsPlans.all(5000)).filter((r) => messaging.normalizePhone(r.patient.phone) === ph);
+  return { phone: maskPhone(phone), plans: rows.map((r) => ({ planNo: r.planNo, token: r.token, goal: r.goal, goalLabel: r.goalLabel, facility: r.facility, status: r.status, progress: progress(r), end: r.end, createdAt: r.createdAt })) };
+}
+
 // ---- views ----------------------------------------------------------------------------------------
 
 function progress(record) {
@@ -650,5 +727,6 @@ module.exports = {
   productFor, defaultProduct: async () => (await allProducts()).find(isDefault) || null, ensureDefaultProduct,
   getSettings, rotateSecret, checkSecret, hookUrls,
   factsFromAnswers, deliveryScenarios, targetFrom, plan, inferHistory, suggestionFor, gestation,
+  facilities, startVerification, checkVerification, verifyAndReceipt, checkReceipt, selfEnrol, myPlans,
   enrol, update, contribute, setStatus, bridgeWithInsureCredit, byTokenOrThrow, view, publicView, list, findByPhone, runReminders, run,
 };

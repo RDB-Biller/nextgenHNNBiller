@@ -170,5 +170,26 @@ async function mkBill({ diagnosis, items, phone = '0244000900', name = 'Akosua B
   const lst = await sav.list({ tenantId: T });
   ok(lst.total === 2 && lst.savedTotal > 0 && lst.rows.every((r) => r.patient.phone.startsWith('•')), 'listing by hospital with totals');
 
+  // ===== 10. public self-signup (Afriyie app) =========================================================
+  const fac = await sav.facilities();
+  ok(fac.length >= 2 && fac.every((f) => f.programme), 'the public app can list hospitals with a live programme');
+  await rejects(() => sav.startVerification('123'), 422, 'a bad phone cannot start verification');
+  const smsG = sms.length; const v1 = await sav.startVerification('0244000955');
+  ok(v1.sent && sms.length === smsG + 1 && /code is \d{4,6}/.test(lastSms().message) && v1.codeSandbox === undefined, 'a one-time code is texted (never echoed when messaging is live)');
+  const code = lastSms().message.match(/code is (\d+)/)[1];
+  await rejects(() => sav.selfEnrol({ name: 'Adwoa', phone: '0244000955', code: '000000', facilityId: T, goal: 'delivery', horizon: '9', facts: { edd } }), 401, 'a wrong code is refused');
+  await rejects(() => sav.selfEnrol({ name: 'Adwoa', phone: '0244000955', code, facilityId: 'nope', goal: 'delivery', horizon: '9' }), 422, 'a hospital must be chosen');
+  const su = await sav.selfEnrol({ name: 'Adwoa Owusu', phone: '0244000955', code, facilityId: T, goal: 'delivery', horizon: '6', answers: { edd, previousCs: '1', hypertension: 'yes' } });
+  ok(/^\d{8}$/.test(su.planNo) && su.token && su.plan.firstName === 'Adwoa' && su.plan.target.target > 0 && (await store.savingsPlans.byPlanNo(su.planNo)).createdBy === 'patient_app', 'a person can enrol themselves from the app; the hospital sees the plan like any other');
+  await rejects(() => sav.selfEnrol({ name: 'Adwoa Owusu', phone: '0244000955', code, facilityId: T, goal: 'other', horizon: '3', facts: { otherAmount: 100 } }), 401, 'a code works once');
+  await sav.startVerification('0244000955'); const code2 = lastSms().message.match(/code is (\d+)/)[1];
+  const mine = await sav.myPlans('0244000955', code2);
+  ok(mine.plans.length === 1 && mine.plans[0].planNo === su.planNo && mine.plans[0].token === su.token && mine.phone.startsWith('•'), 'after verifying the phone, the app gets every plan for that person (with tokens to open them)');
+  await sav.startVerification('0244000955'); const code3 = lastSms().message.match(/code is (\d+)/)[1];
+  const rc = await sav.verifyAndReceipt('0244000955', code3);
+  ok(rc.verified && rc.provider === 'africastalking' && /^[a-f0-9]{64}$/.test(rc.receipt) && (await sav.checkReceipt(rc)) && !(await sav.checkReceipt({ ...rc, phone: '+233244000956' })), 'registration from the Afriyie app verifies the phone through the biller (Africa\'s Talking) and gets a signed receipt the TMS backend can check');
+  for (let i = 0; i < 5; i++) await sav.checkVerification('0244000955', 'bad').catch(() => null);
+  await rejects(() => sav.checkVerification('0244000955', code3), 401, 'repeated wrong codes burn the code');
+
   console.log(`\nBIRTHPREP SAVINGS CHECK: ${a} assertions${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "HNN Biller — Complete API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`"
   },
   "servers": [
@@ -4928,6 +4928,94 @@
         "responses": {
           "200": {
             "description": "{ plans, remindersSent }"
+          }
+        }
+      }
+    },
+    "/savings/api/facilities": {
+      "get": {
+        "summary": "Public: hospitals with a live BirthPrep programme, plus the intake questions, goals and horizons (CORS open)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/savings/api/verify/start": {
+      "post": {
+        "summary": "Public: text a one-time code to a phone through the biller's SMS provider (Africa's Talking). { phone }. In messaging sandbox the code is echoed (codeSandbox).",
+        "responses": {
+          "200": {
+            "description": "{ sent, to }"
+          },
+          "422": {
+            "description": "phone_invalid"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
+    "/savings/api/verify/check": {
+      "post": {
+        "summary": "Public: verify a code on its own and get a signed receipt { verified, phone, verifiedAt, receipt, provider } (HMAC with PHONE_VERIFY_SIGNING_KEY) for a partner backend such as TMS Afriyie",
+        "responses": {
+          "200": {
+            "description": "Receipt"
+          },
+          "401": {
+            "description": "code_invalid or code_expired_or_missing"
+          },
+          "429": {
+            "description": "too_many_attempts"
+          }
+        }
+      }
+    },
+    "/savings/api/signup": {
+      "post": {
+        "summary": "Public self-enrolment from the Afriyie app: { name, phone, code, facilityId, goal, horizon, other, answers, facts }. Creates the plan at the chosen hospital and texts the link.",
+        "responses": {
+          "201": {
+            "description": "{ planNo, token, link, plan }"
+          },
+          "401": {
+            "description": "bad code"
+          },
+          "422": {
+            "description": "facility_required / plan validation"
+          }
+        }
+      }
+    },
+    "/savings/api/my-plans": {
+      "post": {
+        "summary": "Public: every plan linked to a verified phone { phone, code } -> { plans:[{ planNo, token, ... }] }",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/savings-hooks/{secret}/verify-receipt": {
+      "post": {
+        "summary": "Partner backend checks a verification receipt { phone, verifiedAt, receipt } -> { valid }",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       }

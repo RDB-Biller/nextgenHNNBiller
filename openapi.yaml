@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Composite Billing & Settlement Platform
-  version: 0.7.0
+  version: 0.8.0
   description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are settled
     by patient self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from its Stanbic account
     to the clinic over the SBG rail.
@@ -2156,6 +2156,65 @@ paths:
       responses:
         '200':
           description: '{ plans, remindersSent }'
+  /savings/api/facilities:
+    get:
+      summary: 'Public: hospitals with a live BirthPrep programme, plus the intake questions, goals and horizons
+        (CORS open)'
+      responses:
+        '200':
+          description: OK
+  /savings/api/verify/start:
+    post:
+      summary: 'Public: text a one-time code to a phone through the biller''s SMS provider (Africa''s Talking).
+        { phone }. In messaging sandbox the code is echoed (codeSandbox).'
+      responses:
+        '200':
+          description: '{ sent, to }'
+        '422':
+          description: phone_invalid
+        '429':
+          description: rate_limited
+  /savings/api/verify/check:
+    post:
+      summary: 'Public: verify a code on its own and get a signed receipt { verified, phone, verifiedAt, receipt,
+        provider } (HMAC with PHONE_VERIFY_SIGNING_KEY) for a partner backend such as TMS Afriyie'
+      responses:
+        '200':
+          description: Receipt
+        '401':
+          description: code_invalid or code_expired_or_missing
+        '429':
+          description: too_many_attempts
+  /savings/api/signup:
+    post:
+      summary: 'Public self-enrolment from the Afriyie app: { name, phone, code, facilityId, goal, horizon, other,
+        answers, facts }. Creates the plan at the chosen hospital and texts the link.'
+      responses:
+        '201':
+          description: '{ planNo, token, link, plan }'
+        '401':
+          description: bad code
+        '422':
+          description: facility_required / plan validation
+  /savings/api/my-plans:
+    post:
+      summary: 'Public: every plan linked to a verified phone { phone, code } -> { plans:[{ planNo, token, ... }]
+        }'
+      responses:
+        '200':
+          description: OK
+  /savings-hooks/{secret}/verify-receipt:
+    post:
+      summary: Partner backend checks a verification receipt { phone, verifiedAt, receipt } -> { valid }
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
 components:
   securitySchemes:
     TenantKey:

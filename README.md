@@ -1042,3 +1042,12 @@ number of months or years, or open-ended). `services/savingsPlans.js`:
   savings partner (`POST /savings-hooks/{secret}/contribution`, idempotent on reference); the
   partner app can read the plan feed. Reminders go out before each milestone. Patient page at
   `/s/<token>`. Smoke: `npm run smoke:savings`.
+
+### Self-signup from the Afriyie app (general population)
+
+Public, phone-verified endpoints under `/savings/api` (CORS open, rate limited): `facilities`,
+`verify/start` (code by SMS through the biller's Africa's Talking), `verify/check` (signed receipt
+for a partner backend; key `PHONE_VERIFY_SIGNING_KEY`), `signup` (creates the plan at the chosen
+hospital; the biller sees it like any plan it enrolled), `my-plans`. The matching Afriyie frontend
+changes (public `/birthprep` sign-up, `/dashboard/birthprep`, registration codes via the biller)
+are in the `tms-afriyie-frontend` patch delivered alongside this repo.
