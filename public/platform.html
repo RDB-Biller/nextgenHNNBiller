@@ -468,6 +468,13 @@
       <div id="aia_recent" style="margin-top:12px"></div>
     </div>
 
+    <div class="card" style="margin-bottom:14px" id="sv_card"><h2>BirthPrep savings &mdash; plans &amp; partner webhook</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Give the contribution URL to the savings partner (e.g. TrimesterSave) so deposits post to the plan; the secret is part of the URL. Hospitals enrol patients from the billing terminal; targets come from the obstetric pathways configured in the product.</p>
+      <div id="sv_hooks" class="muted" style="font-size:13px">Loading…</div>
+      <div class="row" style="margin:10px 0"><button class="ghost mini" onclick="svLoad()">Refresh</button><button class="ghost mini" onclick="svRotate()">Rotate secret</button><button class="ghost mini" onclick="svReminders()">Send due reminders now</button></div>
+      <div id="sv_plans"></div>
+    </div>
+
     <div class="card" style="margin-bottom:14px" id="ic_card"><h2>InsureCredit &mdash; applications &amp; ConfirmU callbacks</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Give these URLs to Africa's Talking (USSD) and ConfirmU. The secret is part of each URL, so treat them like passwords; rotating it invalidates the old ones.</p>
       <div id="ic_hooks" class="muted" style="font-size:13px">Loading…</div>
@@ -1466,7 +1473,7 @@ async function setRegStatus(id,status){
 }
 
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();aiaLoad();
+boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();aiaLoad();svLoad();
   loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();if(window.smsBoot)smsBoot();};
 
 // ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====

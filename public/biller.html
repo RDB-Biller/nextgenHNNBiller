@@ -98,6 +98,39 @@
         </div>
         <div id="finResult" style="margin-top:12px"></div>
       </div>
+      <div class="card" id="savCard"><h2>Savings plan <span class="tag" style="background:var(--brand-soft);color:var(--brand)">BirthPrep</span></h2>
+        <p class="muted" style="margin-top:0;font-size:13px">Enrol the patient to save towards a delivery, a planned procedure or any goal. The target comes from their clinical picture and history; the plan re-plans when things change, and InsureCredit can bridge a shortfall.</p>
+        <div id="savSuggest" style="display:none;background:var(--brand-soft);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:13px"></div>
+        <div class="row">
+          <div class="field"><label>Saving for</label><select id="sv_goal" onchange="savGoalChanged()"><option value="delivery">Delivery of the baby</option><option value="procedure">A planned procedure</option><option value="other">Something else</option></select></div>
+          <div class="field"><label>Horizon</label><select id="sv_h" onchange="savHorizonChanged()"><option value="9">9 months</option><option value="6">6 months</option><option value="3">3 months</option><option value="other">Other</option></select></div>
+          <div class="field" id="sv_other_wrap" style="display:none"><label>Other: months (blank = open-ended)</label><input id="sv_other" type="number" placeholder="e.g. 24"/></div>
+        </div>
+        <div id="sv_delivery">
+          <div class="row">
+            <div class="field"><label>Expected due date</label><input id="sv_edd" type="date"/></div>
+            <div class="field"><label>or first day of last period</label><input id="sv_lmp" type="date"/></div>
+            <div class="field"><label>Previous caesareans</label><input id="sv_cs" type="number" min="0" placeholder="0"/></div>
+          </div>
+          <div class="row" style="font-size:13px">
+            <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sv_pih" style="width:auto"/> Hypertension in pregnancy</label>
+            <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sv_gdm" style="width:auto"/> Diabetes</label>
+            <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sv_twins" style="width:auto"/> Twins or more</label>
+            <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sv_pcs" style="width:auto"/> Caesarean already planned</label>
+          </div>
+        </div>
+        <div id="sv_procedure" style="display:none" class="row">
+          <div class="field"><label>Procedure</label><input id="sv_pname" placeholder="e.g. Hernia repair"/></div>
+          <div class="field"><label>Quoted cost (GHS)</label><input id="sv_pquote" type="number"/></div>
+          <div class="field"><label>Planned date</label><input id="sv_pdate" type="date"/></div>
+        </div>
+        <div id="sv_otherGoal" style="display:none" class="row">
+          <div class="field"><label>What for</label><input id="sv_olabel" placeholder="e.g. Health fund"/></div>
+          <div class="field"><label>Amount (GHS)</label><input id="sv_oamt" type="number"/></div>
+        </div>
+        <div class="row"><button class="ghost" onclick="savPreview()">Preview plan</button><button class="accent" onclick="savEnrol()">Enrol &amp; text the patient</button><button class="ghost" onclick="savLookup()">Patient's plans</button></div>
+        <div id="savResult" style="margin-top:12px;font-size:13px"></div>
+      </div>
       <div class="card"><h2>Financial ecosystem (referrals)</h2>
         <div class="row">
           <a class="api" style="text-decoration:none;text-align:center" href="https://www.trimestersave.com" target="_blank">Savings</a>
@@ -229,6 +262,7 @@ async function ensureBill(){
   const bill=await r.json();
   billId=bill.id;
   lastVerification=bill.patientVerification?{...bill.patientVerification,billId:bill.id,phone:body.patient.phone||null}:null;
+  savSuggestFor(bill.id);
   return billId;
 }
 // The link a patient uses to confirm (or dispute) this bill — sent automatically
@@ -453,6 +487,71 @@ async function reqFinancing(){
   if(f.referralUrl)extra=` · <a href="${esc(f.referralUrl)}" target="_blank">continue at partner →</a>`;
   $('finResult').innerHTML+=`<p style="margin:10px 0 0"><span class="pill ${esc(f.status)}">${esc(f.status.replace('_',' '))}</span> ${esc(type.replace('_',' '))} ${num(f.amount)}${extra}</p>`;
   toast('Financing: '+f.status);
+}
+
+// ---- Savings plan (BirthPrep) ----
+function savGoalChanged(){const g=$('sv_goal').value;$('sv_delivery').style.display=g==='delivery'?'':'none';$('sv_procedure').style.display=g==='procedure'?'flex':'none';$('sv_otherGoal').style.display=g==='other'?'flex':'none';}
+function savHorizonChanged(){$('sv_other_wrap').style.display=$('sv_h').value==='other'?'':'none';}
+function savBody(){
+  const g=$('sv_goal').value, h=$('sv_h').value;
+  const facts={};
+  if(g==='delivery'){ if($('sv_edd').value)facts.edd=$('sv_edd').value; if($('sv_lmp').value)facts.lmp=$('sv_lmp').value; if($('sv_cs').value)facts.previousCs=Number($('sv_cs').value);
+    if($('sv_pih').checked)facts.hypertension=true; if($('sv_gdm').checked)facts.diabetes=true; if($('sv_twins').checked)facts.multiple=true; if($('sv_pcs').checked)facts.plannedCs=true; }
+  if(g==='procedure'){facts.procedureName=$('sv_pname').value;facts.procedureQuote=Number($('sv_pquote').value);if($('sv_pdate').value)facts.procedureDate=$('sv_pdate').value;}
+  if(g==='other'){facts.otherLabel=$('sv_olabel').value;facts.otherAmount=Number($('sv_oamt').value);}
+  const other=h==='other'?($('sv_other').value?{months:Number($('sv_other').value)}:{open:true}):null;
+  return {goal:g,horizon:h,other,facts,patient:{name:$('pname').value,phone:$('pphone').value,memberId:$('member').value||null},billId:billId||undefined};
+}
+function savRender(v,title){
+  const sc=(v.scenarios||[]).slice(0,4).map(s=>`<div class="line"><span>${esc(s.label)}${s.date?` · ${esc(s.date)}`:''}</span><span class="num">${Math.round(s.probability*100)}% · GHS ${num(s.cost)}</span></div>`).join('');
+  const ms=(v.schedule||[]).map(m=>`<div class="line"><span>${esc(m.label)} · ${esc(m.dueDate)}</span><span class="num">${m.status==='paid'?'✓ ':''}GHS ${num(m.amount)}</span></div>`).join('');
+  const adv=(v.advisories||[]).map(x=>`<li>${esc(x.text||x)}</li>`).join('');
+  const prog=v.progress?`<p><b>Saved GHS ${num(v.progress.saved)}</b> of ${num(v.progress.target)} (${v.progress.percent}%)${v.progress.overdueMilestones?` · <span style="color:var(--bad)">${v.progress.overdueMilestones} overdue</span>`:''}</p>`:'';
+  const bridge=v.bridge&&v.bridge.insureCredit?`<p class="muted">${esc(v.bridge.insureCredit.note)}</p>`:'';
+  return `<p><b>${esc(title)}</b>${v.planNo?` · plan <b>${esc(v.planNo)}</b> · <span class="pill ${v.status==='active'?'settled':'open'}">${esc(v.status)}</span>`:''}</p>
+    <p>Target <b>GHS ${num(v.target.target)}</b> (${esc(v.goalLabel||'')})${v.end?` by <b>${esc(v.end)}</b>`:' · open-ended'}${v.analysis?` · caesarean chance ${Math.round(v.analysis.csProbability*100)}%${v.analysis.strict?' (planned)':''}`:''}</p>
+    ${prog}<div class="ledger">${sc}</div><p class="muted" style="margin:8px 0 4px">Milestones</p><div class="ledger">${ms}</div>${adv?`<ul style="margin:8px 0;padding-left:18px">${adv}</ul>`:''}${bridge}
+    ${v.planNo?`<div class="row" style="margin-top:8px"><input id="sv_amt_${esc(v.id)}" type="number" placeholder="GHS" style="max-width:110px"/><button class="ghost" onclick="savContribute('${esc(v.id)}')">Record contribution</button><button class="ghost" onclick="savReplan('${esc(v.id)}')">Re-plan with current form</button>${billId?`<button class="ghost" onclick="savBridge('${esc(v.id)}')">InsureCredit for this bill</button>`:''}</div><div class="linkbox">${esc(v.link||'')}</div>`:''}`;
+}
+async function savPreview(){
+  const r=await fetch('/api/v1/savings/preview',{method:'POST',headers:hdr(),body:JSON.stringify(savBody())});const o=await r.json().catch(()=>({}));
+  if(!r.ok){toast('Preview: '+(o.message||o.error||r.status)+(o.detail?' — '+o.detail:''));return;}
+  $('savResult').innerHTML=savRender(o.result||o,'Preview (nothing saved)');
+}
+async function savEnrol(){
+  if(!$('pname').value||!$('pphone').value){toast('Patient name and phone are needed');return;}
+  const r=await fetch('/api/v1/savings/plans',{method:'POST',headers:hdr(),body:JSON.stringify(savBody())});const o=await r.json().catch(()=>({}));
+  if(!r.ok){toast('Enrol: '+(o.message||o.error||r.status)+(o.detail?' — '+o.detail:''));return;}
+  $('savResult').innerHTML=savRender(o,'Enrolled');toast('Plan '+o.planNo+' texted to the patient');
+}
+async function savLookup(){
+  if(!$('pphone').value){toast('Enter the patient phone');return;}
+  const r=await fetch('/api/v1/savings/lookup?phone='+encodeURIComponent($('pphone').value),{headers:hdr()});const o=await r.json().catch(()=>({}));
+  const rows=o.data||[];$('savResult').innerHTML=rows.length?rows.map(v=>savRender(v,'Existing plan')).join('<hr/>'):'<p class="muted">No savings plan for this phone.</p>';
+}
+async function savContribute(id){
+  const amt=Number($('sv_amt_'+id).value);if(!(amt>0))return toast('Enter an amount');
+  const r=await fetch(`/api/v1/savings/plans/${id}/contributions`,{method:'POST',headers:hdr(),body:JSON.stringify({amount:amt,via:'cashier'})});const o=await r.json().catch(()=>({}));
+  if(!r.ok)return toast('Failed: '+(o.message||o.error)+(o.detail?' — '+o.detail:''));$('savResult').innerHTML=savRender(o,'Contribution recorded');toast('Recorded');
+}
+async function savReplan(id){
+  const b=savBody();const r=await fetch(`/api/v1/savings/plans/${id}/replan`,{method:'POST',headers:hdr(),body:JSON.stringify({facts:b.facts,goal:b.goal,horizon:b.horizon,other:b.other,note:'Updated at the billing terminal'})});const o=await r.json().catch(()=>({}));
+  if(!r.ok)return toast('Failed: '+(o.message||o.error));$('savResult').innerHTML=savRender(o,'Re-planned');toast('Plan re-planned');
+}
+async function savBridge(id){
+  const r=await fetch(`/api/v1/savings/plans/${id}/insurecredit`,{method:'POST',headers:hdr(),body:JSON.stringify({billId})});const o=await r.json().catch(()=>({}));
+  if(!r.ok)return toast('InsureCredit: '+(o.message||o.error)+(o.detail?' — '+o.detail:''));toast('InsureCredit offer '+(o.applicationNo||'')+' texted');
+}
+// After a bill is created, ask whether a savings plan should be suggested (pregnancy / elective procedure).
+async function savSuggestFor(id){
+  try{const r=await fetch(`/api/v1/savings/suggest/${id}`,{headers:hdr()});const o=await r.json();const box=$('savSuggest');
+    if(!o.suggest){box.style.display='none';return;}
+    const h=o.history||{};const bits=[];if(h.previousCs)bits.push(`${h.previousCs} previous caesarean${h.previousCs>1?'s':''}`);if(h.hypertension)bits.push('hypertension');if(h.diabetes)bits.push('diabetes');
+    box.innerHTML=`<b>Suggest a savings plan:</b> ${esc(o.reason)}.${bits.length?` History on file: ${esc(bits.join(', '))}.`:''} <a href="#" onclick="document.getElementById('savCard').scrollIntoView({behavior:'smooth'});return false">Set it up below</a>`;
+    box.style.display='';$('sv_goal').value=o.goal;savGoalChanged();
+    if(o.facts){if(o.facts.hypertension)$('sv_pih').checked=true;if(o.facts.diabetes)$('sv_gdm').checked=true;if(o.facts.multiple)$('sv_twins').checked=true;}
+    if(h.previousCs)$('sv_cs').value=h.previousCs;if(h.hypertension)$('sv_pih').checked=true;if(h.diabetes)$('sv_gdm').checked=true;
+  }catch(e){}
 }
 let PAYERS=[];
 // Billing-terminal default: highlighted in the payer row and pre-ticked in the split panel.

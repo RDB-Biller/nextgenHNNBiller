@@ -1011,3 +1011,34 @@ Every decision - payer console, secure link, Master Control - is recorded agains
 prediction (`ai_adjudications`): that one stream is the benchmark and the training set.
 Autonomous and rule-cleared decisions are recorded but never count as benchmark evidence.
 Smoke: `npm run smoke:ai-adjudication`.
+
+## BirthPrep savings plans (the TrimesterSave idea inside the biller)
+
+Product Lab module `birthprep`; the platform ships a live **BirthPrep Savings (default)** every
+hospital can use, and a hospital-specific product (its own tariff, pathway overrides, brand) wins
+for that hospital. From the billing terminal the biller enrols a patient on a savings plan towards
+a **delivery**, a **planned procedure** or **any goal**, over **9, 6 or 3 months or "other"** (any
+number of months or years, or open-ended). `services/savingsPlans.js`:
+
+- **Targets from obstetric pathways**, not guesses: two previous caesareans -> a planned repeat
+  caesarean (strict); hypertension in pregnancy -> expedited delivery scenarios at 32 weeks
+  (steroids, newborn special care), 34, 36-37 or term; diabetes in pregnancy -> earlier and/or
+  caesarean delivery; twins, breech, placenta praevia, previous preterm, age. Each scenario has a
+  probability, a date and a cost from the product's tariff; the target is the expected (or most
+  likely, or worst-case) cost plus a buffer. The table is overridable per product (`pathwayJson`).
+- **History**: previous bills on the platform (caesarean sections incl. "x2", pre-eclampsia, GDM,
+  preterm) and a Q&A intake (biller, patient page or chatbot) feed the same facts; documented
+  history outranks a "no".
+- **Deadline**: the earliest plausible need (e.g. before 34 weeks with hypertension) minus a lead
+  time, capped by the chosen horizon; milestones at the product's cadence.
+- **Re-planning**: when facts change (SVD -> planned caesarean, new hypertension, a different goal)
+  the target and remaining milestones are recomputed, contributions kept, an advisory added and
+  the patient texted.
+- **Suggestions**: a bill with a pregnancy diagnosis or a planned/elective procedure prompts the
+  terminal to set up a plan (configurable).
+- **InsureCredit bridge**: the shortfall is shown as a possible micro-loan (up to the cap) and an
+  offer can be created against the delivery/procedure bill.
+- **Money**: HNN never holds it. Contributions are recorded at the cashier or posted by the
+  savings partner (`POST /savings-hooks/{secret}/contribution`, idempotent on reference); the
+  partner app can read the plan feed. Reminders go out before each milestone. Patient page at
+  `/s/<token>`. Smoke: `npm run smoke:savings`.

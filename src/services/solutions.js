@@ -10,6 +10,7 @@ const pharmacyPricing = require('./pharmacyPricing');
 const reconciliation = require('./reconciliation');
 const insurecredit = require('./insurecredit');
 const aiAdjudication = require('./aiAdjudication');
+const savingsPlans = require('./savingsPlans');
 
 /**
  * Solutions -- the 8 "gaps from the call" turned into Product Lab products.
@@ -335,6 +336,18 @@ const MODULES = {
     async run(ctx, p, input) { return aiAdjudication.run(ctx, p, input); },
   },
 
+  birthprep: {
+    label: 'BirthPrep savings plan',
+    description: 'Hospitals enrol patients on a savings plan towards a delivery, an elective procedure or any goal (9, 6, 3 months or other). Targets come from obstetric pathways (previous caesareans, hypertension or diabetes in pregnancy...) and the patient\'s history, re-plan when facts change, and InsureCredit bridges a shortfall.',
+    scope: 'none',
+    surfaces: ['patient', 'hospital', 'payer'],
+    params: savingsPlans.PARAMS,
+    check: savingsPlans.check,
+    async apply() { return null; },
+    async revert() {},
+    async run(ctx, p, input) { return savingsPlans.run(ctx, p, input); },
+  },
+
   insurecredit: {
     label: 'InsureCredit micro-loan',
     description: 'Texts the patient a link (and USSD instructions) to apply for a micro-loan of up to GHS 2,000 for their out-of-pocket share, scored by ConfirmU, with a micro medical report attached. Above the limit it offers to send the report to a funder (e.g. HR) as a justification note.',
@@ -496,6 +509,20 @@ const INPUTS = {
     { key: 'claimId', label: 'Claim id (for evaluate)', type: 'text', surfaces: ['hospital', 'payer'] },
     { key: 'useLlm', label: 'Call Claude for this evaluation? (costs tokens)', type: 'select', options: ['no', 'yes'], surfaces: ['hospital', 'payer'] },
     { key: 'epochs', label: 'Training epochs (for train)', type: 'number', surfaces: ['payer'] },
+  ],
+  birthprep: [
+    { key: 'planNo', label: 'Plan number', type: 'text', surfaces: ['patient'] },
+    { key: 'phone', label: 'Phone number on the plan', type: 'text', surfaces: ['patient'] },
+    { key: 'action', label: 'What to do', type: 'select', options: ['simulate', 'list', 'questions'], surfaces: ['hospital', 'payer'] },
+    { key: 'goal', label: 'Goal', type: 'select', options: ['delivery', 'procedure', 'other'], surfaces: ['hospital', 'payer'] },
+    { key: 'horizon', label: 'Horizon (months)', type: 'select', options: ['9', '6', '3', 'other'], surfaces: ['hospital', 'payer'] },
+    { key: 'otherMonths', label: 'Other: months (blank = open-ended)', type: 'number', surfaces: ['hospital', 'payer'] },
+    { key: 'edd', label: 'Expected due date (YYYY-MM-DD)', type: 'text', surfaces: ['hospital', 'payer'] },
+    { key: 'previousCs', label: 'Previous caesarean sections', type: 'number', surfaces: ['hospital', 'payer'] },
+    { key: 'hypertension', label: 'Hypertension in pregnancy?', type: 'select', options: ['no', 'yes'], surfaces: ['hospital', 'payer'] },
+    { key: 'diabetes', label: 'Diabetes in pregnancy?', type: 'select', options: ['no', 'yes'], surfaces: ['hospital', 'payer'] },
+    { key: 'procedureQuote', label: 'Procedure quote (GHS)', type: 'number', surfaces: ['hospital', 'payer'] },
+    { key: 'otherAmount', label: 'Other goal amount (GHS)', type: 'number', surfaces: ['hospital', 'payer'] },
   ],
   insurecredit: [
     { key: 'applicationNo', label: 'Application number', type: 'text', surfaces: ['patient', 'hospital', 'payer'] },

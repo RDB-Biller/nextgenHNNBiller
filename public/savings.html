@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="robots" content="noindex"/>
+<title>Savings plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/app/app.css"/><link rel="stylesheet" href="/app/credit.css"/>
+<style>.sv-bar{height:12px;border-radius:9px;background:#dfe6e1;overflow:hidden}.sv-bar>span{display:block;height:100%;background:var(--ac)}.sv-ms{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.sv-ms.paid{color:var(--brand)}.sv-ms.overdue{color:var(--bad)}</style></head><body>
+<div class="wrap ic" id="sv" style="max-width:600px"><p class="muted">Loading…</p></div>
+<div class="toast" id="toast"></div>
+<script>
+(function(){
+  const esc=(x)=>String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num=(n)=>Number(n||0).toFixed(2);
+  const toast=(m)=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);};
+  const Q=new URLSearchParams(location.search); const root=document.getElementById('sv');
+  async function api(path,body){const r=await fetch('/savings/api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.message||j.error||'Something went wrong');e.code=j.error&&j.error!=='error'?j.error:j.message;throw e;}return j;}
+  function lookupForm(msg){root.innerHTML=`<div class="ic-card"><div class="ic-brand">Savings plan</div><p class="muted" style="font-size:14px">${esc(msg||'Open your plan with the plan number from your text message.')}</p>
+    <div class="field"><label>Plan number (8 digits)</label><input id="lk_no" inputmode="numeric"/></div><div class="field"><label>Phone number the text was sent to</label><input id="lk_ph" type="tel"/></div><button class="ic-btn" id="lk_go" type="button">Open my plan</button></div>`;
+    root.querySelector('#lk_go').addEventListener('click',async()=>{try{const r=await api('lookup',{planNo:root.querySelector('#lk_no').value,phone:root.querySelector('#lk_ph').value});location.href='/savings/?t='+encodeURIComponent(r.token);}catch(e){toast(e.code==='plan_not_found'?'Those details do not match a plan':e.message);}});}
+  function paint(v){
+    const p=v.progress; const today=new Date().toISOString().slice(0,10);
+    const ms=(v.schedule||[]).map(m=>`<div class="sv-ms ${m.status==='paid'?'paid':(m.dueDate<today?'overdue':'')}"><span>${m.status==='paid'?'✓ ':''}${esc(m.label)} · ${esc(m.dueDate)}</span><b>GHS ${num(m.amount)}</b></div>`).join('');
+    const sc=(v.scenarios||[]).map(s=>`<div class="sv-ms"><span>${esc(s.label)}${s.date?' · '+esc(s.date):''}${s.extras&&s.extras.length?`<br><span class="muted" style="font-size:12px">${esc(s.extras.join(', '))}</span>`:''}</span><b>${Math.round(s.probability*100)}% · GHS ${num(s.cost)}</b></div>`).join('');
+    const adv=(v.advisories||[]).slice().reverse().map(a=>`<li ${a.severity==='change'?'style="color:var(--warn)"':''}>${esc(a.text)}</li>`).join('');
+    const qs=(v.questions||[]).map(q=>{const val=v.answered&&v.answered[q.fact];const inp=q.type==='yesno'?`<select data-q="${q.id}"><option value="">—</option><option value="yes" ${val===true?'selected':''}>Yes</option><option value="no" ${val===false?'selected':''}>No</option></select>`:q.type==='select'?`<select data-q="${q.id}">${q.options.map(o=>`<option ${val===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`:`<input data-q="${q.id}" type="${q.type==='number'?'number':q.type==='date'?'date':'text'}" value="${esc(val==null?'':val)}"/>`;return `<div class="field"><label>${esc(q.q)}</label>${inp}</div>`;}).join('');
+    root.innerHTML=`<div class="ic-top"><div class="ic-brand">${esc(v.brand||v.programme)}</div><span class="muted" style="font-size:13px">${esc(v.facility)}</span></div>
+      <div class="ic-card"><p class="muted" style="margin:0;font-size:13px">Hi ${esc(v.firstName)}, your plan <b>${esc(v.planNo)}</b> · ${esc(v.goalLabel)} · <span class="ic-pill">${esc(v.status)}</span></p>
+        <div class="ic-amt">GHS ${num(p.saved)} <span class="muted" style="font-size:16px;font-family:Inter">of ${num(p.target)}</span></div>
+        <div class="sv-bar"><span style="width:${p.percent}%"></span></div>
+        <p class="muted" style="font-size:13px;margin:8px 0 0">${v.end?`Needed by <b>${esc(v.end)}</b>.`:'Open-ended plan.'} ${p.next?`Next: GHS ${num(p.next.amount)} by ${esc(p.next.dueDate)}.`:''} ${p.overdueMilestones?`<span style="color:var(--bad)">${p.overdueMilestones} milestone(s) overdue.</span>`:''} Pay at ${esc(v.facility)} or via ${esc(v.partner)}.</p></div>
+      <div class="ic-card"><b style="font-size:14px">Milestones</b>${ms}</div>
+      ${v.goal==='delivery'?`<div class="ic-card"><b style="font-size:14px">How the target was worked out</b><p class="muted" style="font-size:12px;margin:4px 0 6px">Possible ways your delivery could go, with the cost of each. Target = ${esc(v.target.basisAmount===v.target.expected?'expected cost':v.target.basisAmount===v.target.worstCase?'worst case':'most likely cost')} GHS ${num(v.target.basisAmount)} plus a safety buffer.</p>${sc}</div>`:''}
+      ${adv?`<div class="ic-card"><b style="font-size:14px">Advice</b><ul style="font-size:14px;margin:6px 0 0;padding-left:18px">${adv}</ul></div>`:''}
+      ${v.bridge&&v.bridge.insureCredit?`<div class="ic-card"><b style="font-size:14px">If there is a shortfall</b><p style="font-size:14px;margin:6px 0 0">${esc(v.bridge.insureCredit.note)}</p></div>`:''}
+      <div class="ic-card"><details><summary>Update your details (the plan adjusts)</summary><p class="muted" style="font-size:12px">Answer what applies. Anything your clinician has already told you helps the plan.</p>${qs}<button class="ic-btn ghost" id="q_go" type="button">Save answers</button></details></div>
+      <p class="ic-note">${esc(v.disclaimer||'')} ${esc(v.programme)} records what you save; the money is held by ${esc(v.partner)} or paid at the hospital, never by HNN Biller.</p>`;
+    root.querySelector('#q_go').addEventListener('click',async()=>{const answers={};root.querySelectorAll('[data-q]').forEach(e=>{if(e.value!=='')answers[e.dataset.q]=e.value;});try{paint(await api(encodeURIComponent(Q.get('t'))+'/answers',{answers}));toast('Plan updated');}catch(e){toast(e.message);}});
+  }
+  (async()=>{try{if(!Q.get('t'))return lookupForm();paint(await api(encodeURIComponent(Q.get('t'))));}catch(e){if(e.code==='plan_not_found')return lookupForm('This link did not work. Open your plan with the plan number instead.');root.innerHTML=`<div class="ic-card"><p style="color:var(--bad)">${esc(e.message)}</p></div>`;}})();
+})();
+</script></body></html>

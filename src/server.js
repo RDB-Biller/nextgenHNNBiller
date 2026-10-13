@@ -33,6 +33,9 @@ const solutionsPortalRoutes = require('./routes/solutionsPortal');
 const solutionsApiRoutes = require('./routes/solutionsApi');
 const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
+const savingsRoutes = require('./routes/savings');
+const savingsHooks = require('./routes/savingsHooks');
+const savingsPlans = require('./services/savingsPlans');
 const insurecredit = require('./services/insurecredit');
 const aiAdjudication = require('./services/aiAdjudication');
 const campaigns = require('./services/campaigns');
@@ -75,6 +78,10 @@ app.get('/c/:t', (req, res) => res.redirect(`/credit/?t=${encodeURIComponent(req
 app.get('/n/:t', (req, res) => res.redirect(`/credit/?s=${encodeURIComponent(req.params.t)}`));
 app.use('/credit/api', creditPortalRoutes);
 app.use('/credit', express.static(PUBLIC, { index: 'credit.html' }));
+app.get('/s/:t', (req, res) => res.redirect(`/savings/?t=${encodeURIComponent(req.params.t)}`));
+app.use('/savings/api', savingsHooks.api);
+app.use('/savings', express.static(PUBLIC, { index: 'savings.html' }));
+app.use('/savings-hooks', savingsHooks.hooks);
 app.use('/ussd', creditHooks.ussd);
 app.use('/insurecredit-hooks', creditHooks.hooks);
 app.use('/report/api', reportPortalRoutes);
@@ -106,6 +113,7 @@ app.use('/api/v1/bills', billsRoutes);
 app.use('/api/v1/payments', paymentsRoutes);
 app.use('/api/v1/claims', claimsRoutes);
 app.use('/api/v1/financing', requireFeature('financing'), financingRoutes);
+app.use('/api/v1/savings', savingsRoutes);
 app.use('/api/v1/ledger', requireFeature('ledger'), ledgerRoutes);
 app.use('/api/v1/claimit', requireFeature('claimit'), claimitRoutes);
 // Hospital-side manual entry of clinical indicators — see routes/clinical.js.
@@ -118,7 +126,8 @@ app.use(errorHandler);
 
 if (require.main === module) {
   store.init().then(() => campaigns.ensureSeedGroup()).then(() => insurecredit.ensureDefaultProduct().catch((e) => console.error('[insurecredit] default product:', e.message)))
-    .then(() => aiAdjudication.ensureDefaultProduct().catch((e) => console.error('[aiAdjudication] default product:', e.message))).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
+    .then(() => aiAdjudication.ensureDefaultProduct().catch((e) => console.error('[aiAdjudication] default product:', e.message)))
+    .then(() => savingsPlans.ensureDefaultProduct().catch((e) => console.error('[savings] default product:', e.message))).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
     const rail = (sandbox) => (sandbox ? 'sandbox' : 'LIVE');
     console.log(`Composite Billing Platform on :${config.port} `
       + `(settlement=${rail(mode.settlement.sandbox)}, messaging=${rail(mode.messaging.sandbox)}`
@@ -143,6 +152,7 @@ if (require.main === module) {
       settlementBatches.runDue().catch((e) => console.error('[settlementBatches] sweep failed:', e));
       insurecredit.runAutoSend().catch((e) => console.error('[insurecredit] auto-send failed:', e));
       aiAdjudication.runPendingPass().catch((e) => console.error('[aiAdjudication] pending pass failed:', e));
+      savingsPlans.runReminders().catch((e) => console.error('[savings] reminders failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
     setInterval(runSweeps, SWEEP_INTERVAL_MS);

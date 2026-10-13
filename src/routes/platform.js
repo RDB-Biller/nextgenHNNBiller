@@ -39,6 +39,7 @@ const pharmacyQuotes = require('../services/pharmacyQuotes');
 const reconciliation = require('../services/reconciliation');
 const insurecredit = require('../services/insurecredit');
 const aiAdjudication = require('../services/aiAdjudication');
+const savingsPlans = require('../services/savingsPlans');
 const smsDashboard = require('../services/smsDashboard');
 const solutions = require('../services/solutions');
 
@@ -1213,6 +1214,17 @@ router.post('/ai-adjudication/evaluate/:claimId', async (req, res, next) => {
 });
 router.post('/ai-adjudication/run-pending', async (req, res, next) => {
   try { res.json(await aiAdjudication.runPendingPass({ olderThanMs: 0 })); } catch (e) { next(e); }
+});
+
+// ---- BirthSave (Master Control) -------------------------------------------------------------
+router.get('/savings/overview', async (req, res, next) => {
+  try { res.json({ hookUrls: await savingsPlans.hookUrls(baseUrl(req)), ...(await savingsPlans.list({ productId: req.query.productId, status: req.query.status, limit: Number(req.query.limit) || 100 })) }); } catch (e) { next(e); }
+});
+router.post('/savings/rotate-secret', async (req, res, next) => {
+  try { await savingsPlans.rotateSecret(); res.json({ hookUrls: await savingsPlans.hookUrls(baseUrl(req)) }); } catch (e) { next(e); }
+});
+router.post('/savings/run-reminders', async (req, res, next) => {
+  try { res.json(await savingsPlans.runReminders()); } catch (e) { next(e); }
 });
 
 router.get('/insurecredit/overview', async (req, res, next) => {

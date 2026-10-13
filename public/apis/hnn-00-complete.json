@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "HNN Biller — Complete API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`"
   },
   "servers": [
@@ -4482,6 +4482,452 @@
         "responses": {
           "200": {
             "description": "Updated switch"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/questions": {
+      "get": {
+        "summary": "BirthPrep intake questions (biller, patient page or chatbot), goals and horizons",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/savings": {
+      "get": {
+        "summary": "The hospital's savings plans with totals (?status)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/lookup": {
+      "get": {
+        "summary": "Plans for a patient phone",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "phone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/history": {
+      "get": {
+        "summary": "What the biller already knows about the patient from previous bills: previous caesareans, hypertension, diabetes, preterm birth (with evidence)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "phone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/suggest/{billId}": {
+      "get": {
+        "summary": "Should the terminal suggest a plan for this bill? (pregnancy diagnosis or planned/elective procedure; configurable)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "billId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ suggest, goal, reason, facts, history }"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/preview": {
+      "post": {
+        "summary": "Dry-run the plan maths: scenarios, target, deadline, milestones, advisories. Body as for enrolment (facts/answers, goal, horizon, other)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Simulated plan"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans": {
+      "post": {
+        "summary": "Enrol a patient: { patient:{name,phone,memberId}, goal: delivery|procedure|other, horizon: 9|6|3|other, other:{months|years|open}, facts, answers, billId, productId }. Merges the history, texts the patient a short link.",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Plan"
+          },
+          "422": {
+            "description": "patient_phone_required, procedure_quote_required, other_amount_required, horizon_invalid"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans/{id}": {
+      "get": {
+        "summary": "One plan",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans/{id}/replan": {
+      "post": {
+        "summary": "Clinical change -> re-plan: { facts, answers, goal, horizon, other, note }. Keeps contributions, adds an advisory, texts the patient if the target changed.",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan"
+          },
+          "409": {
+            "description": "plan_closed"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans/{id}/contributions": {
+      "post": {
+        "summary": "Record a contribution { amount, via, reference }",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan"
+          },
+          "422": {
+            "description": "amount_invalid or below_minimum_contribution"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans/{id}/status": {
+      "post": {
+        "summary": "{ status: active | paused | completed | closed }",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan"
+          }
+        }
+      }
+    },
+    "/api/v1/savings/plans/{id}/insurecredit": {
+      "post": {
+        "summary": "Bridge the shortfall with an InsureCredit offer against a real bill { billId } (loan part capped at the InsureCredit cap)",
+        "security": [
+          {
+            "TenantKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "InsureCredit offer"
+          }
+        }
+      }
+    },
+    "/savings/api/{token}": {
+      "get": {
+        "summary": "Patient plan page data (first name only): progress, milestones, scenarios, advisories, bridge, intake questions",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "plan_not_found"
+          }
+        }
+      }
+    },
+    "/savings/api/{token}/answers": {
+      "post": {
+        "summary": "Patient (or chatbot) answers intake questions -> the plan is re-planned. Body { answers:{ questionId: value } }",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated plan"
+          }
+        }
+      }
+    },
+    "/savings/api/lookup": {
+      "post": {
+        "summary": "Recover a plan link: { planNo, phone } must both match",
+        "responses": {
+          "200": {
+            "description": "{ token }"
+          },
+          "404": {
+            "description": "plan_not_found"
+          }
+        }
+      }
+    },
+    "/s/{token}": {
+      "get": {
+        "summary": "Short link from the SMS; redirects to /savings/?t=",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect"
+          }
+        }
+      }
+    },
+    "/savings-hooks/{secret}/contribution": {
+      "post": {
+        "summary": "Savings partner posts a deposit { planNo, amount, reference, via? }. Secret in the path; bare 404 if wrong; idempotent on reference.",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ ok, planNo, saved, target, status }"
+          },
+          "404": {
+            "description": "Bad secret or plan_not_found"
+          }
+        }
+      }
+    },
+    "/savings-hooks/{secret}/plans/{planNo}": {
+      "get": {
+        "summary": "Read-only plan feed for the partner app (e.g. Afriyie)",
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "planNo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan"
+          }
+        }
+      }
+    },
+    "/api/platform/savings/overview": {
+      "get": {
+        "summary": "Partner webhook URLs and every plan with totals (?productId, ?status, ?limit)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/savings/rotate-secret": {
+      "post": {
+        "summary": "Rotate the partner webhook secret",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New hookUrls"
+          }
+        }
+      }
+    },
+    "/api/platform/savings/run-reminders": {
+      "post": {
+        "summary": "Send due milestone reminders now (idempotent per milestone)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ plans, remindersSent }"
           }
         }
       }

@@ -298,6 +298,7 @@ const SOL_INPUTS={
   auto_adjudication:[['diagnosis','Diagnosis','text'],['itemCodes','Item codes (comma-separated)','text'],['amount','Amount (GHS)','number']],
   claim_expiry:[],settlement_cycle:[['tenantId','Provider id (optional)','text']],daily_billing:[['tenantId','Provider id','text']],multi_funder:[],
   pharmacy_compare:[['items','Medicines (one per line)','textarea']],
+  birthprep:[['action','What to do','select',['simulate','list','questions']],['goal','Goal','select',['delivery','procedure','other']],['horizon','Horizon (months)','select',['9','6','3','other']],['otherMonths','Other: months','number'],['edd','Expected due date (YYYY-MM-DD)','text'],['previousCs','Previous caesareans','number'],['hypertension','Hypertension in pregnancy?','select',['no','yes']],['diabetes','Diabetes in pregnancy?','select',['no','yes']],['procedureQuote','Procedure quote (GHS)','number'],['otherAmount','Other goal amount (GHS)','number']],
   ai_adjudication:[['action','What to do','select',['benchmark','evaluate','recent','train']],['claimId','Claim id (for evaluate)','text'],['useLlm','Call Claude for this evaluation?','select',['no','yes']],['epochs','Training epochs','number']],
   insurecredit:[['action','What to do','select',['list','verify','preview']],['applicationNo','Application number (for verify)','text'],['amount','Amount in GHS (for preview)','number'],['name','Patient first name (for preview)','text']],reconciliation:[['tenantId','Provider id','text'],['since','From (YYYY-MM-DD)','text']],
 };
@@ -342,8 +343,20 @@ function solAiAdjudication(d){
   if(d.rows)return solTable(d.rows,[['claimId','Claim',r=>r.claimId.slice(0,12)],['amount','Amount'],['recommendation','AI'],['confidence','Conf.',r=>Math.round((r.confidence||0)*100)+'%'],['action','Action'],['outcome','Outcome',r=>r.outcome||'—'],['decidedBy','By',r=>r.decidedBy||'—'],['agreed','Agreed',r=>r.agreed==null?'—':r.agreed?'yes':'no']]);
   return `<pre style="white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre>`;
 }
+function solSavings(d){
+  if(d.simulated||d.target&&d.schedule){
+    return `<p>Target <b>GHS ${n2(d.target.target)}</b> (${esc(d.goalLabel||'')})${d.end?` by <b>${esc(d.end)}</b>`:' · open-ended'}${d.analysis?` · caesarean chance ${Math.round(d.analysis.csProbability*100)}%${d.analysis.strict?' (planned)':''}`:''} · expected ${n2(d.target.expected)} · worst case ${n2(d.target.worstCase)}</p>`
+      +solTable((d.scenarios||[]).slice(0,6),[['label','Scenario'],['date','Date',r=>r.date||'—'],['probability','Chance',r=>Math.round(r.probability*100)+'%'],['cost','Cost (GHS)',r=>n2(r.cost)]])
+      +`<p class="muted" style="font-size:13px;margin:10px 0 4px">Milestones</p>`+solTable(d.schedule||[],[['dueDate','Due'],['label','Milestone'],['amount','Amount',r=>n2(r.amount)],['status','Status']])
+      +((d.advisories||[]).length?`<ul style="font-size:13px">${d.advisories.map(a=>`<li>${esc(a.text||a)}</li>`).join('')}</ul>`:'');
+  }
+  if(d.rows)return `<p><b>${d.total}</b> plans · target GHS ${n2(d.targetTotal)} · saved GHS ${n2(d.savedTotal)}</p>`+solTable(d.rows,[['planNo','Plan'],['goalLabel','Goal'],['status','Status'],['target','Target',r=>n2(r.target.target)],['progress','Saved',r=>n2(r.progress.saved)+' ('+r.progress.percent+'%)'],['end','Needed by',r=>r.end||'open']]);
+  if(d.questions)return solTable(d.questions,[['id','Id'],['q','Question'],['type','Type']]);
+  return `<pre style="white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre>`;
+}
 function solRender(mod,d){
   if(mod==='insurecredit')return solInsureCredit(d);
+  if(mod==='birthprep')return solSavings(d);
   if(mod==='ai_adjudication')return solAiAdjudication(d);
   if(mod==='pharmacy_compare')return solPharmacy(d);
   if(mod==='auth_threshold')return `<p>Auto-authorize ${d.enabled?'<b>on</b>':'off'} up to <b>GHS ${n2(d.thresholdMaxAmount)}</b>.</p>`+(d.check?`<p>GHS ${n2(d.check.amount)} → <b>${d.check.autoAuthorized?'authorized automatically':'goes to manual review'}</b></p>`:'');
@@ -504,3 +517,14 @@ async function aiaRecent(id){
 async function aiaRunPending(){
   try{const r=await fetch('/api/platform/ai-adjudication/run-pending',{method:'POST',headers:H()});const o=await r.json();toast(`Scored ${o.evaluated} pending claim(s)`);aiaLoad();}catch(e){toast(e.message);}
 }
+
+// ======================= BirthPrep savings panel (Master Control) =======================
+async function svLoad(){
+  try{const r=await fetch('/api/platform/savings/overview',{headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error);
+    const u=o.hookUrls||{};
+    $('sv_hooks').innerHTML=`<div><b>Partner contribution webhook (POST { planNo, amount, reference })</b><br><code style="font-size:12px;word-break:break-all">${esc(u.contribution||'')}</code></div><div style="margin-top:4px"><b>Plan feed for the partner app</b><br><code style="font-size:12px;word-break:break-all">${esc(u.plan||'')}</code></div>`;
+    $('sv_plans').innerHTML=solSavings({rows:o.rows||[],total:o.total||0,targetTotal:o.targetTotal||0,savedTotal:o.savedTotal||0});
+  }catch(e){$('sv_hooks').textContent=e.message;}
+}
+async function svRotate(){if(!confirm('Rotate the partner webhook secret? The current URL stops working.'))return;try{const r=await fetch('/api/platform/savings/rotate-secret',{method:'POST',headers:H()});if(!r.ok)throw new Error('Failed');toast('Secret rotated');svLoad();}catch(e){toast(e.message);}}
+async function svReminders(){try{const r=await fetch('/api/platform/savings/run-reminders',{method:'POST',headers:H()});const o=await r.json();toast(`Reminders sent: ${o.remindersSent}`);}catch(e){toast(e.message);}}

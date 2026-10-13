@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: HNN Biller — Master Control API (SaaS owner)
-  version: 1.2.0
+  version: 1.3.0
   description: 'Manage every organisation on the deployment — clients, payers, EMR/EHR partners — the IT leads assigned
     to them, and each client’s edition. **This is the transition API: move any client between commercial and non-commercial
     instantly, in both directions, with no data loss.**
@@ -1585,3 +1585,27 @@ paths:
       responses:
         '200':
           description: Updated switch
+  /api/platform/savings/overview:
+    get:
+      summary: Partner webhook URLs and every plan with totals (?productId, ?status, ?limit)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/savings/rotate-secret:
+    post:
+      summary: Rotate the partner webhook secret
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: New hookUrls
+  /api/platform/savings/run-reminders:
+    post:
+      summary: Send due milestone reminders now (idempotent per milestone)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ plans, remindersSent }'

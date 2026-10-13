@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS ai_adjudications (id text PRIMARY KEY, claim_id text,
 CREATE INDEX IF NOT EXISTS idx_ai_adjudications_claim ON ai_adjudications(claim_id);
 CREATE INDEX IF NOT EXISTS idx_ai_adjudications_product ON ai_adjudications(product_id);
 CREATE INDEX IF NOT EXISTS idx_ai_adjudications_payer ON ai_adjudications(payer_id);
+-- BirthPrep savings plans (services/savingsPlans.js): plan_no is given to the patient; token is the link.
+CREATE TABLE IF NOT EXISTS savings_plans (id text PRIMARY KEY, plan_no text UNIQUE, token text UNIQUE, tenant_id text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_savings_plans_tenant ON savings_plans(tenant_id);
 -- Public trial sign-ups (register.html / routes/registerPortal.js), whether
 -- from the campaign "YES" reply link or a direct visit to /register/.
 CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
@@ -413,6 +416,14 @@ function pgRepo(exec) {
       insert: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
       update: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
       all: (limit = 5000) => many('SELECT data FROM credit_applications ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
+    savingsPlans: {
+      get: (id) => one('SELECT data FROM savings_plans WHERE id=$1', [id]),
+      byPlanNo: (n) => one('SELECT data FROM savings_plans WHERE plan_no=$1', [n]),
+      byToken: (t) => one('SELECT data FROM savings_plans WHERE token=$1', [t]),
+      insert: (r) => exec(upsert('savings_plans', ['plan_no', 'token', 'tenant_id', 'status']), [r.id, r.planNo, r.token, r.tenantId, r.status, r]),
+      update: (r) => exec(upsert('savings_plans', ['plan_no', 'token', 'tenant_id', 'status']), [r.id, r.planNo, r.token, r.tenantId, r.status, r]),
+      all: (limit = 5000) => many('SELECT data FROM savings_plans ORDER BY created_at DESC LIMIT $1', [limit]),
     },
     aiAdjudications: {
       get: (id) => one('SELECT data FROM ai_adjudications WHERE id=$1', [id]),
@@ -708,6 +719,14 @@ function memRepo(M) {
       update: async (a) => { M.credits.set(a.id, a); },
       all: async (limit = 5000) => [...M.credits.values()].reverse().slice(0, limit),
     },
+    savingsPlans: {
+      get: async (id) => M.savingsPlans.get(id) || null,
+      byPlanNo: async (n) => [...M.savingsPlans.values()].find((r) => r.planNo === n) || null,
+      byToken: async (t) => [...M.savingsPlans.values()].find((r) => r.token === t) || null,
+      insert: async (r) => { M.savingsPlans.set(r.id, r); },
+      update: async (r) => { M.savingsPlans.set(r.id, r); },
+      all: async (limit = 5000) => [...M.savingsPlans.values()].reverse().slice(0, limit),
+    },
     aiAdjudications: {
       get: async (id) => M.aiAdjudications.get(id) || null,
       byClaim: async (c) => [...M.aiAdjudications.values()].reverse().find((r) => r.claimId === c) || null,
@@ -795,7 +814,7 @@ if (usePg) {
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(), aiAdjudications: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(), aiAdjudications: new Map(), savingsPlans: new Map(),
     funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);
