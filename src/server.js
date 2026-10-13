@@ -35,6 +35,7 @@ const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
+const patientApi = require('./routes/patientApi');
 const savingsPlans = require('./services/savingsPlans');
 const insurecredit = require('./services/insurecredit');
 const aiAdjudication = require('./services/aiAdjudication');
@@ -82,6 +83,7 @@ app.get('/s/:t', (req, res) => res.redirect(`/savings/?t=${encodeURIComponent(re
 app.use('/savings/api', savingsHooks.api);
 app.use('/savings', express.static(PUBLIC, { index: 'savings.html' }));
 app.use('/savings-hooks', savingsHooks.hooks);
+app.use('/patient-api/v1', patientApi);
 app.use('/ussd', creditHooks.ussd);
 app.use('/insurecredit-hooks', creditHooks.hooks);
 app.use('/report/api', reportPortalRoutes);

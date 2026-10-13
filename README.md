@@ -1051,3 +1051,14 @@ for a partner backend; key `PHONE_VERIFY_SIGNING_KEY`), `signup` (creates the pl
 hospital; the biller sees it like any plan it enrolled), `my-plans`. The matching Afriyie frontend
 changes (public `/birthprep` sign-up, `/dashboard/birthprep`, registration codes via the biller)
 are in the `tms-afriyie-frontend` patch delivered alongside this repo.
+
+## Patient accounts for the Afriyie app (`/patient-api/v1`)
+
+The Afriyie / TrimesterSave app can run entirely on this service: `patient/register`, `login`, `me`,
+`update`, `change_password`, `forgot_password`, `reset_password`, `verify_phone`, `send_verification_code`,
+plus `budget/add_budget`, `budget/patient_budgets`, `vital/add_vital`, `vital/patient_vitals`. Paths and the
+`{ result }` / `{ error }` envelopes match what the app already used, so only its base URL changes
+(`<biller>/patient-api/v1/`). Every SMS (verification and password reset) is sent by the Biller's own
+messaging provider (Africa's Talking). Passwords are scrypt-hashed; sessions are signed 30-day tokens; the
+phone is verified with the Biller's one-time code and a signed receipt (`/savings/api/verify/check`).
+Accounts live in the settings store (Postgres in production). Test: `npm run smoke:patient-accounts`.
