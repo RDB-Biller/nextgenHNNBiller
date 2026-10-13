@@ -69,7 +69,7 @@ const setParams = async (p, patch) => products.update(p.id, { config: { ...(awai
   const reg = solutions.registry().find((m) => m.key === 'ai_adjudication');
   ok(reg && reg.scope === 'none' && reg.params.length === ai.PARAMS.length && reg.params.some((x) => x.key === 'requiredAccuracy'), 'ai_adjudication is a Product Lab module with its parameter schema');
   const dp = ai.paramsOf({ config: { params: {} } });
-  ok(dp.mode === 'assist' && dp.llmModel === 'claude-fable-5-1' && dp.llmEffort === 'max' && dp.requiredAccuracy === 0.95 && dp.autoDecline === false, 'defaults: assist mode, Claude Fable 5.1 at max effort, 95% required accuracy, no auto-decline');
+  ok(dp.mode === 'assist' && dp.llmModel === 'claude-fable-5-1' && dp.llmEffort === 'max' && dp.requiredAccuracy === 0.95 && dp.autoDecline === false && dp.llmEnabled === false, 'defaults: assist mode, Claude OFF (Fable 5.1 at max effort when switched on), 95% required accuracy, no auto-decline');
   await rejects(() => Promise.resolve(solutions.validateConfig({ module: 'ai_adjudication', params: { mode: 'auto', auditSamplePercent: 100 } })), 422, 'auto mode with a 100% audit sample is refused (nothing would be automated)');
   await rejects(() => Promise.resolve(solutions.validateConfig({ module: 'ai_adjudication', params: { requiredAccuracy: 0.3 } })), 422, 'required accuracy below 0.5 is refused');
 
@@ -77,7 +77,16 @@ const setParams = async (p, patch) => products.update(p.id, { config: { ...(awai
   const def = await ai.ensureDefaultProduct();
   ok(def && def.status === 'live' && def.name === ai.DEFAULT_NAME && (await ai.ensureDefaultProduct()).id === def.id, 'a live default AI adjudication product exists and is created only once');
   ok((await ai.productFor('acacia')).id === def.id && (await ai.productFor('gmtf')).id === def.id, 'payers without their own configuration are governed by the default');
-  const acaciaProd = await mkProduct('acacia', 'Acacia AI adjudication', { guidelines: 'Malaria: artemisinin combination therapy is covered. Cosmetic procedures are not.', exclusions: 'cosmetic\nbotox', minBenchmarkSample: 20 });
+  // ----- no external dependency by default ------------------------------------------------------
+  ok((await ai.getLlmSwitch()).enabled === false, 'the platform-wide Claude switch is OFF out of the box');
+  const legacy = await products.get(def.id); legacy.config.params.llmEnabled = true; await store.products.save(legacy);
+  ok((await ai.ensureDefaultProduct()).config.params.llmEnabled === false, 'an untouched default that still had Claude on is moved to off at startup');
+  const onlyProd = await mkProduct('acacia', 'Acacia (Claude on at product level)', { llmEnabled: true, minBenchmarkSample: 20 });
+  const c0 = await route(await mkBill({}));
+  ok(llmCalls.length === 0 && (await row(c0)).llm.status === 'platform_off' && c0.ai.recommendation && !(await row(c0)).reasons.some((x) => x.includes('unavailable')), 'with the platform switch off, even a product with Claude on never calls the API and is scored by checks + scorer');
+  await ai.setLlmSwitch(true, 'test');
+  await products.setStatus(onlyProd.id, 'sandbox', 'test');
+  const acaciaProd = await mkProduct('acacia', 'Acacia AI adjudication', { llmEnabled: true, guidelines: 'Malaria: artemisinin combination therapy is covered. Cosmetic procedures are not.', exclusions: 'cosmetic\nbotox', minBenchmarkSample: 20 });
   ok((await ai.productFor('acacia')).id === acaciaProd.id && (await ai.productFor('gmtf')).id === def.id, "a payer's own live product overrides the default for that payer only");
 
   // ===== 3. a clean claim: scored in the background, Claude called correctly ======================
@@ -150,7 +159,7 @@ const setParams = async (p, patch) => products.update(p.id, { config: { ...(awai
   await setParams(acaciaProd, { llmDailyCap: 1000 });
 
   // ===== 7. shadow mode ==========================================================================
-  const gmtfProd = await mkProduct('gmtf', 'GMTF shadow', { mode: 'shadow' });
+  const gmtfProd = await mkProduct('gmtf', 'GMTF shadow', { mode: 'shadow', llmEnabled: true });
   const cs = await route(await mkBill({ payerId: 'gmtf', memberId: 'GM-1' }), 'gmtf');
   const shownS = await ai.forClaim(cs);
   ok(cs.ai.action === 'shadow' && shownS.recommendation === null && shownS.mode === 'shadow', 'shadow mode scores silently: reviewers see no recommendation');
@@ -168,7 +177,10 @@ const setParams = async (p, patch) => products.update(p.id, { config: { ...(awai
   for (let i = 0; i < 24; i++) { const c = await route(await mkBill({})); await claims.authorize(c.id); }
   await ai.flush();
   bmA = await ai.benchmark(await products.get(acaciaProd.id));
-  ok(bmA.decisive >= 20 && bmA.accuracy >= 0.9 && bmA.falseApproveRate <= 0.05 && bmA.gate.passed, `after ${bmA.decisive} human-reviewed definite recommendations at ${Math.round(bmA.accuracy * 100)}% accuracy the gate passes`);
+  ok(bmA.decisive >= 20 && bmA.accuracy >= 0.9 && bmA.falseApproveRate <= 0.05, `after ${bmA.decisive} human-reviewed definite recommendations the blended accuracy is ${Math.round(bmA.accuracy * 100)}%`);
+  ok(bmA.components.claude.active && bmA.components.scorer.accuracy != null && (bmA.gate.passed || bmA.gate.reasons.every((x) => x.startsWith('scorer_alone'))), 'with Claude active the gate also requires the checks + scorer alone to clear the bar (Claude is never load-bearing)');
+  if (!bmA.gate.passed) { await setParams(acaciaProd, { llmEnabled: false }); bmA = await ai.benchmark(await products.get(acaciaProd.id)); }
+  ok(bmA.gate.passed, `the gate passes on checks + scorer alone (${Math.round((bmA.components.scorer.accuracy || 0) * 100)}% scorer accuracy on ${bmA.components.scorer.decisive})`);
   ok(bmA.components.claude.accuracy >= 0.9 && bmA.components.scorer.decisive >= 0 && bmA.projection.automationRate > 0, 'the benchmark reports each component and the projected automation rate');
   // Not verified by the patient -> still a human
   const cUnv = await route(await mkBill({}));

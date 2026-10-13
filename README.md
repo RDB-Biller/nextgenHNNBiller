@@ -985,10 +985,15 @@ its claims. `services/aiAdjudication.js` scores every routed claim with three la
    submission, ...). It learns online from every human decision and can be retrained in batch
    from the payer's history or an imported labelled file (`POST .../train`). New weights are
    adopted only if they do at least as well on a held-out 20%.
-3. **Claude** (`claude-fable-5-1` at `max` effort by default; model/effort per product) reads a
-   de-identified packet (no name, phone or member id) plus the payer's guidelines and the two
-   layers above, and returns a JSON-schema verdict with reasons. Needs `ANTHROPIC_API_KEY`;
-   without it, or on any API failure, the other layers still decide and say so.
+3. **Claude** (optional, OFF by default; `claude-fable-5-1` at `max` effort when on; model/effort
+   per product) reads a de-identified packet (no name, phone or member id) plus the payer's
+   guidelines and the two layers above, and returns a JSON-schema verdict with reasons. Three
+   things must all be on for it to be called: the platform-wide switch in Master Control
+   (`POST /api/platform/ai-adjudication/llm`, seeded by `AI_LLM_ENABLED`, default off), the
+   product's own `llmEnabled`, and `ANTHROPIC_API_KEY`. The platform never depends on it: with
+   it off, or on any API failure, cap or timeout, the other layers decide and say so. And it is
+   never load-bearing for autonomy: when Claude is active, the gate additionally requires the
+   checks + scorer **alone** to meet the required accuracy and false-approve rate.
 
 **Modes and the gate.** `shadow` scores silently; `assist` shows reviewers the recommendation
 (payer console, secure claim link, Master Control submissions); `auto` approves on its own only

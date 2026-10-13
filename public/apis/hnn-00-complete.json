@@ -4443,6 +4443,48 @@
           }
         }
       }
+    },
+    "/api/platform/ai-adjudication/llm": {
+      "get": {
+        "summary": "Platform-wide Claude switch (off by default: no external AI dependency). Also reports whether ANTHROPIC_API_KEY is set.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ enabled, updatedAt, updatedBy, seededFromEnv, keyConfigured }"
+          }
+        }
+      },
+      "post": {
+        "summary": "Switch Claude on or off platform-wide. A product also needs its own llmEnabled. Checks and the trained scorer never depend on it.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated switch"
+          }
+        }
+      }
     }
   }
 }

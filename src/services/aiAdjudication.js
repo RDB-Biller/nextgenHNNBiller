@@ -60,6 +60,7 @@ const networks = require('./networks');
 const MODULE = 'ai_adjudication';
 const DEFAULT_NAME = 'AI Adjudication (default)';
 const MODEL_KEY = (productId) => `ai_model:${productId}`;
+const LLM_SWITCH_KEY = 'ai_llm';
 const MODELS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODES = ['shadow', 'assist', 'auto'];
@@ -95,7 +96,8 @@ const PARAMS = [
     help: 'Share of auto-approvable claims still routed to a human so the benchmark keeps being measured.' },
   { key: 'requireVerifiedBill', label: 'Auto-approve only when the patient has verified the bill', type: 'boolean', default: true },
   { key: 'fallbackOnDrift', label: 'Drop back to assist if accuracy falls below the bar', type: 'boolean', default: true },
-  { key: 'llmEnabled', label: 'Use Claude (LLM layer)', type: 'boolean', default: true },
+  { key: 'llmEnabled', label: 'Use Claude (LLM layer) for this product', type: 'boolean', default: false,
+    help: 'Off by default. Also needs the platform-wide Claude switch in Master Control and ANTHROPIC_API_KEY. Claude is never load-bearing: auto mode must pass the gate on checks + scorer alone.' },
   { key: 'llmModel', label: 'Claude model', type: 'select', options: MODELS, default: 'claude-fable-5-1' },
   { key: 'llmEffort', label: 'Claude effort', type: 'select', options: EFFORTS, default: 'max',
     help: 'max = deepest reasoning (most tokens). high is the model default and cheaper.' },
@@ -149,7 +151,14 @@ async function defaultProduct() { return (await allProducts()).find(isDefault) |
 /** Ships one live default (assist mode) so every payer gets AI recommendations from day one. Created once, never revived. */
 async function ensureDefaultProduct() {
   const found = await defaultProduct();
-  if (found) return found;
+  if (found) {
+    // The default shipped with Claude on; it now ships off (no external dependency). Move an untouched default over.
+    if (found.config?.params?.llmEnabled === true && !found.config.params.guidelines) {
+      const products = require('./products');
+      return products.update(found.id, { config: { ...found.config, params: { ...found.config.params, llmEnabled: false } } }, 'system');
+    }
+    return found;
+  }
   const products = require('./products');
   const payers = await store.payers.all();
   const sponsor = payers.find((x) => x.id === 'cosmopolitan') || payers[0];
@@ -428,6 +437,25 @@ function bumpLlm(productId) { const day = new Date().toISOString().slice(0, 10);
 
 function llmConfigured() { return !!process.env.ANTHROPIC_API_KEY; }
 
+/**
+ * Platform-wide Claude switch (Master Control). OFF by default: the platform never
+ * depends on a paid external model to operate. AI_LLM_ENABLED=true only seeds the
+ * starting value on an empty database; once saved from Master Control that wins.
+ * A product additionally needs its own llmEnabled and ANTHROPIC_API_KEY.
+ */
+async function getLlmSwitch() {
+  const saved = await store.settings.get(LLM_SWITCH_KEY);
+  if (saved && typeof saved.enabled === 'boolean') return { enabled: saved.enabled, updatedAt: saved.updatedAt || null, updatedBy: saved.updatedBy || null, seededFromEnv: false };
+  return { enabled: process.env.AI_LLM_ENABLED === 'true', updatedAt: null, updatedBy: null, seededFromEnv: true };
+}
+async function setLlmSwitch(enabled, by = 'HNN') {
+  const v = { enabled: enabled === true, updatedAt: now(), updatedBy: by };
+  await store.settings.set(LLM_SWITCH_KEY, v);
+  return { ...v, seededFromEnv: false };
+}
+/** Is Claude actually in play for this product right now? (switch + product + key) */
+async function llmActive(p) { return !!(p.llmEnabled && (await getLlmSwitch()).enabled && llmConfigured()); }
+
 async function askClaude(p, payer, packet, productId) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { status: 'not_configured', error: 'ANTHROPIC_API_KEY is not set' };
@@ -492,7 +520,8 @@ async function evaluate(claim, bill, { product, useLlm = true } = {}) {
   const ml = p.mlEnabled ? { enabled: true, probability: round4(predict(model.weights, features)), version: model.version, samples: model.samples, onlineUpdates: model.onlineUpdates } : { enabled: false, probability: null };
 
   let llm = { enabled: false, status: 'skipped' };
-  if (p.llmEnabled && useLlm) {
+  if (p.llmEnabled && useLlm && !(await getLlmSwitch()).enabled) llm = { enabled: false, status: 'platform_off' };
+  else if (p.llmEnabled && useLlm) {
     const packet = { claim: facts, checks: flags, scorer: ml.enabled ? { probabilityApprovable: ml.probability, trainedOn: model.samples } : null };
     llm = { enabled: true, ...(await askClaude(p, payer, packet, product.id)) };
   }
@@ -511,7 +540,7 @@ async function evaluate(claim, bill, { product, useLlm = true } = {}) {
   const reasons = [];
   for (const f of hard) reasons.push(`${f.code}: ${f.detail}`);
   if (llm.status === 'ok') reasons.push(...llm.reasons);
-  else if (llm.enabled) reasons.push(`Claude unavailable (${llm.status}${llm.error ? ': ' + llm.error : ''}); decision from checks and the trained scorer only`);
+  else if (llm.enabled && llm.status !== 'skipped') reasons.push(`Claude unavailable (${llm.status}${llm.error ? ': ' + llm.error : ''}); decision from checks and the trained scorer only`);
   if (ml.enabled) reasons.push(`scorer: ${Math.round(ml.probability * 100)}% approvable (trained on ${model.samples} decisions)`);
   for (const f of flags.filter((x) => x.severity === 'soft')) reasons.push(`${f.code}: ${f.detail}`);
 
@@ -535,7 +564,7 @@ async function benchmark(product, { windowDays } = {}) {
   const rows = (await store.aiAdjudications.listByProduct(product.id, 10000)).filter((r) => isBenchmarkRow(r) && new Date(r.decidedAt || r.createdAt).getTime() >= since);
   const thr = Number(p.confidenceThreshold) || 0.9;
   let decisive = 0; let correct = 0; let approveRecs = 0; let falseApprove = 0; let declineRecs = 0; let falseDecline = 0; let autoCand = 0; let autoCandCorrect = 0;
-  let mlDec = 0; let mlOk = 0; let llmDec = 0; let llmOk = 0; let reviews = 0;
+  let mlDec = 0; let mlOk = 0; let llmDec = 0; let llmOk = 0; let reviews = 0; let mlApprove = 0; let mlFalseApprove = 0;
   const recent = { n: 0, correct: 0 }; const since30 = Date.now() - 30 * 86400000;
   for (const r of rows) {
     const human = r.outcome; const rec = r.recommendation;
@@ -548,15 +577,30 @@ async function benchmark(product, { windowDays } = {}) {
         if (!(r.hardFlags || []).length && r.amount <= Number(p.maxAutoAmount)) { autoCand++; if (ok) autoCandCorrect++; } }
       if (rec === 'decline') { declineRecs++; if (human === 'approved') falseDecline++; }
     }
-    if (r.ml?.probability != null) { const pr = r.ml.probability; if (pr >= thr || pr <= 1 - thr) { mlDec++; if ((pr >= thr ? 'approved' : 'declined') === human) mlOk++; } }
+    if (r.ml?.probability != null) {
+      // Scorer-only view: what the checks + scorer would have said without Claude (hard flags block approval).
+      const pr = r.ml.probability; const hard = (r.hardFlags || []).length > 0;
+      const mlRec = hard ? (pr <= 1 - thr ? 'declined' : null) : (pr >= thr ? 'approved' : pr <= 1 - thr ? 'declined' : null);
+      if (mlRec) { mlDec++; if (mlRec === human) mlOk++; if (mlRec === 'approved') { mlApprove++; if (human === 'declined') mlFalseApprove++; } }
+    }
     if (r.llm?.status === 'ok' && r.llm.decision !== 'review') { llmDec++; if ((r.llm.decision === 'approve' ? 'approved' : 'declined') === human) llmOk++; }
   }
   const accuracy = decisive ? round4(correct / decisive) : null;
   const falseApproveRate = approveRecs ? round4(falseApprove / approveRecs) : null;
+  const scorerAccuracy = mlDec ? round4(mlOk / mlDec) : null;
+  const scorerFalseApproveRate = mlApprove ? round4(mlFalseApprove / mlApprove) : null;
+  const claudeOn = await llmActive(p);
   const gateReasons = [];
   if (decisive < Number(p.minBenchmarkSample)) gateReasons.push(`benchmark_sample_too_small (${decisive} of ${p.minBenchmarkSample} definite recommendations reviewed)`);
   if (accuracy == null || accuracy < Number(p.requiredAccuracy)) gateReasons.push(`accuracy_below_required (${accuracy == null ? 'n/a' : Math.round(accuracy * 100) + '%'} vs ${Math.round(p.requiredAccuracy * 100)}% required)`);
   if (falseApproveRate != null && falseApproveRate > Number(p.maxFalseApproveRate)) gateReasons.push(`false_approve_rate_too_high (${Math.round(falseApproveRate * 1000) / 10}% vs ${Math.round(p.maxFalseApproveRate * 1000) / 10}% allowed)`);
+  // Claude is never load-bearing: when it is in play, the checks + scorer ALONE must also clear the bar,
+  // so switching Claude off (key, cap, outage, cost) can never leave auto mode running on an unproven base.
+  if (claudeOn) {
+    if (mlDec < Number(p.minBenchmarkSample)) gateReasons.push(`scorer_alone_sample_too_small (${mlDec} of ${p.minBenchmarkSample})`);
+    if (scorerAccuracy == null || scorerAccuracy < Number(p.requiredAccuracy)) gateReasons.push(`scorer_alone_below_required (${scorerAccuracy == null ? 'n/a' : Math.round(scorerAccuracy * 100) + '%'} vs ${Math.round(p.requiredAccuracy * 100)}%)`);
+    if (scorerFalseApproveRate != null && scorerFalseApproveRate > Number(p.maxFalseApproveRate)) gateReasons.push(`scorer_alone_false_approve_rate_too_high (${Math.round(scorerFalseApproveRate * 1000) / 10}%)`);
+  }
   const model = await loadModel(product.id);
   return {
     productId: product.id, productName: product.name, mode: p.mode, productStatus: product.status, windowDays: days,
@@ -564,8 +608,8 @@ async function benchmark(product, { windowDays } = {}) {
     accuracy, correct, falseApproveRate, falseApproves: falseApprove, approveRecommendations: approveRecs,
     falseDeclineRate: declineRecs ? round4(falseDecline / declineRecs) : null, declineRecommendations: declineRecs,
     recentAccuracy30d: recent.n ? round4(recent.correct / recent.n) : null, recentN30d: recent.n,
-    components: { scorer: { decisive: mlDec, accuracy: mlDec ? round4(mlOk / mlDec) : null, version: model.version, trainedOn: model.samples, onlineUpdates: model.onlineUpdates },
-      claude: { decisive: llmDec, accuracy: llmDec ? round4(llmOk / llmDec) : null, configured: llmConfigured() } },
+    components: { scorer: { decisive: mlDec, accuracy: scorerAccuracy, falseApproveRate: scorerFalseApproveRate, version: model.version, trainedOn: model.samples, onlineUpdates: model.onlineUpdates },
+      claude: { decisive: llmDec, accuracy: llmDec ? round4(llmOk / llmDec) : null, configured: llmConfigured(), active: claudeOn, platformSwitch: (await getLlmSwitch()).enabled, productEnabled: !!p.llmEnabled } },
     projection: { autoApproveCandidates: autoCand, autoApproveCandidatesCorrect: autoCandCorrect,
       automationRate: rows.length ? round4(autoCand / rows.length) : 0,
       humanReviewsSavedPerHundred: rows.length ? Math.round(100 * autoCand * (1 - Number(p.auditSamplePercent) / 100) / rows.length) : 0 },
@@ -836,11 +880,11 @@ async function overview() {
     const bm = await benchmark(pr);
     const drift = await store.settings.get(`ai_drift:${pr.id}`);
     items.push({ id: pr.id, name: pr.name, payerId: pr.payerId, payerName: pr.payerName, isDefault: isDefault(pr), status: pr.status, mode: paramsOf(pr).mode,
-      llm: { model: paramsOf(pr).llmModel, effort: paramsOf(pr).llmEffort, enabled: paramsOf(pr).llmEnabled, callsToday: llmCallsToday(pr.id), dailyCap: paramsOf(pr).llmDailyCap },
+      llm: { model: paramsOf(pr).llmModel, effort: paramsOf(pr).llmEffort, enabled: paramsOf(pr).llmEnabled, active: await llmActive(paramsOf(pr)), callsToday: llmCallsToday(pr.id), dailyCap: paramsOf(pr).llmDailyCap },
       benchmark: bm, drift: drift || null, model: await modelInfo(pr) });
   }
   const pend = await store.claims.byStatus('pending', 2000);
-  return { llmConfigured: llmConfigured(), products: items, queue: { inflight: inflight.size, pendingUnscored: pend.filter((c) => !c.ai).length } };
+  return { llmConfigured: llmConfigured(), llmSwitch: await getLlmSwitch(), products: items, queue: { inflight: inflight.size, pendingUnscored: pend.filter((c) => !c.ai).length } };
 }
 
 async function recentVerdicts({ productId, payerId, limit = 50 } = {}) {
@@ -893,5 +937,5 @@ module.exports = {
   productFor, defaultProduct, ensureDefaultProduct,
   evaluate, evaluateAndAct, enqueue, flush, runPendingPass, decideAction, recordOutcome,
   benchmark, train, modelInfo, setMode, overview, recentVerdicts, forClaim, run,
-  bindActions, track, llmConfigured, invalidateStats, systemPrompt, _setRequestImplForTests,
+  bindActions, track, llmConfigured, getLlmSwitch, setLlmSwitch, llmActive, invalidateStats, systemPrompt, _setRequestImplForTests,
 };

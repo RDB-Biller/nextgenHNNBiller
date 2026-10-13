@@ -1179,6 +1179,13 @@ async function aiProduct(req, res) {
   if (!p || p.type !== 'solution' || p.config?.module !== 'ai_adjudication') { res.status(404).json({ error: 'ai_adjudication_product_not_found' }); return null; }
   return p;
 }
+// Platform-wide Claude switch: off by default; nothing in the platform depends on it.
+router.get('/ai-adjudication/llm', async (req, res, next) => {
+  try { res.json({ ...(await aiAdjudication.getLlmSwitch()), keyConfigured: aiAdjudication.llmConfigured() }); } catch (e) { next(e); }
+});
+router.post('/ai-adjudication/llm', async (req, res, next) => {
+  try { res.json({ ...(await aiAdjudication.setLlmSwitch(req.body?.enabled === true, req.principal?.id || 'HNN')), keyConfigured: aiAdjudication.llmConfigured() }); } catch (e) { next(e); }
+});
 router.get('/ai-adjudication/overview', async (req, res, next) => {
   try { res.json(await aiAdjudication.overview()); } catch (e) { next(e); }
 });
