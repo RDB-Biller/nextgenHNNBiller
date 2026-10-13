@@ -460,6 +460,14 @@
       <div id="pd_run_out" style="margin-top:10px"></div>
     </div>
 
+    <div class="card" style="margin-bottom:14px" id="aia_card"><h2>AI adjudication &mdash; benchmark, training and the autonomy gate</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Every claim is scored by deterministic checks, a scorer trained on the payer's own decisions and Claude. <b>Assist</b> shows reviewers a recommendation; <b>auto</b> lets the AI approve on its own only while its measured accuracy on human-reviewed claims stays above the level you set in the product (and drops back to assist if it drifts). Raise the required accuracy, retrain, then promote.</p>
+      <div id="aia_status" class="muted" style="font-size:13px">Loading…</div>
+      <div class="row" style="margin:10px 0"><button class="ghost mini" onclick="aiaLoad()">Refresh</button><button class="ghost mini" onclick="aiaRunPending()">Score pending claims now</button></div>
+      <div id="aia_products"></div>
+      <div id="aia_recent" style="margin-top:12px"></div>
+    </div>
+
     <div class="card" style="margin-bottom:14px" id="ic_card"><h2>InsureCredit &mdash; applications &amp; ConfirmU callbacks</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Give these URLs to Africa's Talking (USSD) and ConfirmU. The secret is part of each URL, so treat them like passwords; rotating it invalidates the old ones.</p>
       <div id="ic_hooks" class="muted" style="font-size:13px">Loading…</div>
@@ -1458,7 +1466,7 @@ async function setRegStatus(id,status){
 }
 
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();
+boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();aiaLoad();
   loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();if(window.smsBoot)smsBoot();};
 
 // ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====

@@ -968,3 +968,41 @@ expiring, revocable link (max 3 recipients per application).
 logging; local numbers (`024…`) are normalised to `+233…` at the send seam; a provider-agnostic email
 transport (`EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`; Resend or SendGrid); outbound requests time out
 after 12s; hospital-initiated clinical links use that hospital's sender. Smoke: `npm run smoke:insurecredit`.
+
+## AI adjudication (Claude Fable 5.1)
+
+The "~80% AI-assisted adjudication" phase that `claimsAutomation.js` left for later. A Product
+Lab solution (module `ai_adjudication`); the platform ships one live **AI Adjudication (default)**
+in assist mode, and any insurer can build its own configuration that overrides the default for
+its claims. `services/aiAdjudication.js` scores every routed claim with three layers:
+
+1. **Deterministic checks** - duplicates, billed price vs the reference tariff (payer price list,
+   NHIS tariff, or the payer's own history), quantities, the payer's exclusion list, disputed
+   bills, missing member id, the always-review amount. A *hard* flag means the AI may never
+   approve on its own.
+2. **A trainable scorer** - logistic regression over explainable features (amount vs the payer's
+   norm, diagnosis/treatment affinity, provider and member history, tariff deviation, time of
+   submission, ...). It learns online from every human decision and can be retrained in batch
+   from the payer's history or an imported labelled file (`POST .../train`). New weights are
+   adopted only if they do at least as well on a held-out 20%.
+3. **Claude** (`claude-fable-5-1` at `max` effort by default; model/effort per product) reads a
+   de-identified packet (no name, phone or member id) plus the payer's guidelines and the two
+   layers above, and returns a JSON-schema verdict with reasons. Needs `ANTHROPIC_API_KEY`;
+   without it, or on any API failure, the other layers still decide and say so.
+
+**Modes and the gate.** `shadow` scores silently; `assist` shows reviewers the recommendation
+(payer console, secure claim link, Master Control submissions); `auto` approves on its own only
+while the **benchmark gate** holds: enough human-reviewed definite recommendations
+(`minBenchmarkSample`), accuracy >= `requiredAccuracy`, false-approve rate <=
+`maxFalseApproveRate`, claim <= `maxAutoAmount`, no hard flag, patient verified the bill
+(`requireVerifiedBill`), and the claim was not drawn into the human **audit sample**
+(`auditSamplePercent`) that keeps the benchmark honest once the AI is acting. If accuracy drifts
+below the bar the product trips back to assist by itself (`fallbackOnDrift`). Declines are never
+automated unless `autoDecline` is switched on. Promotion to `auto` (`POST
+/api/platform/ai-adjudication/{productId}/mode`) is refused until the gate passes; the licenser
+raises `requiredAccuracy`, retrains, and promotes from Master Control -> Product Lab.
+
+Every decision - payer console, secure link, Master Control - is recorded against the AI's
+prediction (`ai_adjudications`): that one stream is the benchmark and the training set.
+Autonomous and rule-cleared decisions are recorded but never count as benchmark evidence.
+Smoke: `npm run smoke:ai-adjudication`.

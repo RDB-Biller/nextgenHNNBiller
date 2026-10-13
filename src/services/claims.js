@@ -14,6 +14,7 @@ const fees = require('./fees');
 const split = require('./split');
 const priceList = require('./priceList');
 const claimsAutomation = require('./claimsAutomation');
+const aiAdjudication = require('./aiAdjudication');
 
 // Validate a payer is usable for this bill (exists, slot active if facility-scoped).
 async function assertPayer(bill, payerId) {
@@ -145,7 +146,7 @@ async function maybeAutoClear(claim, bill) {
   }
   if (!decision.autoClear) return;
   try {
-    await authorize(claim.id);
+    await authorize(claim.id, { actor: 'rules' });
     const c = await store.claims.get(claim.id);
     if (c) {
       c.autoCleared = { method: decision.method, ruleId: decision.ruleId, clearedAt: new Date().toISOString() };
@@ -171,6 +172,11 @@ async function routeToPayer(bill, payerId) {
 
   await notifyClaimOutcome(claim, bill, 'submitted');
   await maybeAutoClear(claim, bill);
+  // AI adjudication runs AFTER the exact-rule fast path, in the background so the
+  // billing terminal never waits on a model call. It scores every claim (even one
+  // the rules already cleared, for the benchmark) and may auto-approve on its own
+  // only inside the gate described in services/aiAdjudication.js.
+  aiAdjudication.enqueue(claim, bill);
   // Re-read: maybeAutoClear may have just taken this claim all the way to
   // 'settled' -- the caller (e.g. routes/bills.js's response) should see
   // that, not the 'pending' snapshot from before auto-clear ran.
@@ -223,6 +229,7 @@ async function routeToPayers(bill, splitInput) {
   for (const claim of claims) {
     await maybeAutoClear(claim, bill);
   }
+  for (const claim of claims) aiAdjudication.enqueue(claim, bill);
 
   // Re-read each claim -- maybeAutoClear may have taken any of them straight
   // to 'settled'; the caller should see that, not each 'pending' snapshot.
@@ -238,7 +245,14 @@ const getByToken = (token) => store.claims.byToken(token);
  * so concurrent instances can't both fire the transfer. Step 2: do the SBG transfer
  * OUTSIDE the lock (never hold a row lock across a network call). Step 3: finalise.
  */
-async function authorize(claimId) {
+/**
+ * `opts.actor` says who is authorising: undefined/'human' (payer console, secure
+ * link, Master Control), 'rules' (claimsAutomation) or 'ai' (aiAdjudication). It
+ * only affects what is RECORDED against the AI's prediction -- human decisions are
+ * the benchmark and the training signal; the others are logged -- never the
+ * authorisation itself.
+ */
+async function authorize(claimId, opts = {}) {
   // Opt-in gate (payer.requirePatientVerification, default off — mirrors repriceClaims):
   // when on, the patient must have verified their bill before this payer can
   // authorise the A2A transfer. A cheap read-mostly pre-check, outside the row lock —
@@ -262,6 +276,10 @@ async function authorize(claimId) {
     await t.claims.update(c);
     return c;
   });
+  // The decision is made the moment a reviewer commits to it, whatever the transfer
+  // then does; recorded best-effort so a scoring hiccup can never block money.
+  aiAdjudication.track(aiAdjudication.recordOutcome(claim, 'approved', { by: opts.actor || 'human', actor: opts.by || null })
+    .catch((e) => console.error('[aiAdjudication] record outcome failed:', e.message))); // eslint-disable-line no-console
 
   const bill = await store.bills.get(claim.billId);
   const payer = await store.payers.get(claim.payerId);
@@ -326,7 +344,7 @@ async function authorize(claimId) {
   return claim;
 }
 
-async function reject(claimId, reason) {
+async function reject(claimId, reason, opts = {}) {
   const claim = await store.tx(async (t) => {
     const c = await t.claims.get(claimId, { forUpdate: true });
     if (!c) { const e = new Error('claim_not_found'); e.status = 404; throw e; }
@@ -337,6 +355,8 @@ async function reject(claimId, reason) {
     await t.claims.update(c);
     return c;
   });
+  aiAdjudication.track(aiAdjudication.recordOutcome(claim, 'declined', { by: opts.actor || 'human', actor: opts.by || null })
+    .catch((e) => console.error('[aiAdjudication] record outcome failed:', e.message))); // eslint-disable-line no-console
   const bill = await store.bills.get(claim.billId);
   bill.status = 'rejected';
   await store.bills.update(bill);
@@ -392,4 +412,10 @@ async function finalizeSettled(claim, bill) {
 // once per claim after a single consolidated bank transfer covers a whole
 // batch -- so a batch-settled claim gets exactly the same ledger entry, SaaS
 // fees, bill-settled check and notification an immediately-settled one does.
+// The AI layer decides; this module acts -- one code path moves money (see claimsAutomation.js header).
+aiAdjudication.bindActions({
+  approve: (id, meta) => authorize(id, { actor: 'ai', by: meta?.verdictId || null }),
+  decline: (id, reason, meta) => reject(id, reason, { actor: 'ai', by: meta?.verdictId || null }),
+});
+
 module.exports = { routeToPayer, routeToPayers, getByToken, authorize, reject, refresh, finalizeSettled };

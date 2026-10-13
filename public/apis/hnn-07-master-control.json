@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "HNN Biller — Master Control API (SaaS owner)",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Manage every organisation on the deployment — clients, payers, EMR/EHR partners — the IT leads assigned to them, and each client’s edition. **This is the transition API: move any client between commercial and non-commercial instantly, in both directions, with no data loss.**\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`\n\n_The platform never custodies funds: money moves account-to-account to the provider; fees are accrued to the ledger as receivables._"
   },
   "servers": [
@@ -2115,6 +2115,253 @@
           },
           "404": {
             "description": "application_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/overview": {
+      "get": {
+        "summary": "AI adjudication: every product with its benchmark (accuracy, false-approve rate, gate), scorer model, drift state and the scoring queue; whether ANTHROPIC_API_KEY is set",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/verdicts": {
+      "get": {
+        "summary": "Recent AI verdicts with outcomes (?productId, ?payerId, ?limit)",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/{productId}/benchmark": {
+      "get": {
+        "summary": "Benchmark for one product: accuracy on human-reviewed definite recommendations, false approve/decline rates, per-component accuracy (Claude, scorer), projected automation, gate pass/fail with reasons",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "windowDays",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Benchmark"
+          },
+          "404": {
+            "description": "ai_adjudication_product_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/{productId}/train": {
+      "post": {
+        "summary": "Retrain the scorer from human decisions. Backfills unscored history; accepts an imported labelled file. New weights are kept only if the held-out result is not worse.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "epochs": {
+                    "type": "integer"
+                  },
+                  "backfill": {
+                    "type": "boolean"
+                  },
+                  "examples": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "amount": {
+                          "type": "number"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "code": {
+                                "type": "string"
+                              },
+                              "qty": {
+                                "type": "number"
+                              },
+                              "unitPrice": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        },
+                        "diagnosis": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "date": {
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "approved",
+                            "declined"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Training report (holdout before/after, adopted, version)"
+          },
+          "422": {
+            "description": "not_enough_labelled_claims"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/{productId}/mode": {
+      "post": {
+        "summary": "Set the mode: shadow | assist | auto. auto is refused (422 benchmark_gate_not_met) unless the benchmark gate passes right now.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "shadow",
+                      "assist",
+                      "auto"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated product"
+          },
+          "422": {
+            "description": "benchmark_gate_not_met or invalid_mode"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/evaluate/{claimId}": {
+      "post": {
+        "summary": "Score (or re-score) one claim now and act per its product mode. Body { useLlm?: boolean }",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "claimId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verdict"
+          },
+          "404": {
+            "description": "claim_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/ai-adjudication/run-pending": {
+      "post": {
+        "summary": "Score every pending claim that was never scored",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ evaluated, pendingUnscored }"
           }
         }
       }

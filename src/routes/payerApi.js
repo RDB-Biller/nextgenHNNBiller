@@ -7,6 +7,7 @@ const verification = require('../services/verification');
 const priorApproval = require('../services/priorApproval');
 const networks = require('../services/networks');
 const solutions = require('../services/solutions');
+const aiAdjudication = require('../services/aiAdjudication');
 const { idempotency } = require('../middleware/idempotency');
 
 const router = express.Router();
@@ -52,6 +53,9 @@ async function claimView(c) {
     matchingPriorApprovals: matchingPriorApprovals.map((pa) => ({
       id: pa.id, description: pa.description, amountCap: pa.amountCap, expiresAt: pa.expiresAt, timesUsed: pa.timesUsed })),
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
+    // AI adjudication recommendation (null until scored, or while the payer's product is in shadow mode).
+    ai: await aiAdjudication.forClaim(c),
+    autoCleared: c.autoCleared || null,
     link: c.link, createdAt: c.createdAt,
   };
 }
@@ -95,6 +99,23 @@ router.post('/claims/:id/authorize', idempotency((r) => `payer:${r.payer.id}:aut
     const c = await own(req, res); if (!c) return;
     await claimsService.authorize(c.id);
     res.json(await claimView(await store.claims.get(c.id)));
+  } catch (e) { next(e); }
+});
+
+// Ask for (another) AI review of a claim now, e.g. after a prior approval was recorded.
+router.post('/claims/:id/ai-review', async (req, res, next) => {
+  try {
+    const c = await own(req, res); if (!c) return;
+    await aiAdjudication.evaluateAndAct(c, null, { useLlm: req.body?.useLlm !== false });
+    res.json(await claimView(await store.claims.get(c.id)));
+  } catch (e) { next(e); }
+});
+// The payer's own AI benchmark: how often the AI agreed with their reviewers, and whether it may act on its own.
+router.get('/ai-adjudication', async (req, res, next) => {
+  try {
+    const p = await aiAdjudication.productFor(req.payer.id);
+    if (!p) return res.json({ configured: false });
+    res.json({ configured: true, product: { id: p.id, name: p.name, isDefault: p.name === aiAdjudication.DEFAULT_NAME }, benchmark: await aiAdjudication.benchmark(p), model: await aiAdjudication.modelInfo(p) });
   } catch (e) { next(e); }
 });
 

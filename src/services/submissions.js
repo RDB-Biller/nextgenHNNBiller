@@ -31,6 +31,8 @@ async function enrich(c) {
     createdAt: c.createdAt, authorizedAt: c.authorizedAt || null,
     rejectionReason: c.rejectionReason || null,
     approvedBy: c.approvedBy || null,
+    ai: c.ai ? { recommendation: c.ai.recommendation, confidence: c.ai.confidence, action: c.ai.action, reasons: c.ai.reasons, hardFlags: c.ai.hardFlags, mode: c.ai.mode } : null,
+    autoCleared: c.autoCleared || null,
   };
 }
 
@@ -68,7 +70,7 @@ const one = async (id) => {
  */
 async function approve(claimId, by = 'administrator') {
   const c = await one(claimId);
-  await claimsService.authorize(c.id);           // executes the Stanbic A2A transfer
+  await claimsService.authorize(c.id, { by });   // executes the Stanbic A2A transfer (a human decision, for the AI benchmark)
   const settled = await store.claims.get(c.id);
   settled.approvedBy = by;
   settled.approvedAt = new Date().toISOString();
@@ -78,7 +80,7 @@ async function approve(claimId, by = 'administrator') {
 
 async function decline(claimId, reason, by = 'administrator') {
   const c = await one(claimId);
-  await claimsService.reject(c.id, reason);
+  await claimsService.reject(c.id, reason, { by });
   const done = await store.claims.get(c.id);
   done.declinedBy = by;
   await store.claims.update(done);

@@ -57,3 +57,16 @@ td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
 .pill.on_credit,.pill.credit_extended,.pill.referred,.pill.submitted{background:#FFF3E6;color:var(--warn)}
 .api{font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:11px;color:var(--ink);background:#EFEDE2;border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+
+/* AI adjudication recommendation (payer console, secure claim link, Master Control) */
+.ai-rec{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.ai-rec.approve{background:var(--brand-soft);color:var(--brand)}
+.ai-rec.review{background:#FFF3E6;color:var(--warn)}
+.ai-rec.decline{background:#FBE6E1;color:var(--bad)}
+.ai-rec.none{background:#eef2f0;color:var(--muted);font-weight:500}
+.ai-card{background:#F7FAF8;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:12px 0;font-size:13px}
+.ai-card ul{margin:6px 0 0;padding-left:18px}
+.ai-card .l{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.ai-gauge{height:8px;border-radius:9px;background:#dfe6e1;overflow:hidden;min-width:90px}
+.ai-gauge>span{display:block;height:100%;background:var(--brand)}
+.ai-gauge.bad>span{background:var(--bad)}

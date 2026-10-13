@@ -3,7 +3,7 @@
 <title>Payer Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="app.css"/></head><body>
+<link rel="stylesheet" href="app.css"/><script src="ai-ui.js"></script></head><body>
 <div class="wrap">
   <div class="top"><div><div class="brandmark">Payer<span class="dot">.</span> Console</div><p class="muted" id="who" style="margin:4px 0 0"></p></div>
   <nav class="nav"><a href="#" onclick="load();return false">Refresh</a></nav></div>
@@ -22,6 +22,7 @@
       </optgroup>
     </select></div>
   <div class="grid cols-3" id="kpis" style="margin:14px 0 18px"></div>
+  <div id="aibench"></div>
   <div class="card"><h2>Claims addressed to you</h2><div id="list"></div></div>
   <div class="card"><h2>Prior approvals <span class="muted" style="font-weight:400;font-size:12px">pre-authorise a member so a later claim can be verified by referencing this instead of waiting on the patient</span></h2>
     <div class="row">
@@ -44,6 +45,8 @@ const num=(n)=>Number(n||0).toFixed(2);
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pill=(s)=>`<span class="pill ${esc(s)}">${esc(s)}</span>`;
 const key=()=>$('key').value;
+// Network-posture calls below use H(); it was never defined in this page (the panel silently failed to load).
+const H=()=>({'Content-Type':'application/json','x-payer-key':key()});
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);};
 let lastClaims=[];
 
@@ -67,12 +70,24 @@ async function load(){
     const resend=pv.status!=='not_sent'?`<a href="#" onclick="resendV('${c.claimId}');return false" style="font-size:11px">resend</a> · `:'';
     return `${vpill(pv)}<div style="margin-top:4px">${resend}<a href="#" onclick="overrideV('${c.claimId}');return false" style="font-size:11px">verify manually</a></div>`;
   };
-  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Verification</th><th>Status</th><th></th></tr></thead><tbody>`+
+  fetch('/api/payer/ai-adjudication',{headers:{'x-payer-key':key()}}).then(r=>r.json()).then(b=>{$('aibench').innerHTML=b&&b.configured?AiUI.benchmarkLine(b):'';}).catch(()=>{});
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Patient</th><th>Member ID</th><th>Provider</th><th class="num">Amount</th><th>Verification</th><th>AI review</th><th>Status</th><th></th></tr></thead><tbody>`+
     (d.data.map(c=>`<tr><td>${esc(c.claimId.slice(0,12))}…</td><td>${esc(c.patientName||'—')}</td><td>${esc(c.memberId||'—')}</td>
       <td>${esc(c.provider||'—')}</td><td class="num">${num(c.amount)}</td>
       <td>${vCell(c)}</td>
+      <td>${AiUI.pill(c.ai)}${c.ai&&c.ai.recommendation?`<div style="margin-top:4px"><a href="#" onclick="aiDetail('${c.claimId}');return false" style="font-size:11px">why?</a></div>`:''}</td>
       <td>${pill(c.status)}</td>
-      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=8 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+      <td>${c.status==='pending'?`<button class="accent" style="padding:6px 10px" onclick="authz('${c.claimId}')">Authorise</button> <button class="ghost" style="padding:6px 10px" onclick="rej('${c.claimId}')">Decline</button>`:(c.transferReference?esc(c.transferReference):'')}</td></tr>`).join('')||'<tr><td colspan=9 class="muted">No claims.</td></tr>')+`</tbody></table>`;
+  // "why?" expands the AI card under the row
+}
+function aiDetail(id){
+  const c=lastClaims.find(x=>x.claimId===id); if(!c||!c.ai)return;
+  let box=document.getElementById('aidetail_'+id);
+  if(box){box.remove();return;}
+  const tr=[...document.querySelectorAll('#list tr')].find(r=>r.innerHTML.includes(id.slice(0,12)));
+  if(!tr)return;
+  const row=document.createElement('tr'); row.id='aidetail_'+id; row.innerHTML=`<td colspan="9">${AiUI.card(c.ai)}</td>`;
+  tr.after(row);
 }
 async function resendV(id){
   const r=await fetch(`/api/payer/claims/${id}/verification/reissue`,{method:'POST',headers:{'x-payer-key':key()}});
@@ -139,6 +154,7 @@ async function rej(id){
   if(r.ok){toast('Declined');load();}
 }
 async function loadNetwork(){
+  if(!$('n_mode'))return; // the network-posture panel markup is not on this page
   const r=await fetch('/api/payer/network',{headers:H()});
   if(!r.ok) return;
   const d=await r.json();
@@ -150,7 +166,7 @@ async function loadNetwork(){
      <td class="num">${p.maxClaimAmount??'—'}</td>
      <td><span class="pill ${p.active?'settled':'rejected'}">${p.active?'active':p.status}</span></td>
      <td>${p.active?`<button class="ghost" style="padding:6px 10px" onclick="suspendTerms('${esc(p.tenantId)}')">Suspend</button>`:''}</td></tr>`).join('')
-    ||'<tr><td colspan=8 class="muted">No providers in your narrow network yet.</td></tr>')+`</tbody></table>`;
+    ||'<tr><td colspan=9 class="muted">No providers in your narrow network yet.</td></tr>')+`</tbody></table>`;
 }
 async function savePosture(){
   const r=await fetch('/api/payer/network/posture',{method:'PUT',headers:H(),

@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: Composite Billing & Settlement Platform
-  version: 0.5.0
-  description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are
-    settled by patient self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from
-    its Stanbic account to the clinic over the SBG rail.
+  version: 0.6.0
+  description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are settled
+    by patient self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from its Stanbic account
+    to the clinic over the SBG rail.
 
     '
 servers:
@@ -29,14 +29,14 @@ paths:
               $ref: '#/components/schemas/CreateBill'
       responses:
         '201':
-          description: Created. A patient verification link is generated and sent automatically — response
-            includes patientVerification:{status,link,channelsSent,channelErrors?}, not persisted onto
-            the bill itself. If the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels),
-            the same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp
-            reports a specific failure code for any enabled channel that didn't go out. While the server
-            is in sandbox mode, nothing is ever sent for real and the response additionally includes otpCodeSandbox
-            so the flow can be demoed without a phone — see the Master Control API's Messaging endpoints
-            for how a real Twilio/Africa's Talking/Hubtel provider is configured and activated.
+          description: Created. A patient verification link is generated and sent automatically — response includes
+            patientVerification:{status,link,channelsSent,channelErrors?}, not persisted onto the bill itself. If
+            the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels), the
+            same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp
+            reports a specific failure code for any enabled channel that didn't go out. While the server is in sandbox
+            mode, nothing is ever sent for real and the response additionally includes otpCodeSandbox so the flow
+            can be demoed without a phone — see the Master Control API's Messaging endpoints for how a real Twilio/Africa's
+            Talking/Hubtel provider is configured and activated.
           content:
             application/json:
               schema:
@@ -102,10 +102,10 @@ paths:
           type: string
       responses:
         '200':
-          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox
-            while the server is in sandbox mode — reissuing also generates a fresh reply code, invalidating
-            any earlier one. channelErrors.sms/whatsapp reports a specific failure code for any enabled
-            channel that didn''t go out this time'
+          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox while
+            the server is in sandbox mode — reissuing also generates a fresh reply code, invalidating any earlier
+            one. channelErrors.sms/whatsapp reports a specific failure code for any enabled channel that didn''t
+            go out this time'
         '409':
           description: verification_not_pending
   /api/v1/payments/intents:
@@ -145,8 +145,8 @@ paths:
           description: OK
   /api/v1/dashboard:
     get:
-      summary: Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[]
-        (oldest first), the patient bill-verification follow-up queue
+      summary: Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[] (oldest
+        first), the patient bill-verification follow-up queue
       security:
       - TenantKey: []
       responses:
@@ -245,8 +245,8 @@ paths:
         '200':
           description: Settled or authorised
         '409':
-          description: patient_verification_pending — this payer has requirePatientVerification on and
-            the patient has not yet confirmed the bill (see /verify/api)
+          description: patient_verification_pending — this payer has requirePatientVerification on and the patient
+            has not yet confirmed the bill (see /verify/api)
   /api/payer/claims/{id}/reject:
     post:
       summary: Decline the claim
@@ -287,8 +287,8 @@ paths:
           description: verification_not_pending
   /api/payer/claims/{id}/verification/override:
     post:
-      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital,
-        or a prior approval on file)
+      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital, or
+        a prior approval on file)
       security:
       - PayerKey: []
       parameters:
@@ -715,9 +715,9 @@ paths:
                   - provider
                   - member
                   default: provider
-                  description: 'Who receives the insurer''s refund. provider - lands with the clinic,
-                    so a member-charged margin is netted from the cashback and the balance is owed on.
-                    member - the insurer pays the member directly, so the margin is invoiced instead.
+                  description: 'Who receives the insurer''s refund. provider - lands with the clinic, so a member-charged
+                    margin is netted from the cashback and the balance is owed on. member - the insurer pays the
+                    member directly, so the margin is invoiced instead.
 
                     '
                 externalRef:
@@ -893,11 +893,10 @@ paths:
       summary: Inbound SMS/WhatsApp reply to a patient verification message (shared-secret signed)
       description: 'Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
         with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK
-        confirms only when exactly one verification is pending for that phone; otherwise (or always) the
-        patient can send the numeric reply code from their message instead, matched only within that phone''s
-        own pending verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret
-        header, not a provider-specific request signature (header x-webhook-secret, not modeled as a securityScheme
-        here — same as /api/v1/webhooks/collection).
+        confirms only when exactly one verification is pending for that phone; otherwise (or always) the patient
+        can send the numeric reply code from their message instead, matched only within that phone''s own pending
+        verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a provider-specific
+        request signature (header x-webhook-secret, not modeled as a securityScheme here — same as /api/v1/webhooks/collection).
 
         '
       requestBody:
@@ -917,8 +916,8 @@ paths:
                   - whatsapp
       responses:
         '200':
-          description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous,
-            wrong_code, locked, no_match, unrecognized.'
+          description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code,
+            locked, no_match, unrecognized.'
         '401':
           description: bad_signature
         '422':
@@ -933,8 +932,8 @@ paths:
           description: data[] of solution views
   /api/v1/solutions/{id}/run:
     post:
-      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId
-        in input is ignored.
+      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId in input is
+        ignored.
       security:
       - TenantKey: []
       parameters:
@@ -996,8 +995,8 @@ paths:
           description: rate_limited
   /solutions/api/{id}:
     get:
-      summary: Public view of one live patient-facing solution (404 unless status is live and the patient
-        surface is enabled)
+      summary: Public view of one live patient-facing solution (404 unless status is live and the patient surface
+        is enabled)
       parameters:
       - name: id
         in: path
@@ -1011,8 +1010,8 @@ paths:
           description: solution_not_found
   /solutions/api/{id}/run:
     post:
-      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them;
-        ids and variance are never returned.
+      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them; ids and
+        variance are never returned.
       parameters:
       - name: id
         in: path
@@ -1034,9 +1033,8 @@ paths:
           description: rate_limited
   /api/v1/bills/{id}/insurecredit:
     post:
-      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS
-        2000) for their share of this bill. An approved loan covering the share settles the bill (settlementMethod
-        insurecredit).
+      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS 2000) for
+        their share of this bill. An approved loan covering the share settles the bill (settlementMethod insurecredit).
       parameters:
       - name: id
         in: path
@@ -1074,7 +1072,8 @@ paths:
   /api/platform/solutions/modules:
     get:
       summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing,
-        multi_funder, pharmacy_compare, reconciliation, insurecredit) with config schemas, plus funders
+        multi_funder, pharmacy_compare, reconciliation, insurecredit, ai_adjudication) with config schemas, plus
+        funders
       security:
       - PlatformKey: []
       responses:
@@ -1096,8 +1095,8 @@ paths:
           description: Module result
   /credit/api/{token}:
     get:
-      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only.
-        The token in the SMS link is the credential.
+      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only. The token
+        in the SMS link is the credential.
       parameters:
       - name: token
         in: path
@@ -1133,8 +1132,8 @@ paths:
           description: offer_expired
   /credit/api/{token}/apply:
     post:
-      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying
-        ref, amount, source and the report link.
+      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying ref, amount,
+        source and the report link.
       parameters:
       - name: token
         in: path
@@ -1220,9 +1219,8 @@ paths:
           description: note_withdrawn or note_expired
   /ussd/{secret}:
     post:
-      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode,
-        text). Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret
-        is a bare 404.
+      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode, text).
+        Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret is a bare 404.
       parameters:
       - name: secret
         in: path
@@ -1236,8 +1234,8 @@ paths:
           description: Bad secret
   /insurecredit-hooks/{secret}/decision:
     post:
-      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount?
-        }. The patient is texted the outcome.
+      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount? }.
+        The patient is texted the outcome.
       parameters:
       - name: secret
         in: path
@@ -1255,9 +1253,8 @@ paths:
           description: decision_must_be_approved_or_declined or approved_amount_invalid
   /insurecredit-hooks/{secret}/applications/{no}:
     get:
-      summary: Verification packet for an application number - need checks against the micro medical report
-        (report present, micro, signed off, amount within patient share, bill status, bill verification,
-        consent on file)
+      summary: Verification packet for an application number - need checks against the micro medical report (report
+        present, micro, signed off, amount within patient share, bill status, bill verification, consent on file)
       parameters:
       - name: secret
         in: path
@@ -1470,8 +1467,8 @@ paths:
           description: OK
   /sms-hooks/{secret}/delivery:
     post:
-      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret
-        in the path; wrong secret returns a bare 404.
+      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret in the path;
+        wrong secret returns a bare 404.
       parameters:
       - name: secret
         in: path
@@ -1501,8 +1498,8 @@ paths:
           description: unknown secret
   /sms-hooks/{secret}/inbox:
     post:
-      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical,
-        campaign and verification reply handlers
+      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical, campaign
+        and verification reply handlers
       parameters:
       - name: secret
         in: path
@@ -1565,8 +1562,8 @@ paths:
           description: '{ ok, optedOut }'
   /api/platform/pharmacy-pricing/unified:
     get:
-      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available,
-        or side by side. variance% = (billed - quoted) / quoted x 100.
+      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available, or side
+        by side. variance% = (billed - quoted) / quoted x 100.
       security:
       - PlatformKey: []
       parameters:
@@ -1635,8 +1632,8 @@ paths:
           description: text/csv
   /api/platform/pharmacy-quotes/import:
     post:
-      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX
-        is read in the browser). Quotes are append-only; validFrom/validUntil bound their use.
+      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX is read
+        in the browser). Quotes are append-only; validFrom/validUntil bound their use.
       security:
       - PlatformKey: []
       requestBody:
@@ -1685,8 +1682,8 @@ paths:
           description: OK
   /credit/api/lookup:
     post:
-      summary: Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both
-        must match. Returns { token }.
+      summary: Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both must match.
+        Returns { token }.
       responses:
         '200':
           description: token
@@ -1718,6 +1715,174 @@ paths:
       responses:
         '302':
           description: Redirect
+  /api/platform/ai-adjudication/overview:
+    get:
+      summary: 'AI adjudication: every product with its benchmark (accuracy, false-approve rate, gate), scorer model,
+        drift state and the scoring queue; whether ANTHROPIC_API_KEY is set'
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/ai-adjudication/verdicts:
+    get:
+      summary: Recent AI verdicts with outcomes (?productId, ?payerId, ?limit)
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+  /api/platform/ai-adjudication/{productId}/benchmark:
+    get:
+      summary: 'Benchmark for one product: accuracy on human-reviewed definite recommendations, false approve/decline
+        rates, per-component accuracy (Claude, scorer), projected automation, gate pass/fail with reasons'
+      security:
+      - PlatformKey: []
+      parameters:
+      - &id001
+        name: productId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: windowDays
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Benchmark
+        '404':
+          description: ai_adjudication_product_not_found
+  /api/platform/ai-adjudication/{productId}/train:
+    post:
+      summary: Retrain the scorer from human decisions. Backfills unscored history; accepts an imported labelled
+        file. New weights are kept only if the held-out result is not worse.
+      security:
+      - PlatformKey: []
+      parameters:
+      - *id001
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                epochs:
+                  type: integer
+                backfill:
+                  type: boolean
+                examples:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      amount:
+                        type: number
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            code:
+                              type: string
+                            qty:
+                              type: number
+                            unitPrice:
+                              type: number
+                      diagnosis:
+                        type: string
+                      provider:
+                        type: string
+                      date:
+                        type: string
+                      outcome:
+                        type: string
+                        enum:
+                        - approved
+                        - declined
+      responses:
+        '200':
+          description: Training report (holdout before/after, adopted, version)
+        '422':
+          description: not_enough_labelled_claims
+  /api/platform/ai-adjudication/{productId}/mode:
+    post:
+      summary: 'Set the mode: shadow | assist | auto. auto is refused (422 benchmark_gate_not_met) unless the benchmark
+        gate passes right now.'
+      security:
+      - PlatformKey: []
+      parameters:
+      - *id001
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum:
+                  - shadow
+                  - assist
+                  - auto
+      responses:
+        '200':
+          description: Updated product
+        '422':
+          description: benchmark_gate_not_met or invalid_mode
+  /api/platform/ai-adjudication/evaluate/{claimId}:
+    post:
+      summary: 'Score (or re-score) one claim now and act per its product mode. Body { useLlm?: boolean }'
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: claimId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Verdict
+        '404':
+          description: claim_not_found
+  /api/platform/ai-adjudication/run-pending:
+    post:
+      summary: Score every pending claim that was never scored
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: '{ evaluated, pendingUnscored }'
+  /api/payer/ai-adjudication:
+    get:
+      summary: 'The payer''s AI adjudication benchmark: how often the AI agreed with their reviewers and whether
+        it may act on its own'
+      security:
+      - PayerKey: []
+      responses:
+        '200':
+          description: '{ configured, product, benchmark, model }'
+  /api/payer/claims/{id}/ai-review:
+    post:
+      summary: 'Ask for (another) AI review of a claim now. Body { useLlm?: boolean }. The claim view then carries
+        `ai` (recommendation, confidence, reasons, flags, reviewer note).'
+      security:
+      - PayerKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Claim view
+        '404':
+          description: claim_not_found
 components:
   securitySchemes:
     TenantKey:
@@ -1847,14 +2012,14 @@ components:
                 enum:
                 - sms
                 - whatsapp
-              description: Which channels this verification also went out on, in addition to the link
-                (empty unless the client enabled them — see /api/platform/clients/{id}/verification-channels).
+              description: Which channels this verification also went out on, in addition to the link (empty unless
+                the client enabled them — see /api/platform/clients/{id}/verification-channels).
             channelErrors:
               type: object
-              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp
-                carry a specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported,
-                provider_whatsapp_not_verified, messaging_provider_not_configured) so a missing channel
-                is explained rather than just absent from channelsSent.
+              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp carry
+                a specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported,
+                provider_whatsapp_not_verified, messaging_provider_not_configured) so a missing channel is explained
+                rather than just absent from channelsSent.
               properties:
                 sms:
                   type: string
@@ -1862,7 +2027,6 @@ components:
                   type: string
             otpCodeSandbox:
               type: string
-              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply
-                code, echoed back here purely so the flow can be demoed without a real phone or a configured
-                provider. Never present, and never returned by any patient-facing endpoint, once MESSAGING_SANDBOX
-                is turned off.
+              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply code, echoed
+                back here purely so the flow can be demoed without a real phone or a configured provider. Never
+                present, and never returned by any patient-facing endpoint, once MESSAGING_SANDBOX is turned off.

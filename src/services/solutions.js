@@ -9,6 +9,7 @@ const funders = require('./funders');
 const pharmacyPricing = require('./pharmacyPricing');
 const reconciliation = require('./reconciliation');
 const insurecredit = require('./insurecredit');
+const aiAdjudication = require('./aiAdjudication');
 
 /**
  * Solutions -- the 8 "gaps from the call" turned into Product Lab products.
@@ -322,6 +323,18 @@ const MODULES = {
     },
   },
 
+  ai_adjudication: {
+    label: 'AI adjudication (Claude Fable 5.1)',
+    description: 'Scores every claim with deterministic checks, a scorer trained on this payer\'s own decisions and Claude. Starts by recommending; approves on its own only once the benchmark accuracy you set is met, and drops back if it drifts.',
+    scope: 'none',
+    surfaces: ['hospital', 'payer'],
+    params: aiAdjudication.PARAMS,
+    check: aiAdjudication.check,
+    async apply() { return null; },
+    async revert() {},
+    async run(ctx, p, input) { return aiAdjudication.run(ctx, p, input); },
+  },
+
   insurecredit: {
     label: 'InsureCredit micro-loan',
     description: 'Texts the patient a link (and USSD instructions) to apply for a micro-loan of up to GHS 2,000 for their out-of-pocket share, scored by ConfirmU, with a micro medical report attached. Above the limit it offers to send the report to a funder (e.g. HR) as a justification note.',
@@ -478,6 +491,12 @@ const INPUTS = {
   multi_funder: [],
   pharmacy_compare: [{ key: 'items', label: 'Medicines (one per line)', type: 'textarea', required: true }],
   reconciliation: [{ key: 'tenantId', label: 'Provider id', type: 'text', surface: 'payer' }, { key: 'since', label: 'From (YYYY-MM-DD)', type: 'text' }],
+  ai_adjudication: [
+    { key: 'action', label: 'What to do', type: 'select', options: ['benchmark', 'evaluate', 'recent', 'train'], surfaces: ['hospital', 'payer'] },
+    { key: 'claimId', label: 'Claim id (for evaluate)', type: 'text', surfaces: ['hospital', 'payer'] },
+    { key: 'useLlm', label: 'Call Claude for this evaluation? (costs tokens)', type: 'select', options: ['no', 'yes'], surfaces: ['hospital', 'payer'] },
+    { key: 'epochs', label: 'Training epochs (for train)', type: 'number', surfaces: ['payer'] },
+  ],
   insurecredit: [
     { key: 'applicationNo', label: 'Application number', type: 'text', surfaces: ['patient', 'hospital', 'payer'] },
     { key: 'phone', label: 'Phone number you applied with', type: 'text', surfaces: ['patient'] },

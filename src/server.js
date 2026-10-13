@@ -34,6 +34,7 @@ const solutionsApiRoutes = require('./routes/solutionsApi');
 const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
 const insurecredit = require('./services/insurecredit');
+const aiAdjudication = require('./services/aiAdjudication');
 const campaigns = require('./services/campaigns');
 const claimExpiry = require('./services/claimExpiry');
 const settlementBatches = require('./services/settlementBatches');
@@ -116,7 +117,8 @@ app.use('/api/v1', institutionsRoutes);
 app.use(errorHandler);
 
 if (require.main === module) {
-  store.init().then(() => campaigns.ensureSeedGroup()).then(() => insurecredit.ensureDefaultProduct().catch((e) => console.error('[insurecredit] default product:', e.message))).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
+  store.init().then(() => campaigns.ensureSeedGroup()).then(() => insurecredit.ensureDefaultProduct().catch((e) => console.error('[insurecredit] default product:', e.message)))
+    .then(() => aiAdjudication.ensureDefaultProduct().catch((e) => console.error('[aiAdjudication] default product:', e.message))).then(() => operatingMode.get()).then((mode) => app.listen(config.port, () => {
     const rail = (sandbox) => (sandbox ? 'sandbox' : 'LIVE');
     console.log(`Composite Billing Platform on :${config.port} `
       + `(settlement=${rail(mode.settlement.sandbox)}, messaging=${rail(mode.messaging.sandbox)}`
@@ -140,6 +142,7 @@ if (require.main === module) {
       claimExpiry.runExpiryPass().catch((e) => console.error('[claimExpiry] sweep failed:', e));
       settlementBatches.runDue().catch((e) => console.error('[settlementBatches] sweep failed:', e));
       insurecredit.runAutoSend().catch((e) => console.error('[insurecredit] auto-send failed:', e));
+      aiAdjudication.runPendingPass().catch((e) => console.error('[aiAdjudication] pending pass failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
     setInterval(runSweeps, SWEEP_INTERVAL_MS);

@@ -3,7 +3,7 @@
 <title>HNN Biller — Submissions</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="app.css"/></head><body>
+<link rel="stylesheet" href="app.css"/><script src="ai-ui.js"></script></head><body>
 <div class="wrap">
   <div class="top">
     <div><div class="brandmark">HNN Biller<span class="dot">.</span> Submissions</div>
@@ -35,18 +35,19 @@ async function load(){
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
   const q=$('filter').value?`?status=${$('filter').value}`:'';
   const d=await (await fetch('/api/platform/submissions'+q,{headers:H()})).json();
-  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Provider</th><th>Payer</th><th>Member</th><th class="num">Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>`+
+  $('list').innerHTML=`<table><thead><tr><th>Claim</th><th>Provider</th><th>Payer</th><th>Member</th><th class="num">Amount</th><th>AI review</th><th>Status</th><th>Action</th></tr></thead><tbody>`+
     ((d.data||[]).map(c=>`<tr>
       <td>${esc(c.claimId.slice(0,12))}…<br><span class="muted" style="font-size:11px">${esc(c.patientName||'')}</span></td>
       <td>${esc(c.provider||c.tenantId)}</td><td>${esc(c.payerName||c.payerId)}</td>
       <td>${esc(c.memberId||'—')}</td>
       <td class="num">${esc(c.currency)} ${n2(c.settlementAmount)}${c.nnest&&c.nnest.promptPaymentDiscount?`<br><span class="muted" style="font-size:11px">gross ${n2(c.nnest.grossAmount)}</span>`:''}</td>
+      <td>${AiUI.pill(c.ai)}${c.ai&&c.ai.reasons&&c.ai.reasons.length?`<div class="muted" style="font-size:11px;max-width:260px">${esc(c.ai.reasons[0])}</div>`:''}</td>
       <td>${pill(c.status)}</td>
       <td>${c.status==='pending'
         ? `<button class="primary" style="padding:6px 10px" onclick="approve('${esc(c.claimId)}')">Approve</button>
            <button class="ghost" style="padding:6px 10px" onclick="decline('${esc(c.claimId)}')">Decline</button>`
         : (c.transferReference?`<span class="muted" style="font-size:11px">ref ${esc(c.transferReference)}</span>`:'—')}</td>
-    </tr>`).join('')||'<tr><td colspan=7 class="muted">No submissions.</td></tr>')+`</tbody></table>`;
+    </tr>`).join('')||'<tr><td colspan=8 class="muted">No submissions.</td></tr>')+`</tbody></table>`;
 }
 async function approve(id){
   if(!confirm('Approve and transfer to the provider now?'))return;

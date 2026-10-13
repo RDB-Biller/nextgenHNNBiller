@@ -122,6 +122,13 @@ CREATE TABLE IF NOT EXISTS sms_inbox (id text PRIMARY KEY, created_at timestampt
 CREATE TABLE IF NOT EXISTS credit_applications (id text PRIMARY KEY, app_no text UNIQUE, token text UNIQUE, status text, tenant_id text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_credit_applications_tenant ON credit_applications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_credit_applications_bill ON credit_applications((data->>'billId'));
+-- AI adjudication verdicts (services/aiAdjudication.js): one row per scoring of a claim,
+-- later stamped with the human/rules/AI outcome. That stream is the benchmark and the
+-- training set, so it is kept even after the claim is settled.
+CREATE TABLE IF NOT EXISTS ai_adjudications (id text PRIMARY KEY, claim_id text, payer_id text, product_id text, recommendation text, outcome text, decided_by text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ai_adjudications_claim ON ai_adjudications(claim_id);
+CREATE INDEX IF NOT EXISTS idx_ai_adjudications_product ON ai_adjudications(product_id);
+CREATE INDEX IF NOT EXISTS idx_ai_adjudications_payer ON ai_adjudications(payer_id);
 -- Public trial sign-ups (register.html / routes/registerPortal.js), whether
 -- from the campaign "YES" reply link or a direct visit to /register/.
 CREATE TABLE IF NOT EXISTS trial_registrations (id text PRIMARY KEY, org_type text, status text, created_at timestamptz DEFAULT now(), data jsonb NOT NULL);
@@ -406,6 +413,15 @@ function pgRepo(exec) {
       insert: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
       update: (a) => exec(upsert('credit_applications', ['app_no', 'token', 'status', 'tenant_id']), [a.id, a.appNo, a.token, a.status, a.tenantId || null, a]),
       all: (limit = 5000) => many('SELECT data FROM credit_applications ORDER BY created_at DESC LIMIT $1', [limit]),
+    },
+    aiAdjudications: {
+      get: (id) => one('SELECT data FROM ai_adjudications WHERE id=$1', [id]),
+      byClaim: (c) => one('SELECT data FROM ai_adjudications WHERE claim_id=$1 ORDER BY created_at DESC LIMIT 1', [c]),
+      insert: (r) => exec(upsert('ai_adjudications', ['claim_id', 'payer_id', 'product_id', 'recommendation', 'outcome', 'decided_by']), [r.id, r.claimId, r.payerId, r.productId, r.recommendation, r.outcome || null, r.decidedBy || null, r]),
+      update: (r) => exec(upsert('ai_adjudications', ['claim_id', 'payer_id', 'product_id', 'recommendation', 'outcome', 'decided_by']), [r.id, r.claimId, r.payerId, r.productId, r.recommendation, r.outcome || null, r.decidedBy || null, r]),
+      listByProduct: (p, limit = 5000) => many('SELECT data FROM ai_adjudications WHERE product_id=$1 ORDER BY created_at DESC LIMIT $2', [p, limit]),
+      listByPayer: (p, limit = 5000) => many('SELECT data FROM ai_adjudications WHERE payer_id=$1 ORDER BY created_at DESC LIMIT $2', [p, limit]),
+      all: (limit = 5000) => many('SELECT data FROM ai_adjudications ORDER BY created_at DESC LIMIT $1', [limit]),
     },
     smsInbox: {
       insert: (m) => exec(upsert('sms_inbox', []), [m.id, m]),
@@ -692,6 +708,15 @@ function memRepo(M) {
       update: async (a) => { M.credits.set(a.id, a); },
       all: async (limit = 5000) => [...M.credits.values()].reverse().slice(0, limit),
     },
+    aiAdjudications: {
+      get: async (id) => M.aiAdjudications.get(id) || null,
+      byClaim: async (c) => [...M.aiAdjudications.values()].reverse().find((r) => r.claimId === c) || null,
+      insert: async (r) => { M.aiAdjudications.set(r.id, r); },
+      update: async (r) => { M.aiAdjudications.set(r.id, r); },
+      listByProduct: async (p, limit = 5000) => [...M.aiAdjudications.values()].filter((r) => r.productId === p).reverse().slice(0, limit),
+      listByPayer: async (p, limit = 5000) => [...M.aiAdjudications.values()].filter((r) => r.payerId === p).reverse().slice(0, limit),
+      all: async (limit = 5000) => [...M.aiAdjudications.values()].reverse().slice(0, limit),
+    },
     smsInbox: {
       insert: async (m) => { M.smsInbox.set(m.id, m); },
       all: async (limit = 5000) => [...M.smsInbox.values()].reverse().slice(0, limit),
@@ -770,7 +795,7 @@ if (usePg) {
     users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
     observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
     campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(), aiAdjudications: new Map(),
     funders: new Map(), settlementBatches: new Map(),
   };
   repo = memRepo(M);

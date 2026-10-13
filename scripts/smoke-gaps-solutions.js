@@ -128,8 +128,8 @@ async function seedPharmacies() {
 async function solutionChecks() {
   await seedPharmacies();
   const reg = solutions.registry();
-  ok(reg.length === 9 && ['auth_threshold', 'auto_adjudication', 'claim_expiry', 'settlement_cycle', 'daily_billing', 'multi_funder', 'pharmacy_compare', 'reconciliation', 'insurecredit'].every((k) => reg.some((m) => m.key === k)),
-    'registry exposes all 9 modules (8 gap modules + InsureCredit) with parameter schemas');
+  ok(reg.length === 10 && ['auth_threshold', 'auto_adjudication', 'claim_expiry', 'settlement_cycle', 'daily_billing', 'multi_funder', 'pharmacy_compare', 'reconciliation', 'insurecredit', 'ai_adjudication'].every((k) => reg.some((m) => m.key === k)),
+    'registry exposes all 10 modules (8 gap modules + InsureCredit + AI adjudication) with parameter schemas');
 
   // validation
   await rejects(() => products.create('acacia', { type: 'solution', name: 'x', config: { module: 'nope' } }), 422, 'unknown module rejected');

@@ -298,6 +298,7 @@ const SOL_INPUTS={
   auto_adjudication:[['diagnosis','Diagnosis','text'],['itemCodes','Item codes (comma-separated)','text'],['amount','Amount (GHS)','number']],
   claim_expiry:[],settlement_cycle:[['tenantId','Provider id (optional)','text']],daily_billing:[['tenantId','Provider id','text']],multi_funder:[],
   pharmacy_compare:[['items','Medicines (one per line)','textarea']],
+  ai_adjudication:[['action','What to do','select',['benchmark','evaluate','recent','train']],['claimId','Claim id (for evaluate)','text'],['useLlm','Call Claude for this evaluation?','select',['no','yes']],['epochs','Training epochs','number']],
   insurecredit:[['action','What to do','select',['list','verify','preview']],['applicationNo','Application number (for verify)','text'],['amount','Amount in GHS (for preview)','number'],['name','Patient first name (for preview)','text']],reconciliation:[['tenantId','Provider id','text'],['since','From (YYYY-MM-DD)','text']],
 };
 function pdAfterProducts(){
@@ -324,8 +325,26 @@ function solInsureCredit(d){
   if(d.rows)return `<p><b>${d.total}</b> applications · requested GHS ${n2(d.requestedTotal)} · approved GHS ${n2(d.approvedTotal)} · notes shared ${d.sharedNotes}</p>`+solTable(d.rows,[['applicationNo','App no.'],['status','Status'],['amount','Bill'],['loanableAmount','Loanable'],['facility','Facility'],['to','Phone'],['createdAt','Created']]);
   return `<pre style="white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre>`;
 }
+function aiaBench(b){
+  const pct=(v)=>v==null?'—':Math.round(v*100)+'%';
+  const g=b.gate||{reasons:[]};
+  return `<p style="margin:0 0 4px">Mode <b>${esc(b.mode)}</b> · <span class="ai-rec ${g.autonomous?'approve':g.passed?'review':'none'}">${g.autonomous?'approving on its own':g.passed?'gate met (promote to auto)':'gate not met'}</span></p>
+    <p style="margin:0 0 4px">Accuracy <b>${pct(b.accuracy)}</b> on ${b.decisive} definite recommendations reviewed by humans (${b.reviewed} reviewed, ${pct(b.reviewRate)} sent to review) · false approvals <b>${pct(b.falseApproveRate)}</b> · false declines ${pct(b.falseDeclineRate)} · last 30 days ${pct(b.recentAccuracy30d)} (n=${b.recentN30d})</p>
+    <p class="muted" style="margin:0 0 4px;font-size:12px">Required: ${pct(b.requirements.requiredAccuracy)} accuracy, ≤${Math.round(b.requirements.maxFalseApproveRate*1000)/10}% false approvals, ${b.requirements.minBenchmarkSample} reviewed · confidence ≥${pct(b.requirements.confidenceThreshold)} · auto up to GHS ${n2(b.requirements.maxAutoAmount)}</p>
+    <p class="muted" style="margin:0 0 4px;font-size:12px">Components: Claude ${pct(b.components.claude.accuracy)} (${b.components.claude.decisive}${b.components.claude.configured?'':' · API key not set'}) · scorer ${pct(b.components.scorer.accuracy)} (${b.components.scorer.decisive}, v${b.components.scorer.version}, trained on ${b.components.scorer.trainedOn}, ${b.components.scorer.onlineUpdates} online updates)</p>
+    <p class="muted" style="margin:0;font-size:12px">Projection at current settings: ${pct(b.projection.automationRate)} of claims auto-approvable → about ${b.projection.humanReviewsSavedPerHundred} fewer human reviews per 100 claims.</p>
+    ${g.reasons.length?`<p style="margin:6px 0 0;font-size:12px;color:var(--warn)">${g.reasons.map(esc).join(' · ')}</p>`:''}`;
+}
+function solAiAdjudication(d){
+  if(d.gate)return aiaBench(d)+(d.model?`<p class="muted" style="font-size:12px;margin-top:8px">Scorer weights: ${Object.entries(d.model.weights).map(([k,v])=>`${esc(k)} ${v}`).join(', ')}</p>`:'');
+  if(d.verdict)return `<p><span class="ai-rec ${esc(d.verdict.recommendation)}">AI: ${esc(d.verdict.recommendation)} · ${Math.round(d.verdict.confidence*100)}%</span> · would do: <b>${esc(d.wouldDo.action)}</b>${d.wouldDo.reasons&&d.wouldDo.reasons.length?` (${d.wouldDo.reasons.map(esc).join('; ')})`:''}</p><ul style="font-size:13px">${d.verdict.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul><p class="muted" style="font-size:12px">Claude: ${esc(d.verdict.llm.status)}${d.verdict.llm.model?' · '+esc(d.verdict.llm.model):''} · scorer ${d.verdict.scorer.enabled?Math.round(d.verdict.scorer.probability*100)+'%':'off'}</p>`;
+  if(d.holdout)return `<p>Training ${d.adopted?'<b>adopted</b>':'<b>not adopted</b> (held-out result was not better)'} · v${d.version} · ${d.samples} labelled claims (${d.backfilled} backfilled, ${d.imported} imported) · held-out accuracy ${d.holdout.before.accuracy==null?'—':Math.round(d.holdout.before.accuracy*100)+'%'} → ${d.holdout.after.accuracy==null?'—':Math.round(d.holdout.after.accuracy*100)+'%'} (log-loss ${d.holdout.before.logloss} → ${d.holdout.after.logloss})</p>`;
+  if(d.rows)return solTable(d.rows,[['claimId','Claim',r=>r.claimId.slice(0,12)],['amount','Amount'],['recommendation','AI'],['confidence','Conf.',r=>Math.round((r.confidence||0)*100)+'%'],['action','Action'],['outcome','Outcome',r=>r.outcome||'—'],['decidedBy','By',r=>r.decidedBy||'—'],['agreed','Agreed',r=>r.agreed==null?'—':r.agreed?'yes':'no']]);
+  return `<pre style="white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre>`;
+}
 function solRender(mod,d){
   if(mod==='insurecredit')return solInsureCredit(d);
+  if(mod==='ai_adjudication')return solAiAdjudication(d);
   if(mod==='pharmacy_compare')return solPharmacy(d);
   if(mod==='auth_threshold')return `<p>Auto-authorize ${d.enabled?'<b>on</b>':'off'} up to <b>GHS ${n2(d.thresholdMaxAmount)}</b>.</p>`+(d.check?`<p>GHS ${n2(d.check.amount)} → <b>${d.check.autoAuthorized?'authorized automatically':'goes to manual review'}</b></p>`:'');
   if(mod==='auto_adjudication')return `<p>Rules active: <b>${d.activeRules.length}</b> (master switch ${d.masterEnabled?'on':'OFF'}).</p>`+solTable(d.activeRules,[['diagnosisKeyword','Diagnosis'],['requiredItemCodes','Needs',r=>(r.requiredItemCodes||[]).join(', ')],['maxAmount','Cap']])+(d.whatIf?`<p style="margin-top:8px">What-if: <b>${d.whatIf.autoClear?'auto-clears ('+esc(d.whatIf.method)+')':'manual review'}</b></p>`:'');
@@ -443,4 +462,37 @@ async function icRotate(){
 }
 async function icAutoSend(){
   try{const r=await fetch('/api/platform/insurecredit/run-auto-send',{method:'POST',headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error);toast('Auto-send: '+JSON.stringify(o).slice(0,120));icLoad();}catch(e){toast(e.message);}
+}
+
+// ======================= AI adjudication panel (Master Control) =======================
+let AIA=null;
+async function aiaLoad(){
+  try{
+    const r=await fetch('/api/platform/ai-adjudication/overview',{headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error||'Failed');
+    AIA=o;
+    $('aia_status').innerHTML=`Claude API key: <b>${o.llmConfigured?'configured':'NOT set (ANTHROPIC_API_KEY) — checks and the trained scorer still run'}</b> · scoring in flight ${o.queue.inflight} · pending claims not yet scored ${o.queue.pendingUnscored}`;
+    $('aia_products').innerHTML=o.products.length?o.products.map(p=>`<div class="card" style="margin:8px 0;padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(p.name)}</b>${p.isDefault?' <span class="pill settled">default for every payer without its own</span>':''} · ${esc(p.payerName||p.payerId)} · <span class="pill ${p.status==='live'?'settled':'open'}">${esc(p.status)}</span> · Claude ${esc(p.llm.model)} @ ${esc(p.llm.effort)}${p.llm.enabled?'':' (off)'} · ${p.llm.callsToday}/${p.llm.dailyCap} calls today</div>
+        <div class="row" style="flex:0 0 auto">${p.mode!=='auto'?`<button class="ghost mini" onclick="aiaMode('${esc(p.id)}','auto')" ${p.benchmark.gate.passed?'':'disabled title="benchmark gate not met"'}>Promote to auto</button>`:`<button class="ghost mini" onclick="aiaMode('${esc(p.id)}','assist')">Back to assist</button>`}<button class="ghost mini" onclick="aiaMode('${esc(p.id)}','${p.mode==='shadow'?'assist':'shadow'}')">${p.mode==='shadow'?'Start recommending':'Shadow only'}</button><button class="ghost mini" onclick="aiaTrain('${esc(p.id)}')">Retrain scorer</button><button class="ghost mini" onclick="aiaRecent('${esc(p.id)}')">Recent verdicts</button></div></div>
+      <div style="margin-top:8px;font-size:13px">${aiaBench(p.benchmark)}</div>
+      ${p.drift?`<p style="margin:6px 0 0;font-size:12px;color:var(--bad)">Drift: tripped back to assist on ${esc(String(p.drift.at).slice(0,16).replace('T',' '))} (accuracy ${Math.round((p.drift.accuracy||0)*100)}%, false approvals ${Math.round((p.drift.falseApproveRate||0)*100)}%). Retrain and re-promote once the benchmark recovers.</p>`:''}
+      ${p.model.holdout?`<p class="muted" style="margin:6px 0 0;font-size:12px">Last training: held-out accuracy ${p.model.holdout.after&&p.model.holdout.after.accuracy!=null?Math.round(p.model.holdout.after.accuracy*100)+'%':'—'} on ${p.model.holdout.n} claims · ${esc(String(p.model.trainedAt||'').slice(0,16).replace('T',' '))}</p>`:''}
+    </div>`).join(''):'<p class="muted">No AI adjudication product yet. Create one in "Build a product" → Solution → AI adjudication.</p>';
+  }catch(e){$('aia_status').textContent=e.message;}
+}
+async function aiaMode(id,mode){
+  if(mode==='auto'&&!confirm('Let the AI approve claims on its own for this payer? It only acts while the benchmark gate holds, under the auto amount cap, with no hard flags, and keeps routing an audit sample to humans.'))return;
+  try{const r=await fetch(`/api/platform/ai-adjudication/${encodeURIComponent(id)}/mode`,{method:'POST',headers:H(),body:JSON.stringify({mode})});const o=await r.json();if(!r.ok)throw new Error((o.message||o.error)+(o.detail?': '+o.detail:''));toast('Mode: '+mode);aiaLoad();loadProducts();}catch(e){toast(e.message);}
+}
+async function aiaTrain(id){
+  const epochs=prompt('Training epochs (passes over the labelled claims). History not yet scored is backfilled first.','5');if(epochs===null)return;
+  try{const r=await fetch(`/api/platform/ai-adjudication/${encodeURIComponent(id)}/train`,{method:'POST',headers:H(),body:JSON.stringify({epochs:Number(epochs)||5,backfill:true})});const o=await r.json();if(!r.ok)throw new Error((o.message||o.error)+(o.detail?': '+o.detail:''));
+    toast(`Training ${o.adopted?'adopted':'not adopted'} · held-out ${o.holdout.after.accuracy==null?'—':Math.round(o.holdout.after.accuracy*100)+'%'}`);aiaLoad();}catch(e){toast(e.message);}
+}
+async function aiaRecent(id){
+  try{const r=await fetch(`/api/platform/ai-adjudication/verdicts?productId=${encodeURIComponent(id)}&limit=30`,{headers:H()});const o=await r.json();if(!r.ok)throw new Error(o.message||o.error);
+    $('aia_recent').innerHTML=`<p class="muted" style="font-size:13px;margin:0 0 6px">Recent verdicts</p>`+solAiAdjudication({rows:o.data});}catch(e){toast(e.message);}
+}
+async function aiaRunPending(){
+  try{const r=await fetch('/api/platform/ai-adjudication/run-pending',{method:'POST',headers:H()});const o=await r.json();toast(`Scored ${o.evaluated} pending claim(s)`);aiaLoad();}catch(e){toast(e.message);}
 }

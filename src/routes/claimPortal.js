@@ -5,6 +5,7 @@ const store = require('../store');
 const claimsService = require('../services/claims');
 const verification = require('../services/verification');
 const priorApproval = require('../services/priorApproval');
+const aiAdjudication = require('../services/aiAdjudication');
 const { idempotency } = require('../middleware/idempotency');
 
 const router = express.Router();
@@ -36,6 +37,7 @@ async function view(c) {
     matchingPriorApprovals: matchingPriorApprovals.map((pa) => ({
       id: pa.id, description: pa.description, amountCap: pa.amountCap, expiresAt: pa.expiresAt, timesUsed: pa.timesUsed })),
     transferReference: c.transferReference || null, beneficiaryName: c.beneficiaryName || null,
+    ai: await aiAdjudication.forClaim(c),
   };
 }
 

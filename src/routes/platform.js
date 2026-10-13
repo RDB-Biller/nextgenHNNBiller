@@ -38,6 +38,7 @@ const pharmacyPricing = require('../services/pharmacyPricing');
 const pharmacyQuotes = require('../services/pharmacyQuotes');
 const reconciliation = require('../services/reconciliation');
 const insurecredit = require('../services/insurecredit');
+const aiAdjudication = require('../services/aiAdjudication');
 const smsDashboard = require('../services/smsDashboard');
 const solutions = require('../services/solutions');
 
@@ -1172,6 +1173,41 @@ router.delete('/sms/optouts/:phone', async (req, res, next) => {
 // Applications, callback URLs (USSD for Africa's Talking, decision/verify for
 // ConfirmU) and a manual trigger for the auto-send pass. Offers themselves are
 // sent through the solution runner (POST /solutions/:id/run, action "offer").
+// ---- AI adjudication (the licenser's controls: benchmark, train, promote) ---------------
+async function aiProduct(req, res) {
+  const p = await store.products.get(req.params.productId);
+  if (!p || p.type !== 'solution' || p.config?.module !== 'ai_adjudication') { res.status(404).json({ error: 'ai_adjudication_product_not_found' }); return null; }
+  return p;
+}
+router.get('/ai-adjudication/overview', async (req, res, next) => {
+  try { res.json(await aiAdjudication.overview()); } catch (e) { next(e); }
+});
+router.get('/ai-adjudication/verdicts', async (req, res, next) => {
+  try { res.json({ data: await aiAdjudication.recentVerdicts({ productId: req.query.productId, payerId: req.query.payerId, limit: Number(req.query.limit) || 50 }) }); } catch (e) { next(e); }
+});
+router.get('/ai-adjudication/:productId/benchmark', async (req, res, next) => {
+  try { const p = await aiProduct(req, res); if (!p) return; res.json({ ...(await aiAdjudication.benchmark(p, { windowDays: req.query.windowDays })), model: await aiAdjudication.modelInfo(p) }); } catch (e) { next(e); }
+});
+// Retrain the scorer: { epochs?, backfill?, examples?: [{ amount, items:[{name,code,qty,unitPrice}], diagnosis, provider, outcome }] }
+router.post('/ai-adjudication/:productId/train', async (req, res, next) => {
+  try { const p = await aiProduct(req, res); if (!p) return; res.json(await aiAdjudication.train(p, { epochs: req.body?.epochs, backfill: req.body?.backfill !== false, examples: req.body?.examples || [] })); } catch (e) { next(e); }
+});
+// Promote to autonomous mode -- refused (422 benchmark_gate_not_met) unless the gate passes right now.
+router.post('/ai-adjudication/:productId/mode', async (req, res, next) => {
+  try { const p = await aiProduct(req, res); if (!p) return; res.json(await aiAdjudication.setMode(p, req.body?.mode, req.principal?.id || 'HNN')); } catch (e) { next(e); }
+});
+router.post('/ai-adjudication/evaluate/:claimId', async (req, res, next) => {
+  try {
+    const claim = await store.claims.get(req.params.claimId);
+    if (!claim) return res.status(404).json({ error: 'claim_not_found' });
+    const row = await aiAdjudication.evaluateAndAct(claim, null, { useLlm: req.body?.useLlm !== false });
+    res.json(row ? { verdictId: row.id, recommendation: row.recommendation, confidence: row.confidence, action: row.action, actionReasons: row.actionReasons, reasons: row.reasons, flags: row.flags, llm: row.llm } : { error: 'no_ai_adjudication_product_for_payer' });
+  } catch (e) { next(e); }
+});
+router.post('/ai-adjudication/run-pending', async (req, res, next) => {
+  try { res.json(await aiAdjudication.runPendingPass({ olderThanMs: 0 })); } catch (e) { next(e); }
+});
+
 router.get('/insurecredit/overview', async (req, res, next) => {
   try {
     res.json({ hookUrls: await insurecredit.hookUrls(baseUrl(req)), hardCap: insurecredit.HARD_CAP,
