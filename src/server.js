@@ -36,6 +36,7 @@ const creditHooks = require('./routes/creditHooks');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
 const patientApi = require('./routes/patientApi');
+const patientAccounts = require('./services/patientAccounts');
 const savingsPlans = require('./services/savingsPlans');
 const insurecredit = require('./services/insurecredit');
 const aiAdjudication = require('./services/aiAdjudication');
@@ -155,6 +156,7 @@ if (require.main === module) {
       insurecredit.runAutoSend().catch((e) => console.error('[insurecredit] auto-send failed:', e));
       aiAdjudication.runPendingPass().catch((e) => console.error('[aiAdjudication] pending pass failed:', e));
       savingsPlans.runReminders().catch((e) => console.error('[savings] reminders failed:', e));
+      patientAccounts.runAppointmentReminders().catch((e) => console.error('[patient-accounts] appointment reminders failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
     setInterval(runSweeps, SWEEP_INTERVAL_MS);

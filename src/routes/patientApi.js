@@ -36,7 +36,7 @@ r.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
-r.use(express.json({ limit: '100kb' }));
+r.use(express.json({ limit: '2mb' }));
 r.use(limiter(120, 60000));
 
 r.post('/patient/register', limiter(10, 60000), wrap(async (req, res) => res.status(201).json({ result: await accounts.register(req.body || {}) })));
@@ -55,5 +55,23 @@ r.get('/budget/patient_budgets', authed(async (req, res, a) => res.json({ result
 r.post('/vital/add_vital', authed(async (req, res, a) => res.status(201).json({ result: await accounts.addVital(a, req.body || {}) })));
 r.get('/vital/patient_vitals', authed(async (req, res, a) => res.json({ result: accounts.listVitals(a) })));
 r.get('/vital', authed(async (req, res, a) => res.json({ result: accounts.listVitals(a) })));
+
+// appointments (specific paths first, then /:id)
+r.post('/appointment/add_appointment', authed(async (req, res, a) => res.status(201).json({ result: await accounts.addAppointment(a, req.body || {}) })));
+r.get('/appointment/patient_appointments', authed(async (req, res, a) => res.json({ result: accounts.listAppointments(a) })));
+r.patch('/appointment/update/:id', authed(async (req, res, a) => res.json({ result: await accounts.updateAppointment(a, req.params.id, req.body || {}) })));
+r.delete('/appointment/delete/:id', authed(async (req, res, a) => res.json({ result: await accounts.deleteAppointment(a, req.params.id) })));
+r.get('/appointment/:id', authed(async (req, res, a) => res.json({ result: accounts.getAppointment(a, req.params.id) })));
+
+// notifications for the signed-in patient (the :id the app sends is ignored: the token decides whose they are)
+r.patch('/notification/read_notification/:id', authed(async (req, res, a) => res.json({ result: await accounts.readNotification(a, req.params.id) })));
+r.get('/notification/:id', authed(async (req, res, a) => res.json({ result: await accounts.listNotifications(a), unread: (a.notifications || []).filter((n) => !n.read).length })));
+
+// document vault
+r.post('/vault/add_file', authed(async (req, res, a) => res.status(201).json({ result: await accounts.addFile(a, req.body || {}) })));
+r.get('/vault/patient_files', authed(async (req, res, a) => res.json({ result: accounts.listFiles(a) })));
+r.patch('/vault/update_file/:id', authed(async (req, res, a) => res.json({ result: await accounts.updateFile(a, req.params.id, req.body || {}) })));
+r.delete('/vault/delete/:id', authed(async (req, res, a) => res.json({ result: await accounts.deleteFile(a, req.params.id) })));
+r.get('/vault/:id', authed(async (req, res, a) => res.json({ result: await accounts.getFile(a, req.params.id) })));
 
 module.exports = r;

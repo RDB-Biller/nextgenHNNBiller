@@ -1056,7 +1056,7 @@ are in the `tms-afriyie-frontend` patch delivered alongside this repo.
 
 The Afriyie / TrimesterSave app can run entirely on this service: `patient/register`, `login`, `me`,
 `update`, `change_password`, `forgot_password`, `reset_password`, `verify_phone`, `send_verification_code`,
-plus `budget/add_budget`, `budget/patient_budgets`, `vital/add_vital`, `vital/patient_vitals`. Paths and the
+plus `budget/*`, `vital/*`, `appointment/*` (SMS reminder the day before, to verified phones, once), `notification/*` and `vault/*` (PDF, image and text files up to 1 MB, 25 per patient). Paths and the
 `{ result }` / `{ error }` envelopes match what the app already used, so only its base URL changes
 (`<biller>/patient-api/v1/`). Every SMS (verification and password reset) is sent by the Biller's own
 messaging provider (Africa's Talking). Passwords are scrypt-hashed; sessions are signed 30-day tokens; the

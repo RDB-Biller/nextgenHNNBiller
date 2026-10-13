@@ -11,6 +11,7 @@ const operatingMode = require('../src/services/operatingMode');
 const messagingAccount = require('../src/services/messagingAccount');
 const sav = require('../src/services/savingsPlans');
 const patientApi = require('../src/routes/patientApi');
+const accounts = require('../src/services/patientAccounts');
 
 let a = 0;
 const ok = (cond, label) => { a++; if (!cond) { console.error(`FAIL #${a}: ${label}`); process.exitCode = 1; } else console.log(`ok  : ${label}`); };
@@ -122,6 +123,71 @@ const lastCode = () => /\b(\d{6})\b/.exec(sms[sms.length - 1].message)[1];
   const k = (await call('POST', '/patient/login', { phone: '+233201112223', password: 'kofipass' })).body.result.tokens[0].token;
   r = await call('GET', '/budget/patient_budgets', null, k);
   ok(r.status === 200 && r.body.result.length === 0, 'accounts are isolated from each other');
+
+
+  // appointments
+  const soon = new Date(Date.now() + 10 * 3600000);
+  const day = (d) => d.toISOString().slice(0, 10); const hm = (d) => d.toISOString().slice(11, 16);
+  r = await call('POST', '/appointment/add_appointment', { title: 'Antenatal visit', date: day(soon), time: hm(soon), hospital: 'Euracare', doctor: 'Dr Owusu' }, token);
+  const apptId = r.body.result?._id;
+  ok(r.status === 201 && apptId && r.body.result.status === 'upcoming', 'appointment saved');
+  r = await call('POST', '/appointment/add_appointment', { title: '', date: '2026-12-01' }, token);
+  ok(r.status === 422, 'appointment needs a title');
+  r = await call('POST', '/appointment/add_appointment', { title: 'Scan', date: '2027-01-15', time: '9am' }, token);
+  ok(r.status === 422, 'bad time format refused');
+  await call('POST', '/appointment/add_appointment', { title: 'Later visit', date: '2027-03-01', time: '10:00' }, token);
+  r = await call('GET', '/appointment/patient_appointments', null, token);
+  ok(r.body.result.length === 2 && r.body.result[0].title === 'Antenatal visit', 'appointments listed soonest first');
+  r = await call('PATCH', `/appointment/update/${apptId}`, { notes: 'bring ID' }, token);
+  ok(r.status === 200 && r.body.result.notes === 'bring ID' && r.body.result.title === 'Antenatal visit', 'appointment updated without losing other fields');
+  r = await call('GET', `/appointment/${apptId}`, null, token);
+  ok(r.status === 200, 'appointment fetched by id');
+  r = await call('GET', `/appointment/${apptId}`, null, k);
+  ok(r.status === 404, "another patient cannot read someone else's appointment");
+
+  // SMS reminder within 24h, once only, to the verified phone
+  const smsBefore = sms.length;
+  let rem = await accounts.runAppointmentReminders();
+  ok(rem.sent === 1 && sms.length === smsBefore + 1 && /Reminder: Antenatal visit/.test(sms[sms.length - 1].message) && sms[sms.length - 1].to === '+233241234567', 'appointment reminder is texted via the biller provider');
+  rem = await accounts.runAppointmentReminders();
+  ok(rem.sent === 0, 'the reminder is sent only once');
+
+  // notifications
+  r = await call('GET', '/notification/me', null, token);
+  const kinds = r.body.result.map((n) => n.kind);
+  ok(r.status === 200 && kinds.includes('welcome') && kinds.includes('appointment') && kinds.includes('reminder') && r.body.unread >= 3, 'welcome, appointment-saved and coming-up notices exist');
+  const nid = r.body.result[0]._id;
+  r = await call('PATCH', `/notification/read_notification/${nid}`, {}, token);
+  ok(r.status === 200 && r.body.result.find((n) => n._id === nid).read === true, 'a notification can be marked read');
+  r = await call('PATCH', '/notification/read_notification/all', {}, token);
+  ok(r.body.result.every((n) => n.read), 'all can be marked read');
+
+  r = await call('DELETE', `/appointment/delete/${apptId}`, null, token);
+  ok(r.status === 200, 'appointment deleted');
+  r = await call('GET', '/appointment/patient_appointments', null, token);
+  ok(r.body.result.length === 1, 'deleted appointment is gone');
+
+  // vault
+  const pdf = Buffer.from('%PDF-1.4 test file').toString('base64');
+  r = await call('POST', '/vault/add_file', { name: 'Scan report.pdf', type: 'application/pdf', data: `data:application/pdf;base64,${pdf}`, category: 'Scans' }, token);
+  const fid = r.body.result?._id;
+  ok(r.status === 201 && fid && r.body.result.size > 0 && !('data' in r.body.result), 'file stored; list metadata carries no content');
+  r = await call('POST', '/vault/add_file', { name: 'x.exe', type: 'application/x-msdownload', data: pdf }, token);
+  ok(r.status === 422, 'executables refused');
+  r = await call('POST', '/vault/add_file', { name: 'big.pdf', type: 'application/pdf', data: Buffer.alloc(1100 * 1024, 1).toString('base64') }, token);
+  ok(r.status === 413, 'files over 1 MB refused');
+  r = await call('GET', '/vault/patient_files', null, token);
+  ok(r.body.result.length === 1 && r.body.result[0].category === 'Scans', 'vault listed');
+  r = await call('GET', `/vault/${fid}`, null, token);
+  ok(r.status === 200 && Buffer.from(r.body.result.data, 'base64').toString().startsWith('%PDF'), 'file content comes back intact');
+  r = await call('GET', `/vault/${fid}`, null, k);
+  ok(r.status === 404, "another patient cannot read someone else's file");
+  r = await call('PATCH', `/vault/update_file/${fid}`, { name: 'Scan 12 weeks.pdf', note: 'first scan' }, token);
+  ok(r.status === 200 && r.body.result.name === 'Scan 12 weeks.pdf', 'file renamed');
+  r = await call('DELETE', `/vault/delete/${fid}`, null, token);
+  ok(r.status === 200, 'file deleted');
+  r = await call('GET', `/vault/${fid}`, null, token);
+  ok(r.status === 404, 'deleted file cannot be fetched');
 
   // CORS preflight for the browser app
   const pre = await fetch(base + '/patient/login', { method: 'OPTIONS' });

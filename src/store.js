@@ -243,6 +243,7 @@ function pgRepo(exec) {
     settings: {
       get: (k) => one('SELECT data FROM settings WHERE key=$1', [k]),
       set: (k, v) => exec('INSERT INTO settings (key,data) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=now()', [k, v]),
+      keys: async (prefix) => (await exec('SELECT key FROM settings WHERE left(key, length($1)) = $1', [prefix])).rows.map((r) => r.key),
     },
     networks: {
       get: (payerId, tenantId) => one('SELECT data FROM networks WHERE id=$1', [`${payerId}:${tenantId}`]),
@@ -571,6 +572,7 @@ function memRepo(M) {
     settings: {
       get: async (k) => M.settings.get(k) || null,
       set: async (k, v) => M.settings.set(k, v),
+      keys: async (prefix) => [...M.settings.keys()].filter((k) => k.startsWith(prefix)),
     },
     networks: {
       get: async (payerId, tenantId) => M.networks.get(`${payerId}:${tenantId}`) || null,
