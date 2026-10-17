@@ -36,6 +36,9 @@ const creditHooks = require('./routes/creditHooks');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
 const patientApi = require('./routes/patientApi');
+const i18nApi = require('./routes/i18nApi');
+const devChat = require('./routes/devChat');
+const platformI18n = require('./routes/platformI18n');
 const patientAccounts = require('./services/patientAccounts');
 const savingsPlans = require('./services/savingsPlans');
 const insurecredit = require('./services/insurecredit');
@@ -85,6 +88,10 @@ app.use('/savings/api', savingsHooks.api);
 app.use('/savings', express.static(PUBLIC, { index: 'savings.html' }));
 app.use('/savings-hooks', savingsHooks.hooks);
 app.use('/patient-api/v1', patientApi);
+app.use('/i18n/api', i18nApi);
+app.use('/chat/api', devChat.api);
+app.use('/chat', express.static(PUBLIC, { index: 'devchat.html' }));
+app.use('/chat-hooks', devChat.hooks);
 app.use('/ussd', creditHooks.ussd);
 app.use('/insurecredit-hooks', creditHooks.hooks);
 app.use('/report/api', reportPortalRoutes);
@@ -102,6 +109,7 @@ app.use('/api/payer', payerApiRoutes);
 app.use('/api/admin', adminRoutes);
 // Master control board (SaaS owners) — x-platform-key
 app.use('/sms-hooks', smsHooksRoutes);
+app.use('/api/platform/i18n', authPlatform, platformI18n);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);

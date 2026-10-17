@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const store = require('../store');
 const config = require('../config');
 const messaging = require('./messaging');
+const i18n = require('./i18n');
 const { notify } = require('./notifications');
 
 /**
@@ -574,12 +575,12 @@ async function facilities() {
 }
 
 /** Text a one-time code to the phone. Returns nothing identifying; in messaging sandbox the code is echoed for demos. */
-async function startVerification(phoneRaw, { purpose = 'signup' } = {}) {
+async function startVerification(phoneRaw, { purpose = 'signup', lang } = {}) {
   const phone = messaging.toDialable(phoneRaw || '');
   if (!/^\+\d{8,15}$/.test(phone)) throw err(422, 'phone_invalid');
   const code = messaging.genOtp();
   await store.settings.set(otpKey(phone), { phone, code, purpose, attempts: 0, expiresAt: new Date(Date.now() + OTP_TTL_MS).toISOString() });
-  const r = await messaging.send({ channel: 'sms', to: phone, body: `Your TrimesterSave / BirthPrep code is ${code}. It expires in 10 minutes. Ignore this if you did not request it.`, tenant: null });
+  const r = await messaging.send({ channel: 'sms', to: phone, body: i18n.t('sms.otp', lang, { code }), tenant: null });
   const out = { sent: !!r.ok, sandbox: !!r.sandbox, to: maskPhone(phone), expiresInMinutes: 10 };
   if (r.sandbox) out.codeSandbox = code; // never present once messaging is live
   return out;

@@ -41,6 +41,7 @@
     <button onclick="tab('automation',this)">Automation</button>
     <button onclick="tab('settlement',this)">Settlement</button>
     <button onclick="tab('reports',this)">Reports</button>
+    <button onclick="tab('lang',this);langLoad()">Languages &amp; chat</button>
   </div>
 
   <div class="panel on" id="p-clients">
@@ -595,6 +596,32 @@
       <div id="sb_queue" style="margin-top:10px"></div>
     </div>
     <div class="card"><h2>Recent batches</h2><div id="sb_list"></div></div>
+  </div>
+
+  <div class="panel" id="p-lang">
+    <div class="card" style="margin-bottom:14px"><h2>Machine translation (LibreTranslate)</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Self-hosted <b>LibreTranslate</b> is the only translation engine; nothing else is called. If it is not configured or is down, every page and the developer chat keep working in the original language. Translations are cached, so the same text is only translated once. Twi, Hausa, Yoruba and Ga are usually <b>not</b> supported by LibreTranslate &mdash; those readers see the original text. <span id="lt_state"></span></p>
+      <div class="row">
+        <div class="field"><label>LibreTranslate URL</label><input id="lt_url" placeholder="https://libretranslate-production.up.railway.app"/></div>
+        <div class="field"><label>API key (optional)</label><input id="lt_key" placeholder="leave blank to keep the current key"/></div>
+        <div class="field"><label>Daily character cap</label><input id="lt_cap" type="number" min="0"/></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="lt_on"/> Machine translation enabled</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="lt_unrev"/> Show languages awaiting native-speaker review to patients</label>
+      </div>
+      <p><button class="primary" onclick="ltSave()">Save</button> <button onclick="ltTest()">Test connection</button> <span class="muted" id="lt_msg"></span></p>
+      <div id="lt_langs" class="muted" style="font-size:13px"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px"><h2>Developer chat</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Rooms where developers write in their own language and everyone reads in theirs: <a href="/chat/" target="_blank" class="key">/chat/</a>. Members join with a room's invite code; each can also link a WhatsApp number to follow and reply from WhatsApp. (Per-person WhatsApp, not WhatsApp groups &mdash; provider APIs cannot post into groups.)</p>
+      <p><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ch_on" onchange="chatToggle()"/> Chat enabled</label></p>
+      <div class="field"><label>WhatsApp inbound callback (set this in your WhatsApp provider)</label><input id="ch_hook" readonly onclick="this.select()"/></div>
+      <p><button onclick="chatRotateHook()">Rotate callback secret</button></p>
+      <div class="row"><div class="field"><label>New room</label><input id="rm_name" placeholder="Billing core"/></div><div class="field"><label>Topic</label><input id="rm_topic"/></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="primary" style="width:100%" onclick="roomAdd()">Create room</button></div></div>
+      <div id="rooms" style="margin-top:10px"></div>
+    </div>
   </div>
 
   <div class="panel" id="p-reports">
@@ -1688,4 +1715,5 @@ boot=async function(){await _origBoot2();loadAutomationPolicy();loadExpiryPolicy
 boot();
 </script>
 <script src="platform-extra.js"></script>
+<script src="/app/i18n.js" data-audience="staff" data-auto="true"></script>
 </body></html>

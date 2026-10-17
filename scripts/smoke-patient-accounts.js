@@ -44,6 +44,14 @@ const lastCode = () => /\b(\d{6})\b/.exec(sms[sms.length - 1].message)[1];
   r = await call('POST', '/patient/register', { first_name: 'X', last_name: 'Y', phone: '+233200000001', password: '123' });
   ok(r.status === 422 && /6 characters/.test(r.body.error), 'short password refused');
 
+  // language preference localises SMS
+  r = await call('POST', '/patient/register', { first_name: 'Awa', last_name: 'Diallo', phone: '+233200000777', password: 'secret1', language: 'fr' });
+  ok(r.status === 201 && r.body.result.language === 'fr', 'register stores the preferred language');
+  await call('PATCH', '/patient/forgot_password', { phone: '+233200000777' });
+  ok(/Votre code de réinitialisation/.test(sms[sms.length - 1].message), 'password-reset SMS is sent in the account language');
+  await call('POST', '/patient/send_verification_code', { phone: '+233200000778', lang: 'es' });
+  ok(/Su código de verificación/.test(sms[sms.length - 1].message), 'verification SMS honours the requested language');
+
   // login
   r = await call('POST', '/patient/login', { phone: '+233241234567', password: 'wrong' });
   ok(r.status === 401 && r.body.error, 'wrong password refused');
@@ -52,8 +60,9 @@ const lastCode = () => /\b(\d{6})\b/.exec(sms[sms.length - 1].message)[1];
   ok(r.status === 200 && token && id && r.body.result.phoneVerified === false, 'login (local phone format) returns _id and tokens[0].token');
 
   // verification through the Biller's SMS provider, then receipt -> verify_phone
+  const n0 = sms.length;
   const sent = await call('POST', '/patient/send_verification_code', { phone: '+233241234567' });
-  ok(sent.status === 200 && sent.body.sent && sms.length === 1 && sms[0].to === '+233241234567', 'verification code is texted via the biller provider (Africa\'s Talking)');
+  ok(sent.status === 200 && sent.body.sent && sms.length === n0 + 1 && sms[n0].to === '+233241234567', 'verification code is texted via the biller provider (Africa\'s Talking)');
   const chk = await sav.verifyAndReceipt('+233241234567', lastCode());
   r = await call('PATCH', '/patient/verify_phone', { phone: '+233241234567', code: 'x', ...chk });
   ok(r.status === 200 && r.body.result.phoneVerified === true && r.body.result.tokens?.[0]?.token, 'verify_phone accepts the signed receipt, marks verified and returns a session');

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const store = require('../store');
 const messaging = require('./messaging');
+const i18n = require('./i18n');
 const savings = require('./savingsPlans');
 
 /**
@@ -79,7 +80,7 @@ async function session(a) {
   return publicUser(a, { tokens: [{ token }] });
 }
 
-async function register({ first_name, last_name, phone, password } = {}) {
+async function register({ first_name, last_name, phone, password, language } = {}) {
   const p = dial(phone);
   if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
   if (!String(first_name || '').trim() || !String(last_name || '').trim()) throw err(422, 'Please enter your first and last name');
@@ -89,6 +90,7 @@ async function register({ first_name, last_name, phone, password } = {}) {
     _id: `pt_${crypto.randomBytes(9).toString('hex')}`, first_name: String(first_name).trim(), last_name: String(last_name).trim(),
     phone: p, passwordHash: hashPassword(password), phoneVerified: false, createdAt: iso(), budgets: [], vitals: [],
   };
+  if (language && i18n.isKnown(language)) a.language = i18n.normalise(language);
   await notify(a, { title: 'Welcome to TrimesterSave', message: 'Your account is ready. Verify your phone, then start a savings plan, keep your records and book your visits.', kind: 'welcome' });
   await store.settings.set(phoneKey(p), { id: a._id });
   await save(a);
@@ -111,6 +113,10 @@ async function authenticate(authHeader) {
 
 const PROFILE_FIELDS = ['first_name', 'last_name', 'spouse_name', 'spouse_phone', 'country', 'city', 'town', 'address', 'email', 'ghana_card'];
 async function updateProfile(a, body = {}) {
+  if (body.language !== undefined) {
+    if (!i18n.isKnown(body.language)) throw err(422, 'Unknown language');
+    a.language = i18n.normalise(body.language);
+  }
   for (const f of PROFILE_FIELDS) if (body[f] !== undefined) a[f] = typeof body[f] === 'string' ? body[f].trim().slice(0, 200) : body[f];
   if (!a.first_name || !a.last_name) throw err(422, 'First and last name are required');
   a.updatedAt = iso();
@@ -138,7 +144,7 @@ async function forgotPassword({ phone } = {}) {
   let code; let tries = 0;
   do { code = messaging.genOtp(); tries++; } while (tries < 20 && (await store.settings.get(`pacct:reset:${code}`)) && new Date((await store.settings.get(`pacct:reset:${code}`)).expiresAt) > new Date());
   await store.settings.set(`pacct:reset:${code}`, { id: a._id, expiresAt: new Date(Date.now() + RESET_TTL_MS).toISOString() });
-  const r = await messaging.send({ channel: 'sms', to: p, body: `Your TrimesterSave password reset code is ${code}. It expires in 30 minutes. Ignore this if you did not ask for it.`, tenant: null });
+  const r = await messaging.send({ channel: 'sms', to: p, body: i18n.t('sms.reset', a.language, { code }), tenant: null });
   if (r.sandbox) out.codeSandbox = code;
   return out;
 }
@@ -297,7 +303,7 @@ async function runAppointmentReminders() {
     for (const x of a.appointments || []) {
       const ms = apptWhen(x) - Date.now();
       if (x.status === 'upcoming' && x.remind_sms !== false && !x.reminded && ms > 0 && ms < 24 * 3600000) {
-        const r = await messaging.send({ channel: 'sms', to: a.phone, body: `Reminder: ${x.title} on ${x.date}${x.time ? ' at ' + x.time : ''}${x.hospital ? ' at ' + x.hospital : ''}. - TrimesterSave`, tenant: null }).catch(() => ({ ok: false }));
+        const r = await messaging.send({ channel: 'sms', to: a.phone, body: i18n.t('sms.appt', a.language, { title: x.title, when: x.date + (x.time ? ' ' + x.time : ''), where: x.hospital ? ', ' + x.hospital : '' }), tenant: null }).catch(() => ({ ok: false }));
         if (r.ok) { x.reminded = true; changed = true; sent++; }
       }
     }

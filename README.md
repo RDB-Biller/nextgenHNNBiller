@@ -1062,3 +1062,31 @@ plus `budget/*`, `vital/*`, `appointment/*` (SMS reminder the day before, to ver
 messaging provider (Africa's Talking). Passwords are scrypt-hashed; sessions are signed 30-day tokens; the
 phone is verified with the Biller's one-time code and a signed receipt (`/savings/api/verify/check`).
 Accounts live in the settings store (Postgres in production). Test: `npm run smoke:patient-accounts`.
+
+## Languages and the developer chat
+
+**13 languages:** English (base), French, Portuguese, Spanish, Arabic (right-to-left), Chinese, Hindi, German, Swahili,
+Twi, Hausa, Yoruba and Ga. `GET /i18n/api/languages`, `GET /i18n/api/catalog/:lang`, `POST /i18n/api/translate`.
+
+* **Reviewed UI text** lives in `src/i18n/locales/<code>.json` (English fills any missing key). Twi, Hausa and Yoruba
+  were drafted by Claude and are flagged *needs native-speaker review*; **Ga is an empty stub** (everything falls back
+  to English). Flagged languages are hidden from patient-facing switchers until Master Control > Languages & chat >
+  "Show languages awaiting native-speaker review" is ticked. Edit the JSON files to correct or add strings.
+* **SMS** (verification code, password reset, appointment reminder) is sent in the account's / request's `language`.
+* **Every page** loads `/app/i18n.js`: language switcher, `dir="rtl"` for Arabic, remembered per browser. Static page text
+  is machine-translated (LibreTranslate, cached) when it is configured; otherwise pages stay in English. Dynamic data
+  (names, amounts, records) is never sent for translation.
+* **LibreTranslate** is the only translation engine. Set `LIBRETRANSLATE_URL` (and optionally `LIBRETRANSLATE_API_KEY`)
+  or use Master Control. Host it as its own Railway service from the `libretranslate/libretranslate` image
+  (public networking on, port 5000, a volume at `/home/libretranslate/.local` so models persist; start with
+  `--load-only en,fr,pt,es,ar,zh,hi,de,sw` to keep memory down). Hausa/Yoruba/Twi/Ga are normally not available in
+  LibreTranslate; readers of those languages then see the original text, flagged. If it is down, nothing breaks.
+  A daily character cap and a permanent cache bound the load.
+* **Developer chat** `/chat/`: create rooms in Master Control (invite code per room), each person joins with a name and
+  a language; every message is stored once and shown to each reader in their language with the original one tap
+  away. Code blocks, inline code, URLs, paths and @mentions are never translated. Bot commands: `/lang xx`, `/who`,
+  `/help`. **WhatsApp bridge:** a member links their own number (or sends `JOIN <code> fr` to the room's WhatsApp
+  number) and then receives the room in their language and replies from WhatsApp. Set the callback shown in Master
+  Control (`/chat-hooks/<secret>/whatsapp`) at your WhatsApp provider; it needs a WhatsApp-enabled sender
+  (`waNumber` for Africa's Talking). This is per person: provider APIs cannot post into WhatsApp *groups*.
+* Test: `npm run smoke:i18n`.

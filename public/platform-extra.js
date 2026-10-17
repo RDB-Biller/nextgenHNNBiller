@@ -528,3 +528,34 @@ async function svLoad(){
 }
 async function svRotate(){if(!confirm('Rotate the partner webhook secret? The current URL stops working.'))return;try{const r=await fetch('/api/platform/savings/rotate-secret',{method:'POST',headers:H()});if(!r.ok)throw new Error('Failed');toast('Secret rotated');svLoad();}catch(e){toast(e.message);}}
 async function svReminders(){try{const r=await fetch('/api/platform/savings/run-reminders',{method:'POST',headers:H()});const o=await r.json();toast(`Reminders sent: ${o.remindersSent}`);}catch(e){toast(e.message);}}
+
+
+// ======================= Languages & developer chat =======================
+const langApi=async(path,method='GET',body)=>{
+  const r=await fetch('/api/platform/i18n'+path,{method,headers:H(),body:body?JSON.stringify(body):undefined});
+  const o=await r.json().catch(()=>null);
+  if(!r.ok)throw new Error((o&&(o.message||o.error))||('HTTP '+r.status));
+  return o;
+};
+async function langLoad(){
+  try{
+    const o=await langApi('/');
+    $('lt_url').value=o.translation.url||'';$('lt_key').value='';$('lt_key').placeholder=o.translation.apiKeySet?'(key set — leave blank to keep)':'leave blank if none';
+    $('lt_cap').value=o.translation.dailyCharCap;$('lt_on').checked=o.translation.enabled;$('lt_unrev').checked=o.translation.showUnreviewed;
+    $('lt_state').innerHTML=!o.translation.configured?'<span class="pill sandbox">NOT CONFIGURED — original text only</span>':o.machine.reachable?'<span class="pill live">CONNECTED · used today: '+Number(o.translation.usedToday).toLocaleString()+' characters</span>':'<span class="pill sandbox">UNREACHABLE — original text only</span>';
+    $('lt_langs').innerHTML=o.languages.map(l=>{const m=o.machine.machineLanguages.includes(l.code);return '<span style="display:inline-block;margin:0 10px 4px 0">'+esc(l.native)+' <span class="key">'+l.code+'</span>'+(l.rtl?' RTL':'')+(m?' · machine':' · no machine translation')+(l.reviewed?'':' · <b>needs native-speaker review</b>')+'</span>';}).join('');
+    $('ch_on').checked=o.chat.enabled;$('ch_hook').value=o.chat.whatsappHookUrl;
+    $('rooms').innerHTML=o.rooms.length?'<table><tr><th>Room</th><th>Invite code</th><th>Members</th><th></th></tr>'+o.rooms.map(r=>'<tr><td>'+esc(r.name)+(r.archived?' <span class="muted">(archived)</span>':'')+'<div class="muted" style="font-size:12px">'+esc(r.topic)+'</div></td><td><span class="key">'+r.code+'</span></td><td>'+r.members+'</td><td><button onclick="roomRotate(\''+r.id+'\')">New code</button> <button onclick="roomArchive(\''+r.id+'\','+(!r.archived)+')">'+(r.archived?'Restore':'Archive')+'</button></td></tr>').join('')+'</table>':'<span class="muted">No rooms yet.</span>';
+  }catch(e){toast(e.message);}
+}
+async function ltSave(){
+  const body={url:$('lt_url').value.trim(),dailyCharCap:Number($('lt_cap').value),enabled:$('lt_on').checked,showUnreviewed:$('lt_unrev').checked};
+  if($('lt_key').value.trim())body.apiKey=$('lt_key').value.trim();
+  try{await langApi('/translation','PUT',body);$('lt_msg').textContent='Saved';langLoad();}catch(e){toast(e.message);}
+}
+async function ltTest(){try{const r=await langApi('/translation/test','POST');$('lt_msg').textContent=r.reachable?'Connected — '+r.machineLanguages.length+' of 13 languages machine-translated':(r.configured?'Not reachable':'Not configured');langLoad();}catch(e){toast(e.message);}}
+async function chatToggle(){try{await langApi('/chat','PUT',{enabled:$('ch_on').checked});}catch(e){toast(e.message);langLoad();}}
+async function chatRotateHook(){if(!confirm('Rotate the WhatsApp callback secret? You must update it in your provider.'))return;try{await langApi('/chat/rotate-hook','POST');langLoad();}catch(e){toast(e.message);}}
+async function roomAdd(){try{await langApi('/rooms','POST',{name:$('rm_name').value,topic:$('rm_topic').value});$('rm_name').value='';$('rm_topic').value='';langLoad();}catch(e){toast(e.message);}}
+async function roomRotate(id){try{await langApi('/rooms/'+id+'/rotate-code','POST');langLoad();}catch(e){toast(e.message);}}
+async function roomArchive(id,a){try{await langApi('/rooms/'+id+'/archive','POST',{archived:a});langLoad();}catch(e){toast(e.message);}}

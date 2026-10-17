@@ -38,4 +38,5 @@
   }
   (async()=>{try{if(!Q.get('t'))return lookupForm();paint(await api(encodeURIComponent(Q.get('t'))));}catch(e){if(e.code==='plan_not_found')return lookupForm('This link did not work. Open your plan with the plan number instead.');root.innerHTML=`<div class="ic-card"><p style="color:var(--bad)">${esc(e.message)}</p></div>`;}})();
 })();
-</script></body></html>
+</script><script src="/app/i18n.js" data-audience="patient" data-auto="true"></script>
+</body></html>

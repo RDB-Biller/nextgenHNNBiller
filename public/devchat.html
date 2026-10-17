@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Developer chat</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#17202b;--mute:#667385;--line:#d9dfe7;--brand:#0b6e4f;--mine:#e3f4ec;--sys:#8a95a5}
+@media (prefers-color-scheme:dark){:root{--bg:#10151b;--card:#18202a;--ink:#e8edf3;--mute:#93a0b1;--line:#2a3441;--brand:#37b58a;--mine:#17372c;--sys:#7d8a9b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+.wrap{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input,select,textarea,button{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+button{padding:9px 14px;border:0;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.row{display:flex;gap:8px;align-items:flex-end}.row>*{flex:1}.row>button{flex:0 0 auto}
+#chat{display:none}
+#head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+#head .t{font-weight:600}#head .m{color:var(--mute);font-size:13px}
+#log{height:56vh;overflow:auto;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.msg{max-width:78%;margin:6px 0;padding:8px 11px;border-radius:12px;background:var(--bg);width:fit-content;word-break:break-word;white-space:pre-wrap}
+.msg.me{background:var(--mine);margin-inline-start:auto}
+.msg .who{font-size:12px;color:var(--mute);margin-bottom:2px}
+.msg .tag{font-size:11px;color:var(--mute);margin-top:4px}
+.msg .tog{background:none;color:var(--brand);padding:0;margin-inline-start:8px;font-size:11px;border-radius:0}
+.msg .orig{display:none;margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);color:var(--mute)}
+.msg.open .orig{display:block}
+.msg.sys,.msg.bot{background:none;color:var(--sys);font-size:13px;text-align:center;margin-inline:auto;max-width:100%}
+.msg.bot{font-style:italic}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(127,127,127,.15);border-radius:4px;padding:1px 4px}
+#compose{display:flex;gap:8px;margin-top:8px}#compose textarea{resize:none;height:44px}
+#members{font-size:13px;color:var(--mute);margin:8px 0}
+#wa{margin-top:10px;font-size:13px}
+.err{color:#c0392b;font-size:13px;margin-top:8px;min-height:18px}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);margin:0 4px 4px 0}
+.pill.on:before{content:"● ";color:var(--brand)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 data-i18n="chat.title">Developer chat</h1>
+
+  <div class="card" id="join">
+    <label for="code" data-i18n="chat.invite">Invite code</label>
+    <input id="code" autocomplete="off" autocapitalize="characters" maxlength="12">
+    <div class="row">
+      <div><label for="name" data-i18n="chat.name">Your name</label><input id="name" maxlength="40" autocomplete="name"></div>
+      <div><label for="jlang" data-i18n="lang.label">Language</label><select id="jlang"></select></div>
+    </div>
+    <p><button id="jbtn" data-i18n="chat.join">Join room</button></p>
+    <div class="err" id="jerr"></div>
+  </div>
+
+  <div id="chat">
+    <div id="head"><div><span class="t" id="rname"></span> <span class="m" id="rtopic"></span></div>
+      <div><button class="ghost" id="leave" data-i18n="act.close">Close</button></div></div>
+    <div id="members"></div>
+    <div id="log" aria-live="polite"></div>
+    <div id="compose"><textarea id="text" data-i18n-placeholder="chat.type" placeholder="Type a message" maxlength="2000"></textarea><button id="send" data-i18n="act.send">Send</button></div>
+    <div class="err" id="cerr"></div>
+    <div id="wa" class="card">
+      <b>WhatsApp</b> — <span class="m" style="color:var(--mute)">receive this room on WhatsApp in your language and reply from there (also: send <code>JOIN &lt;code&gt;</code> to the room's WhatsApp number).</span>
+      <div class="row" style="margin-top:8px"><input id="waph" placeholder="+233 24 123 4567" inputmode="tel"><button id="wabtn" class="ghost">Link</button></div>
+      <div class="err" id="waerr"></div>
+    </div>
+  </div>
+</div>
+<script src="/app/i18n.js" data-audience="staff"></script>
+<script>
+(function(){
+'use strict';
+var API='/chat/api', tok=null, me=null, since=0, timer=null, langs=[];
+var $=function(i){return document.getElementById(i)};
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);if(v===null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){return null}}
+function api(method,path,body){
+  return fetch(API+path,{method:method,headers:Object.assign({'Content-Type':'application/json'},tok?{Authorization:'Bearer '+tok}:{}),body:body?JSON.stringify(body):undefined})
+    .then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok){var e=new Error(j.error||('HTTP '+r.status));e.status=r.status;throw e}return j})});
+}
+var ERR={invalid_invite_code:'Invalid invite code.',name_required:'Please enter your name.',chat_disabled:'Chat is switched off right now.',slow_down:'Slow down a little.',message_too_long:'Message too long.',phone_invalid:'Enter a valid phone number.',phone_already_linked:'That number is already linked.'};
+var errText=function(e){return ERR[e.message]||e.message};
+
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function fmt(s){ // safe: escape first, then code spans / fences
+  s=esc(s);
+  s=s.replace(/```([\s\S]*?)```/g,function(m,c){return '<pre>'+c.replace(/^\n/,'')+'</pre>'});
+  return s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+}
+
+function langOptions(sel,cur){sel.innerHTML='';langs.forEach(function(l){var o=document.createElement('option');o.value=l.code;o.textContent=l.native+(l.native!==l.name?' · '+l.name:'');if(l.code===cur)o.selected=true;sel.appendChild(o)})}
+
+function add(m){
+  var d=document.createElement('div');
+  if(m.kind==='system'||m.kind==='bot'){d.className='msg '+(m.kind==='bot'?'bot':'sys');d.textContent=m.text;}
+  else{
+    d.className='msg'+(m.pid===me.id?' me':'');
+    var h='<div class="who">'+esc(m.name)+(m.via==='whatsapp'?' · WhatsApp':'')+'</div><div class="body">'+fmt(m.text)+'</div>';
+    var differs=m.original!==m.text;
+    if(m.translated||m.untranslated){
+      h+='<div class="tag">';
+      if(m.translated) h+=esc(window.HNNi18n?HNNi18n.t('chat.translated_from',{lang:langName(m.lang)}):'Translated from '+langName(m.lang));
+      else h+=esc(window.HNNi18n?HNNi18n.t('chat.untranslated'):'Original (translation unavailable)');
+      if(differs) h+='<button class="tog" type="button">'+esc(window.HNNi18n?HNNi18n.t('chat.show_original'):'Show original')+'</button>';
+      h+='</div>';
+      if(differs) h+='<div class="orig">'+fmt(m.original)+'</div>';
+    }
+    d.innerHTML=h;
+    var b=d.querySelector('.tog'); if(b)b.onclick=function(){d.classList.toggle('open');b.textContent=d.classList.contains('open')?HNNi18n.t('chat.show_translation'):HNNi18n.t('chat.show_original')};
+  }
+  var log=$('log'),near=log.scrollHeight-log.scrollTop-log.clientHeight<80;
+  log.appendChild(d); if(near||m.pid===me.id)log.scrollTop=log.scrollHeight;
+}
+function langName(c){var l=langs.filter(function(x){return x.code===c})[0];return l?l.native:c}
+
+function roster(){return api('GET','/me').then(function(r){me=r.me;$('rname').textContent=r.room.name;$('rtopic').textContent=r.room.topic;
+  $('members').innerHTML=r.members.map(function(m){return '<span class="pill'+(m.online?' on':'')+'">'+esc(m.name)+' · '+esc(langName(m.lang))+(m.whatsapp?' · WA':'')+'</span>'}).join('')})}
+
+function poll(){
+  api('GET','/messages?since='+since).then(function(r){r.messages.forEach(add);since=Math.max(since,r.last)}).catch(function(e){if(e.status===401){stop();ls('hnn_chat_tok',null);show(false)}});
+}
+var rt=0;
+function start(){show(true);$('log').innerHTML='';since=0;
+  roster().then(poll).then(function(){langSync()});
+  timer=setInterval(function(){poll();if(++rt%8===0)roster().catch(function(){})},2500);}
+function stop(){clearInterval(timer);timer=null}
+function show(inChat){$('join').style.display=inChat?'none':'';$('chat').style.display=inChat?'block':'none'}
+
+function langSync(){ // reader language follows the page language switcher
+  if(window.HNNi18n){HNNi18n.onChange(function(l){if(me&&me.lang!==l){api('PATCH','/me',{lang:l}).then(function(r){me=Object.assign(me,r.me);$('log').innerHTML='';since=0;poll();roster()}).catch(function(){})}})}
+}
+
+$('jbtn').onclick=function(){
+  $('jerr').textContent='';
+  api('POST','/join',{code:$('code').value.trim(),name:$('name').value.trim(),lang:$('jlang').value}).then(function(r){
+    tok=r.token;ls('hnn_chat_tok',tok);ls('hnn_chat_name',$('name').value.trim());
+    if(window.HNNi18n&&HNNi18n.lang!==$('jlang').value)HNNi18n.set($('jlang').value);
+    start();
+  }).catch(function(e){$('jerr').textContent=errText(e)});
+};
+function send(){
+  var t=$('text').value; if(!t.trim())return; $('text').value=''; $('cerr').textContent='';
+  api('POST','/messages',{text:t}).then(poll).catch(function(e){$('cerr').textContent=errText(e);$('text').value=t});
+}
+$('send').onclick=send;
+$('text').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+$('leave').onclick=function(){stop();api('POST','/leave').catch(function(){});tok=null;ls('hnn_chat_tok',null);show(false)};
+$('wabtn').onclick=function(){$('waerr').textContent='';api('POST','/whatsapp',{phone:$('waph').value}).then(function(r){$('waerr').textContent='Linked '+r.whatsapp;roster()}).catch(function(e){$('waerr').textContent=errText(e)})};
+
+fetch('/i18n/api/languages').then(function(r){return r.json()}).then(function(r){
+  langs=r.languages;var cur=(window.HNNi18n&&HNNi18n.lang)||'en';langOptions($('jlang'),cur);
+  var q=new URLSearchParams(location.search);if(q.get('code'))$('code').value=q.get('code');
+  $('name').value=ls('hnn_chat_name')||'';
+  var saved=ls('hnn_chat_tok'); if(saved){tok=saved;api('GET','/me').then(function(r){me=r.me;start()}).catch(function(){tok=null;ls('hnn_chat_tok',null)})}
+});
+})();
+</script>
+</body>
+</html>

@@ -48,7 +48,7 @@ r.patch('/patient/forgot_password', limiter(5, 60000), wrap(async (req, res) => 
 r.patch('/patient/reset_password', limiter(10, 60000), wrap(async (req, res) => res.json({ result: await accounts.resetPassword(req.query.code, req.body || {}) })));
 r.patch('/patient/verify_phone', limiter(10, 60000), wrap(async (req, res) => res.json({ result: await accounts.verifyPhone(req.body || {}) })));
 const sendCode = limiter(5, 60000);
-r.post('/patient/send_verification_code', sendCode, wrap(async (req, res) => res.json(await savings.startVerification(req.body?.phone))));
+r.post('/patient/send_verification_code', sendCode, wrap(async (req, res) => res.json(await savings.startVerification(req.body?.phone, { lang: req.body?.lang }))));
 
 r.post('/budget/add_budget', authed(async (req, res, a) => res.status(201).json({ result: await accounts.addBudget(a, req.body || {}) })));
 r.get('/budget/patient_budgets', authed(async (req, res, a) => res.json({ result: accounts.listBudgets(a) })));
