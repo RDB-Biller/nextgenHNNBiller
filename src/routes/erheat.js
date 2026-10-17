@@ -18,7 +18,7 @@ const authed = (fn) => wrap(async (req, res) => fn(req, res, await accounts.auth
 // ---- borrower API for the TrimesterSave app (patient account token). The app holds no rules.
 const api = express.Router();
 api.use((req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS'); res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS'); res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end(); next();
 });
 api.use(express.json({ limit: '200kb' }));
@@ -27,6 +27,11 @@ api.get('/lines', wrap(async (req, res) => {
   let phone = null; if (req.get('authorization')) { try { phone = (await accounts.authenticate(req.get('authorization'))).phone; } catch (_e) { /* anonymous catalogue */ } }
   res.json({ result: await erheat.lines(phone) });
 }));
+api.get('/health/facilities', wrap(async (_q, res) => res.json({ result: await erheat.healthFacilities() })));
+api.get('/health/pending', authed(async (_q, res, a) => res.json({ result: await erheat.healthPending(a) })));
+api.get('/profile', authed(async (_q, res, a) => res.json({ result: await erheat.getProfile(a) })));
+api.put('/profile', authed(async (req, res, a) => res.json({ result: await erheat.saveProfile(a, req.body || {}) })));
+api.get('/history', authed(async (_q, res, a) => res.json({ result: await erheat.awardedHistory(a) })));
 api.get('/passport', authed(async (_q, res, a) => res.json({ result: await erheat.passport(a.phone) })));
 api.get('/apps', authed(async (_q, res, a) => res.json({ result: await erheat.myApps(a) })));
 api.post('/apply', limiter(10, 60000), authed(async (req, res, a) => res.status(201).json({ result: await erheat.apply(a, req.body || {}) })));

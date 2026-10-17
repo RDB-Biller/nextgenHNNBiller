@@ -191,6 +191,9 @@ async function apply(account, b = {}) {
   if (amount > cap) throw err(422, `Your limit for ${line.label} is GHS ${cap}.${pass.level === 'new' ? ' It rises as you repay.' : ''}`);
   if (mine.some((a) => a.line === b.line && !TERMINAL.includes(a.status))) throw err(409, `You already have an open ${line.label} request.`);
   if (mine.filter((a) => Date.now() - Date.parse(a.createdAt) < 30 * 86400000).length >= cfg.maxApps30d) throw err(429, 'You have reached the number of requests allowed this month.');
+  let ctx = null;
+  if (b.line === 'health' && (b.billId || b.facilityId)) ctx = await healthContext(b, borrowerPhone, mine, amount, cap);
+  if (ctx) { b = { ...b, evidence: { ...(b.evidence || {}), ...ctx.evidence }, payee: ctx.payee, verifier: ctx.verifier || b.verifier }; }
   const evidence = checkEvidence(line, b.evidence || {}, amount);
   const payee = { name: String((b.payee || {}).name || '').trim().slice(0, 100), phone: dial((b.payee || {}).phone), type: line.verifierRole };
   if (!payee.name || !validPhone(payee.phone)) throw err(422, 'Give the payee name and a valid phone number.');
@@ -198,7 +201,7 @@ async function apply(account, b = {}) {
   const verifiers = [];
   const vIn = [{ role: line.verifierRole, label: line.verifierLabel, name: (b.verifier || {}).name, phone: (b.verifier || {}).phone, required: true }];
   if (line.coVerifierLabel && b.coVerifier && b.coVerifier.phone) vIn.push({ role: 'co-tenant', label: line.coVerifierLabel, name: b.coVerifier.name, phone: b.coVerifier.phone, required: true });
-  for (const v of vIn) {
+  for (const v of (ctx && ctx.billBacked ? [] : vIn)) {
     const ph = dial(v.phone); if (!validPhone(ph)) throw err(422, `${v.label}: a valid phone number is needed.`);
     if (ph === borrowerPhone) throw err(422, `${v.label} cannot be your own number.`);
     if (verifiers.some((x) => x.phone === ph)) throw err(422, 'Each person must have a different phone number.');
@@ -216,9 +219,83 @@ async function apply(account, b = {}) {
     payee, verifiers, vlang, evidence, flags: Array.from(new Set(flags)), consent: null, lender: null, voucher: null, payout: null, repayments: [], history: [],
     createdAt: now(), expiresAt: new Date(Date.now() + cfg.appTtlDays * 86400000).toISOString(),
   };
-  addEvent(app, 'created', { line: b.line, amount }); await store.settings.set('erheat:no:' + app.appNo, { id: app.id }); await saveApp(app);
-  for (const v of app.verifiers) { await store.settings.set(VER + v.token, { appId: app.id, verifierId: v.id }); await sendVerifierSms(app, v); }
+  addEvent(app, 'created', { line: b.line, amount });
+  if (ctx && ctx.billBacked) {
+    // The facility's own bill in the Biller is the confirmation: it named this patient, this amount, this facility.
+    app.source = { kind: 'bill', billId: ctx.bill.id, tenantId: ctx.bill.tenantId, patientPayable: ctx.payable };
+    app.verifiers = [{ id: rid('v', 4), role: line.verifierRole, label: 'Facility bill record', name: ctx.payee.name, phone: ctx.payee.phone, required: true, token: null, status: 'confirmed', at: now(), channel: 'biller_record' }];
+    (app.confirmations = app.confirmations || []).push({ role: line.verifierRole, decision: 'confirmed', at: now(), channel: 'biller_record', billId: ctx.bill.id });
+    app.status = 'verified'; app.verifiedAmount = amount; addEvent(app, 'verified', 'biller_record');
+  } else if (ctx) app.source = { kind: 'facility', tenantId: ctx.tenant.id };
+  await store.settings.set('erheat:no:' + app.appNo, { id: app.id }); await saveApp(app);
+  for (const v of app.verifiers.filter((x) => x.token)) { await store.settings.set(VER + v.token, { appId: app.id, verifierId: v.id }); await sendVerifierSms(app, v); }
   return borrowerView(app);
+}
+
+// ------------------------------------------------------------------ health sync with the Biller
+const OPEN_BILL = ['open', 'awaiting_payer'];
+const facilityPhone = (t) => { const p = dial(((t || {}).contact || {}).phone); return validPhone(p) ? p : ''; };
+async function healthFacilities() {
+  const out = []; for (const t of await store.tenants.all()) out.push({ id: t.id, name: t.name, canConfirm: !!facilityPhone(t), phone: facilityPhone(t) ? mask(facilityPhone(t)) : '' });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+async function billsOfPhone(phone) { const out = []; for (const bl of await store.bills.all(3000)) if (bl && bl.patient && dial(bl.patient.phone) === phone) out.push(bl); return out; }
+async function creditsOfBill(billId) { try { const r = await store.credits.byBill(billId); return Array.isArray(r) ? r : (r ? [r] : []); } catch (_e) { return []; } }
+function billNote(bl) { const n = (bl.lineItems || []).map((i) => i.name).filter(Boolean).slice(0, 3).join(', '); return (n || (bl.clinical || {}).diagnosis || 'Care at the facility').slice(0, 180); }
+async function healthPending(account) {
+  const phone = dial(account.phone); if (!validPhone(phone)) return { items: [] };
+  const cfg = await getConfig(); const lc = cfg.lines.health; const pass = passportOf(await appsOfPhone(phone), cfg);
+  const cap = Math.min(lc.cap, cfg.hardCap, pass.ceiling); const taken = new Set();
+  for (const a of await appsOfPhone(phone)) if (a.source && a.source.billId && !['declined', 'cancelled', 'expired'].includes(a.status)) taken.add(a.source.billId);
+  const items = [];
+  for (const bl of await billsOfPhone(phone)) {
+    if (!OPEN_BILL.includes(bl.status) || taken.has(bl.id)) continue;
+    const payable = round2((bl.totals || {}).patientPayable); if (!(payable >= lc.min)) continue;
+    const t = bl.tenantId ? await store.tenants.get(bl.tenantId) : null; if (!t) continue;
+    const credit = (await creditsOfBill(bl.id))[0];
+    items.push({ billId: bl.id, kind: 'bill', facility: { id: t.id, name: t.name, canConfirm: !!facilityPhone(t) }, insureCreditNo: credit ? credit.appNo : '', note: billNote(bl), billTotal: payable, amount: Math.min(payable, cap), at: bl.createdAt });
+  }
+  return { items: items.sort((a, b) => String(b.at).localeCompare(String(a.at))), cap };
+}
+async function healthContext(b, borrowerPhone, mine, amount, cap) {
+  if (b.billId) {
+    const bl = await store.bills.get(String(b.billId));
+    if (!bl || !bl.patient || dial(bl.patient.phone) !== borrowerPhone) throw err(404, 'We could not find that bill under your number.');
+    if (!OPEN_BILL.includes(bl.status)) throw err(409, 'That bill is no longer open.');
+    if (mine.some((a) => a.source && a.source.billId === bl.id && !['declined', 'cancelled', 'expired'].includes(a.status))) throw err(409, 'This bill already has a request.');
+    const payable = round2((bl.totals || {}).patientPayable); if (!(amount <= payable)) throw err(422, `The bill is GHS ${payable.toFixed(2)}. The loan cannot be more than that.`);
+    const t = bl.tenantId ? await store.tenants.get(bl.tenantId) : null; if (!t) throw err(422, 'That bill has no facility on record.');
+    const phone = facilityPhone(t) || dial((b.payee || {}).phone); if (!validPhone(phone)) throw err(422, `Give a phone number for ${t.name} to be paid on.`);
+    const credit = (await creditsOfBill(bl.id))[0];
+    return { billBacked: true, bill: bl, tenant: t, payable, payee: { name: t.name, phone }, evidence: { facility: t.name, insureCreditNo: credit ? credit.appNo : '', note: billNote(bl) } };
+  }
+  const t = await store.tenants.get(String(b.facilityId)); if (!t) throw err(404, 'Choose a facility from the list.');
+  const phone = facilityPhone(t); if (!phone) throw err(422, `${t.name} has no contact number on file yet. Enter its details instead.`);
+  return { billBacked: false, tenant: t, payee: { name: t.name, phone }, verifier: { name: t.name, phone }, evidence: { facility: t.name, note: (b.evidence || {}).note || '', insureCreditNo: (b.evidence || {}).insureCreditNo || '' } };
+}
+
+// ------------------------------------------------------------------ saved profile (optional, per line)
+const PROF = 'erheat:profile:';
+const cleanPerson = (x, own) => { const name = String((x || {}).name || '').trim().slice(0, 100); const phone = dial((x || {}).phone); if (!name && !(x || {}).phone) return null; if (!validPhone(phone)) throw err(422, 'A saved contact needs a valid phone number.'); if (phone === own) throw err(422, 'A saved contact cannot be your own number.'); return { name, phone }; };
+async function getProfile(account) { return (await store.settings.get(PROF + account._id)) || { lines: {}, updatedAt: null }; }
+async function saveProfile(account, body = {}) {
+  const own = dial(account.phone); const cur = await getProfile(account); const next = { lines: { ...cur.lines }, updatedAt: now() };
+  for (const [key, v] of Object.entries(body.lines || {})) {
+    const line = LINES[key]; if (!line) continue;
+    if (v === null) { delete next.lines[key]; continue; }
+    const ev = {}; for (const f of line.fields) { const x = (v.evidence || {})[f.key]; if (x === undefined || x === null || String(x).trim() === '') continue; ev[f.key] = String(x).trim().slice(0, 200); }
+    const entry = { evidence: ev }; const payee = cleanPerson(v.payee, own); const verifier = cleanPerson(v.verifier, own);
+    if (payee) entry.payee = payee; if (verifier) entry.verifier = verifier;
+    if (Object.keys(ev).length || entry.payee || entry.verifier) next.lines[key] = entry; else delete next.lines[key];
+  }
+  await store.settings.set(PROF + account._id, next); return next;
+}
+const AWARDED = ['approved', 'payee_paid', 'repaying', 'closed', 'defaulted'];
+async function awardedHistory(account) {
+  const rows = []; for (const k of await store.settings.keys(APP)) { const a = await store.settings.get(k); if (a && a.borrower.id === account._id && AWARDED.includes(a.status)) rows.push(a); }
+  rows.sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  const amt = (a) => (a.lender || {}).approvedAmount || a.verifiedAmount || a.amount; const repaid = (a) => round2(a.repayments.reduce((s, r) => s + r.amount, 0));
+  return { items: rows.map((a) => ({ ...borrowerView(a), awarded: amt(a), repaid: repaid(a) })), totals: { count: rows.length, borrowed: round2(rows.reduce((s, a) => s + amt(a), 0)), repaid: round2(rows.reduce((s, a) => s + repaid(a), 0)), closed: rows.filter((a) => a.status === 'closed').length } };
 }
 async function sendVerifierSms(app, v) {
   const l = LINES[app.line]; const link = `${base()}/erheat/v/${v.token}`;
@@ -446,5 +523,5 @@ async function partnerList({ lines: allowed = [], phones = [], all = false, stat
 
 module.exports = {
   HARD_CAP, LINES, CONSENT_TEXT, getConfig, setConfig, rotateSecret, checkSecret, hookUrls, lines, passport, apply, resendVerifier, myApps, getMine, cancel,
-  verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, partnerList, listAll, adminGet, simulate, sweep, _setPostImplForTests,
+  getProfile, saveProfile, healthFacilities, healthPending, awardedHistory, verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, partnerList, listAll, adminGet, simulate, sweep, _setPostImplForTests,
 };
