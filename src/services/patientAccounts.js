@@ -80,7 +80,7 @@ async function session(a) {
   return publicUser(a, { tokens: [{ token }] });
 }
 
-async function register({ first_name, last_name, phone, password, language } = {}) {
+async function register({ first_name, last_name, phone, password, language, source } = {}) {
   const p = dial(phone);
   if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
   if (!String(first_name || '').trim() || !String(last_name || '').trim()) throw err(422, 'Please enter your first and last name');
@@ -91,7 +91,8 @@ async function register({ first_name, last_name, phone, password, language } = {
     phone: p, passwordHash: hashPassword(password), phoneVerified: false, createdAt: iso(), budgets: [], vitals: [],
   };
   if (language && i18n.isKnown(language)) a.language = i18n.normalise(language);
-  await notify(a, { title: 'Welcome to TrimesterSave', message: 'Your account is ready. Verify your phone, then start a savings plan, keep your records and book your visits.', kind: 'welcome' });
+  if (source === 'erheat') await notify(a, { title: 'Welcome to ER HEAT', message: 'Your account is ready. Verify your phone, then ask for an emergency loan for rent, health, school fees, energy, food or travel.', kind: 'welcome' });
+  else await notify(a, { title: 'Welcome to TrimesterSave', message: 'Your account is ready. Verify your phone, then start a savings plan, keep your records and book your visits.', kind: 'welcome' });
   await store.settings.set(phoneKey(p), { id: a._id });
   await save(a);
   return publicUser(a);
@@ -358,6 +359,8 @@ async function deleteFile(a, id) {
   return { deleted: id };
 }
 
-module.exports = { register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
+/** Add an in-app notification for the account that owns this phone (no-op when there is none). */
+async function notifyPhone(phoneRaw, payload) { const a = await byPhone(phoneRaw); if (!a) return false; await notify(a, payload); await save(a); return true; }
+module.exports = { notifyPhone, register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
   notify, listNotifications, readNotification, addAppointment, updateAppointment, deleteAppointment, listAppointments, getAppointment, runAppointmentReminders,
   addFile, listFiles, getFile, updateFile, deleteFile };
