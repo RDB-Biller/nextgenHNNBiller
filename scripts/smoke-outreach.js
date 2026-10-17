@@ -246,6 +246,23 @@ let countryRows;
   ok(enr.enrolled >= 1 && arAfter.some((c) => c.id === arCon.id) && !arAfter.some((c) => c.id === otherCon.id), 'a campaign can target just one group');
   ok((await outreach.overview()).contactsByCampaign['africa-report-insurers'] >= 1 && (await outreach.listContacts({ list: 'africa-report-2024-insurers' })).rows.some((c) => c.id === arCon.id), 'campaign counts and per-group contact lists');
 
+  // ---- Core banking top 15 with regional offices
+  const cb = await outreach.seedCoreBanking();
+  ok(cb.inGroup === 15 && cb.offices > 40 && (await outreach.seedCoreBanking()).offices === 0, `core banking group: ${cb.inGroup} vendors, ${cb.offices} offices; repeat is a no-op`);
+  const tem = (await outreach.listOrgs({ list: 'core-banking-top15', q: 'Temenos' })).rows[0];
+  const offs = await outreach.officesReach(tem.id);
+  ok(offs.find((f) => f.cc === 'ZA').reach.held && !offs.find((f) => f.cc === 'US').reach.held && offs.find((f) => f.cc === 'US').reach.sms === false, 'South Africa office is held while the USA office is open (and has no cold SMS)');
+  const zaCon = await outreach.addContact({ orgId: tem.id, officeCc: 'ZA', name: '', email: 'sales@za.temenos.test', source: 'https://temenos.test/contact' });
+  const usCon = await outreach.addContact({ orgId: tem.id, officeCc: 'US', name: '', email: 'sales@us.temenos.test', source: 'https://temenos.test/contact' });
+  e = await rej(outreach.addContact({ orgId: tem.id, officeCc: 'BR', email: 'x@br.temenos.test', source: 'https://x.test' })); ok(e && e.status === 422, 'an office the vendor does not have is refused');
+  const cbEn = await outreach.enroll({ list: 'core-banking-top15', campaign: 'core-banking', sequenceId: 'email-only' });
+  const cbRows = (await outreach.listContacts({ campaign: 'core-banking' })).rows;
+  ok(cbEn.enrolled >= 1 && cbEn.held >= 1 && cbRows.some((c) => c.id === usCon.id) && !cbRows.some((c) => c.id === zaCon.id), 'enrolment holds the South Africa office contact but reaches the USA office contact');
+  ok((await outreach.listContacts({ officeCc: 'US', list: 'core-banking-top15' })).rows.some((c) => c.id === usCon.id) && !(await outreach.listContacts({ officeCc: 'US' })).rows.some((c) => c.id === zaCon.id), 'contacts filter by office country');
+  const addO = await outreach.addOffice(tem.id, { cc: 'GH', city: 'Accra', role: 'africa' }); ok(addO.offices.some((f) => f.cc === 'GH'), 'an office can be added');
+  e = await rej(outreach.addOffice(tem.id, { cc: 'GH', city: 'Accra' })); ok(e && e.status === 409, 'duplicate office refused');
+  const rm = await outreach.removeOffice(tem.id, addO.offices.find((f) => f.cc === 'GH').id); ok(!rm.offices.some((f) => f.cc === 'GH'), 'an office can be removed');
+
   srv.close();
   console.log(`\n${a} assertions${process.exitCode ? ' — WITH FAILURES' : ' — all passed'}`);
 })().catch((x) => { console.error(x); process.exit(1); });

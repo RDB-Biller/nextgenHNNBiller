@@ -39,7 +39,7 @@
     <p class="muted" style="margin-top:0;font-size:13px">Add whole markets: Commonwealth countries, the French-, Portuguese-, Spanish-, Arabic-, Chinese- and Hindi-speaking markets, plus index lists such as the Ghana Club 100 and Fortune 500. Starter lists hold organisation names only (no people, no emails) and need checking against the source; use <b>Import a list</b> to load the full published ranking. Countries with strict direct-marketing law are <b>held</b> (no automated email/SMS) until you tick them as legally reviewed.</p>
     <div class="row"><div class="field"><label>Load by pack</label><select id="cp_pack"></select></div>
       <div class="field"><label>or one country</label><select id="cp_country"></select></div>
-      <div class="field" style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap"><button class="primary" onclick="cpLoad('pack')">Load pack</button><button onclick="cpLoad('country')">Load country</button><button onclick="cpAfricaReport()">Load The Africa Report 2024 group</button><button onclick="cpLoad('commonwealth')">All Commonwealth</button><button onclick="cpLoad('all')">All countries</button></div></div>
+      <div class="field" style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap"><button class="primary" onclick="cpLoad('pack')">Load pack</button><button onclick="cpLoad('country')">Load country</button><button onclick="cpAfricaReport()">Load The Africa Report 2024 group</button><button onclick="cpCoreBanking()">Load top 15 core banking group</button><button onclick="cpLoad('commonwealth')">All Commonwealth</button><button onclick="cpLoad('all')">All countries</button></div></div>
     <p class="muted" id="cp_msg" style="font-size:13px"></p><div id="cp_packs"></div>
     <details style="margin:8px 0"><summary>Import a list (paste names, one per line, ranks are ignored)</summary>
       <div class="row"><div class="field"><label>List id</label><input id="cpi_id" placeholder="fortune500, ghana-club-100, my-list"/></div><div class="field"><label>Country</label><select id="cpi_c"></select></div>
@@ -52,14 +52,14 @@
       <div class="field"><label>Country</label><select id="ou_fcc"></select></div><div class="field"><label>List</label><select id="ou_flist"></select></div>
       <div class="field"><label>Search</label><input id="ou_fq" placeholder="name"/></div>
       <div class="field" style="display:flex;align-items:flex-end;gap:6px"><button onclick="ouOrgs()">Filter</button><button onclick="ouSeed()">Load seed lists</button></div></div>
-    <div id="ou_orgs" style="margin-top:8px"></div>
+    <div id="ou_orgs" style="margin-top:8px"></div><div id="ou_offices" style="margin-top:8px"></div>
     <div class="row" style="margin-top:8px"><div class="field"><label>Add organisation</label><input id="ou_on_name"/></div><div class="field"><label>Type</label><select id="ou_on_type">${opt(TYPES)}</select></div><div class="field"><label>Country</label><input id="ou_on_c"/></div>
       <div class="field" style="display:flex;align-items:flex-end"><button onclick="ouAddOrg()">Add</button></div></div></div>
   <div class="card" style="margin-bottom:14px"><h2>Contacts</h2>
     <div class="row"><div class="field"><label>Organisation</label><select id="ou_co"></select></div><div class="field"><label>Name (leave blank for a team mailbox such as sales@ or info@)</label><input id="ou_cn"/></div><div class="field"><label>Role</label><input id="ou_cr"/></div>
       <div class="field"><label>Persona</label><select id="ou_cp">${opt(PERSONAS, 'other')}</select></div></div>
     <div class="row"><div class="field"><label>Work or team email (sales@, info@, enquiries@, comms@ ...)</label><input id="ou_ce2"/></div><div class="field"><label>Phone numbers, comma-separated (mobile / landline detected)</label><input id="ou_cph" placeholder="+233 24 111 2222, +233 30 222 3333"/></div><div class="field"><label>LinkedIn URL</label><input id="ou_cli"/></div>
-      <div class="field"><label>Language</label><input id="ou_cl" placeholder="en, fr, pt, ar..."/></div><div class="field"><label>Public source (required)</label><input id="ou_csrc" placeholder="URL of the page"/></div>
+      <div class="field"><label>Office country (blank = head office)</label><input id="ou_coff" placeholder="US, GB, IN, CH..."/></div><div class="field"><label>Language</label><input id="ou_cl" placeholder="en, fr, pt, ar..."/></div><div class="field"><label>Public source (required)</label><input id="ou_csrc" placeholder="URL of the page"/></div>
       <div class="field" style="display:flex;align-items:flex-end"><button class="primary" onclick="ouAddContact()">Add contact</button></div></div>
     <details style="margin:8px 0"><summary>Bulk import (CSV with a header row, or JSON rows)</summary>
       <p class="muted" style="font-size:12px;margin:4px 0">Columns: org, name (optional), role, persona, email, phones (separate several with ;), purpose, source (required), lang. Team mailboxes (sales@, info@, enquiries@, communications@, product-specific ones such as ghanahomeloans@) need no name. Careers, HR, privacy and no-reply mailboxes are refused.</p>
@@ -71,7 +71,7 @@
   <div class="card" style="margin-bottom:14px"><h2>Run a campaign</h2>
     <div class="row"><div class="field"><label>Organisation type</label><select id="ou_et"><option value="">All</option>${opt(TYPES)}</select></div>
       <div class="field"><label>Persona</label><select id="ou_ep"><option value="">All</option>${opt(PERSONAS)}</select></div>
-      <div class="field"><label>Group / list (optional)</label><select id="ou_el"></select></div><div class="field"><label>Campaign name (optional)</label><input id="ou_ecn" placeholder="africa-report-insurers"/></div>
+      <div class="field"><label>Group / list (optional)</label><select id="ou_el"></select></div><div class="field"><label>Office country only (optional)</label><input id="ou_eoff" placeholder="US"/></div><div class="field"><label>Campaign name (optional)</label><input id="ou_ecn" placeholder="africa-report-insurers"/></div>
       <div class="field"><label>Sequence</label><select id="ou_es"></select></div>
       <div class="field" style="display:flex;align-items:flex-end;gap:6px"><button onclick="ouEnroll()">Enrol new contacts</button><button onclick="ouRun(true)">Dry-run</button><button class="primary" onclick="ouRun(false)">Send due now</button></div></div>
     <pre id="ou_run" class="muted" style="white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto"></pre></div>
@@ -109,12 +109,12 @@
   window.ouOrgs = guard(async () => {
     const r = await api('/orgs?pageSize=100&type=' + encodeURIComponent(q('ou_ftype').value) + '&q=' + encodeURIComponent(q('ou_fq').value) + '&cc=' + encodeURIComponent(q('ou_fcc').value) + '&list=' + encodeURIComponent(q('ou_flist').value));
     ORGS = r.rows; q('ou_co').innerHTML = ORGS.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
-    q('ou_orgs').innerHTML = `<div class="muted" style="font-size:12px">${r.total} match (showing ${r.rows.length})</div><table><tr><th>Organisation</th><th>Type</th><th>Country</th><th>Language</th><th>Reach</th><th>Status</th><th>Contacts</th></tr>${r.rows.map((o) => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:11px">${(o.lists || []).map(esc).join(' · ')}</div></td><td>${o.type}</td><td>${esc(o.country)}</td><td>${esc(o.lang || '')}</td><td>${o.reach && o.reach.held ? '<span title="' + esc(o.reach.reason) + '">⏸ held</span>' : '✉' + (o.reach && o.reach.sms === false ? '' : ' 💬') + ' ☎'}</td><td>${o.status}</td><td>${o.contacts}</td></tr>`).join('')}</table>`;
+    q('ou_orgs').innerHTML = `<div class="muted" style="font-size:12px">${r.total} match (showing ${r.rows.length})</div><table><tr><th>Organisation</th><th>Type</th><th>Country</th><th>Language</th><th>Reach</th><th>Status</th><th>Contacts</th><th></th></tr>${r.rows.map((o) => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:11px">${(o.lists || []).map(esc).join(' · ')}</div></td><td>${o.type}</td><td>${esc(o.country)}</td><td>${esc(o.lang || '')}</td><td>${o.reach && o.reach.held ? '<span title="' + esc(o.reach.reason) + '">⏸ held</span>' : '✉' + (o.reach && o.reach.sms === false ? '' : ' 💬') + ' ☎'}</td><td>${o.status}</td><td>${o.contacts}</td><td><button onclick="ouOffices('${o.id}')">Offices${(o.offices || []).length ? ' (' + o.offices.length + ')' : ''}</button></td></tr>`).join('')}</table>`;
   });
   window.ouAddOrg = guard(async () => { await api('/orgs', 'POST', { name: q('ou_on_name').value, type: q('ou_on_type').value, country: q('ou_on_c').value }); q('ou_on_name').value = ''; ouOrgs(); });
   window.ouAddContact = guard(async () => {
-    await api('/contacts', 'POST', { orgId: q('ou_co').value, name: q('ou_cn').value, role: q('ou_cr').value, persona: q('ou_cp').value, email: q('ou_ce2').value, phones: q('ou_cph').value.split(',').map((x) => x.trim()).filter(Boolean), linkedin: q('ou_cli').value, lang: q('ou_cl').value || undefined, source: q('ou_csrc').value });
-    ['ou_cn', 'ou_cr', 'ou_ce2', 'ou_cph', 'ou_cli', 'ou_csrc'].forEach((i) => { q(i).value = ''; }); msg('Contact added'); ouContacts();
+    await api('/contacts', 'POST', { orgId: q('ou_co').value, name: q('ou_cn').value, role: q('ou_cr').value, persona: q('ou_cp').value, email: q('ou_ce2').value, phones: q('ou_cph').value.split(',').map((x) => x.trim()).filter(Boolean), linkedin: q('ou_cli').value, lang: q('ou_cl').value || undefined, officeCc: q('ou_coff').value || undefined, source: q('ou_csrc').value });
+    ['ou_cn', 'ou_cr', 'ou_ce2', 'ou_cph', 'ou_cli', 'ou_csrc', 'ou_coff'].forEach((i) => { q(i).value = ''; }); msg('Contact added'); ouContacts();
   });
   const csv = (text) => {
     const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim()); if (lines.length < 2) throw new Error('CSV needs a header row and at least one data row');
@@ -130,7 +130,7 @@
   window.ouPreview = guard(async (id) => { const p = await api(`/contacts/${id}/preview?sequence=${q('ou_es').value}&step=0`); q('ou_run').textContent = `Channel: ${p.channel}${p.translated ? ' (translated to ' + p.lang + ')' : ''}\n${p.subject ? 'Subject: ' + p.subject + '\n' : ''}\n${p.body}`; });
   window.ouStatus = guard(async (id, s) => { await api(`/contacts/${id}/status`, 'POST', { status: s }); ouContacts(); });
   window.ouErase = guard(async (id) => { if (!confirm('Erase this person? Their address stays only as a hashed suppression entry.')) return; await api('/contacts/' + id, 'DELETE'); ouContacts(); });
-  window.ouEnroll = guard(async () => { const r = await api('/enroll', 'POST', { orgType: q('ou_et').value || undefined, persona: q('ou_ep').value || undefined, list: q('ou_el').value || undefined, campaign: q('ou_ecn').value || undefined, sequenceId: q('ou_es').value }); msg(`Enrolled ${r.enrolled}`); ouContacts(); });
+  window.ouEnroll = guard(async () => { const r = await api('/enroll', 'POST', { orgType: q('ou_et').value || undefined, persona: q('ou_ep').value || undefined, list: q('ou_el').value || undefined, officeCc: (q('ou_eoff') || {}).value || undefined, campaign: q('ou_ecn').value || undefined, sequenceId: q('ou_es').value }); msg(`Enrolled ${r.enrolled}`); ouContacts(); });
   window.ouRun = guard(async (dry) => {
     if (!dry && !confirm('Send all due messages now? Real emails/SMS go out if providers are live.')) return;
     const r = await api('/run', 'POST', { dryRun: dry });
@@ -182,6 +182,13 @@
     if (mode === 'all' && !confirm('Load every country? This adds well over a thousand organisations.')) return;
     const r = await api('/packs/seed', 'POST', body); q('cp_msg').textContent = `Added ${r.added} organisations, updated ${r.merged} existing (${r.total} in total). Review the list before pitching.`; ouLoad();
   });
+  window.cpCoreBanking = guard(async () => { const r = await api('/packs/core-banking', 'POST'); q('cp_msg').textContent = `Core banking group: ${r.inGroup} vendors; ${r.added} added, ${r.offices} offices added. Offices are starter data: verify each on the company's public contact page. Use "Offices" on an organisation to see which office country is open to you.`; ouLoad(); });
+  window.ouOffices = guard(async (orgId) => {
+    const r = await api('/orgs/' + orgId + '/offices'); const rows = r.offices.map((f) => `<tr><td>${esc(f.country || f.cc)}${f.city ? ', ' + esc(f.city) : ''}${f.home ? ' (head office record)' : ''}</td><td>${esc(f.role)}</td><td>${f.reach.held ? '<b>held: ' + esc(f.reach.reason) + '</b>' : 'open'}${f.reach.known && !f.reach.sms ? ', no cold SMS' : ''}</td><td>${f.home ? '' : '<button onclick="ouOfficeDel(\'' + orgId + '\',\'' + f.id + '\')">Remove</button>'}</td></tr>`).join('');
+    q('ou_offices').innerHTML = `<table><tr><th>Office</th><th>Role</th><th>Reach now</th><th></th></tr>${rows}</table><div class="row"><div class="field"><label>Add office: country</label><input id="of_c" placeholder="US"/></div><div class="field"><label>City</label><input id="of_city"/></div><div class="field"><label>Role</label><select id="of_r"><option>regional</option><option>africa</option><option>sales</option><option>hq</option></select></div><div class="field" style="display:flex;align-items:flex-end"><button onclick="ouOfficeAdd('${orgId}')">Add office</button></div></div><p class="muted" style="font-size:12px">When a country is held, add the contact with that office country (for example US) and enrol it: the legal-review hold, SMS rules and language follow the office.</p>`;
+  });
+  window.ouOfficeAdd = guard(async (orgId) => { await api('/orgs/' + orgId + '/offices', 'POST', { cc: q('of_c').value, city: q('of_city').value, role: q('of_r').value }); ouOffices(orgId); });
+  window.ouOfficeDel = guard(async (orgId, oid) => { await api('/orgs/' + orgId + '/offices/' + oid, 'DELETE'); ouOffices(orgId); });
   window.cpAfricaReport = guard(async () => { const r = await api('/packs/africa-report', 'POST'); q('cp_msg').textContent = `The Africa Report 2024 group: ${r.inGroup} organisations (${r.banks} banks, ${r.insurers} insurers); ${r.added} added, ${r.tagged} existing ones tagged. Pick it under "Group / list" to run a campaign on just these.`; ouLoad(); });
   window.cpImport = guard(async () => {
     const r = await api('/packs/import', 'POST', { listId: q('cpi_id').value, country: q('cpi_c').value || undefined, type: q('cpi_t').value || undefined, text: q('cpi_text').value });

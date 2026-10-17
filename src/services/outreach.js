@@ -30,6 +30,7 @@ const seed = require('../data/outreachSeed');
 const countries = require('../data/countries');
 const countrySeed = require('../data/outreachCountrySeed');
 const africaReport = require('../data/africaReportSeed');
+const coreBank = require('../data/coreBankingSeed');
 const AR = { all: 'africa-report-2024', groups: 'africa-report-2024-bank-groups', banks: 'africa-report-2024-banks', ins: 'africa-report-2024-insurers' };
 
 const err = (status, message) => Object.assign(new Error(message), { status });
@@ -208,10 +209,36 @@ async function updateOrg(id, b = {}) {
   const a = await allOrgs(); const o = a.find((x) => x.id === id); if (!o) throw err(404, 'org_not_found');
   for (const k of ['name', 'country', 'website', 'note']) if (b[k] !== undefined) o[k] = String(b[k]).slice(0, 400);
   if (b.type !== undefined) { if (!TYPES.includes(b.type)) throw err(422, 'bad_type'); o.type = b.type; }
+  if (b.addList) o.lists = Array.from(new Set([...(o.lists || []), String(b.addList).slice(0, 40)]));
+  if (b.removeList) o.lists = (o.lists || []).filter((l) => l !== b.removeList);
   if (b.status !== undefined) { if (!ORG_STATUS.includes(b.status)) throw err(422, 'bad_status'); o.status = b.status; }
   await saveOrgs(a); return o;
 }
 
+/** The country a contact is reached in: its own office when set, otherwise the organisation's country. */
+const placeOf = (org, c) => (c && c.officeCc ? { ...(org || {}), cc: c.officeCc, country: '' } : org);
+const OFFICE_ROLES = ['hq', 'regional', 'africa', 'sales', 'other'];
+function cleanOffice(b) {
+  const g = countries.find(b.cc || b.country); if (!g) throw err(422, 'office needs a known country');
+  return { id: b.id || rid('off'), cc: g.code, country: g.name, city: String(b.city || '').slice(0, 60), role: OFFICE_ROLES.includes(b.role) ? b.role : 'regional', phone: '', note: String(b.note || '').slice(0, 200), verify: b.verify !== false };
+}
+async function addOffice(orgId, b = {}) {
+  const a = await allOrgs(); const o = a.find((x) => x.id === orgId); if (!o) throw err(404, 'org_not_found');
+  const f = cleanOffice(b); o.offices = o.offices || [];
+  if (o.offices.some((x) => x.cc === f.cc && x.city.toLowerCase() === f.city.toLowerCase())) throw err(409, 'office_exists');
+  if (o.offices.length >= 40) throw err(422, 'too_many_offices');
+  o.offices.push(f); await saveOrgs(a); return o;
+}
+async function removeOffice(orgId, officeId) {
+  const a = await allOrgs(); const o = a.find((x) => x.id === orgId); if (!o) throw err(404, 'org_not_found');
+  o.offices = (o.offices || []).filter((x) => x.id !== officeId); await saveOrgs(a); return o;
+}
+/** For each office of an organisation: what the campaign can do there now (so a held country can be bypassed through another office). */
+async function officesReach(orgId) {
+  const o = (await allOrgs()).find((x) => x.id === orgId); if (!o) throw err(404, 'org_not_found'); const cfg = await getConfig();
+  const list = [{ id: 'home', cc: o.cc, country: o.country, city: '', role: 'hq', home: true }, ...(o.offices || [])];
+  return list.map((f) => ({ ...f, reach: reachOf({ cc: f.cc }, cfg) }));
+}
 /** What the campaign can do for an organisation, from its country. */
 function reachOf(o, cfg) {
   const g = geoOf(o);
@@ -266,6 +293,26 @@ async function seedAfricaReport() {
   const inList = cur.filter((o) => (o.lists || []).includes(AR.all));
   return { added, tagged, inGroup: inList.length, banks: inList.filter((o) => o.type === 'bank').length, insurers: inList.filter((o) => ['insurer', 'reinsurer'].includes(o.type)).length };
 }
+/** The top core-banking software vendors as one campaign group, with their head and regional offices (verify before use). */
+async function seedCoreBanking() {
+  const cur = await allOrgs(); const idx = new Map(cur.map((o) => [normName(o.name), o])); let added = 0, tagged = 0, offices = 0;
+  for (const v of coreBank.vendors) {
+    const key = normName(v.name); let o = idx.get(key); const g = countries.find(v.cc);
+    if (!o) {
+      o = { id: rid('org'), name: v.name, type: 'core_banking', country: g ? g.name : v.cc, cc: g ? g.code : '', lang: g ? g.langs[0] : '', lists: [], website: '', note: 'Core banking vendor (starter; verify offices on the public contact page)', tier: 'core-banking-top15', status: 'new', createdAt: now() };
+      cur.push(o); idx.set(key, o); added++;
+    }
+    if (!(o.lists || []).includes(coreBank.GROUP)) { o.lists = [...(o.lists || []), coreBank.GROUP]; tagged++; }
+    o.offices = o.offices || [];
+    for (const f of v.offices) {
+      if (f.cc === o.cc && f.role === 'hq') continue; // the organisation record itself is the head office
+      if (o.offices.some((x) => x.cc === f.cc && x.city.toLowerCase() === f.city.toLowerCase())) continue;
+      o.offices.push(cleanOffice(f)); offices++;
+    }
+  }
+  await saveOrgs(cur);
+  return { added, tagged, offices, inGroup: cur.filter((o) => (o.lists || []).includes(coreBank.GROUP)).length };
+}
 function classifyName(name) {
   const n = String(name || '');
   if (/\b(insurance|insurer|assurance|assurances|assurer|seguros|seguradora|versicherung|assicurazioni|takaful|reinsurance|reassurance|life|medical aid|medical scheme|health plan|hmo|mutuelle|mutualit|mutual)\b/i.test(n) && !/\bbank\b/i.test(n)) return 'insurer';
@@ -283,8 +330,9 @@ async function listPacks() {
   const seedCount = {}; for (const sd of countrySeed.orgs) { const c = countries.find(sd.cc); if (!c) continue; for (const t of new Set([...sd.tags, ...derivedTags(c)])) seedCount[t] = (seedCount[t] || 0) + 1; }
   const loaded = {}; for (const o of orgs) for (const t of o.lists || []) loaded[t] = (loaded[t] || 0) + 1;
   void derived;
+  const cbSize = { [coreBank.GROUP]: coreBank.vendors.length };
   const arSize = { [AR.all]: africaReport.banks.length + africaReport.insurers.length, [AR.groups]: africaReport.banks.filter((b) => b[3] === 'group').length, [AR.banks]: africaReport.banks.filter((b) => b[3] !== 'group').length, [AR.ins]: africaReport.insurers.length };
-  return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: arSize[p.id] || seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
+  return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: cbSize[p.id] || arSize[p.id] || seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
 }
 /** Import a pasted/uploaded list of organisation names into a list pack (one name per line; leading ranks are ignored). */
 async function importList({ listId, listName, country, type, text, names } = {}) {
@@ -380,9 +428,16 @@ async function addContact(b = {}, { by } = {}) {
   const all = await allContacts();
   const dup = all.find((c) => (em && c.email === em) || phones.some((p) => phonesOf(c).some((q) => q.number === p.number)) || (b.linkedin && c.linkedin === b.linkedin));
   if (dup) throw err(409, 'duplicate_contact');
-  const lang = b.lang && i18n.isKnown(b.lang) ? i18n.normalise(b.lang) : (org.lang && i18n.isKnown(org.lang) ? i18n.normalise(org.lang) : 'en');
+  let officeCc = '';
+  if (b.officeCc) {
+    const og = countries.find(b.officeCc); if (!og) throw err(422, 'officeCc: unknown country');
+    if (og.code !== org.cc && !(org.offices || []).some((f) => f.cc === og.code)) throw err(422, `officeCc: ${og.name} is not an office of ${org.name}; add the office first`);
+    officeCc = og.code === org.cc ? '' : og.code;
+  }
+  const og2 = officeCc ? countries.find(officeCc) : null;
+  const lang = b.lang && i18n.isKnown(b.lang) ? i18n.normalise(b.lang) : (og2 && i18n.isKnown(og2.langs[0]) ? i18n.normalise(og2.langs[0]) : (org.lang && i18n.isKnown(org.lang) ? i18n.normalise(org.lang) : 'en'));
   const c = {
-    id: rid('con'), orgId: org.id, kind, name, role: String(b.role || '').slice(0, 100), purpose, persona, email: em, phones, phone: '', landline: '', linkedin: b.linkedin || '',
+    id: rid('con'), orgId: org.id, officeCc, kind, name, role: String(b.role || '').slice(0, 100), purpose, persona, email: em, phones, phone: '', landline: '', linkedin: b.linkedin || '',
     lang, source, lawfulBasis: 'legitimate_interest_b2b', waOptIn: !!b.waOptIn, status: 'new', seq: null, history: [], token: crypto.randomBytes(9).toString('base64url'),
     createdAt: now(), createdBy: by || null,
   };
@@ -401,13 +456,14 @@ async function importContacts(rows, opts) {
   }
   return res;
 }
-async function listContacts({ orgId, status, persona, kind, campaign, list, q, page = 1, pageSize = 50 } = {}) {
+async function listContacts({ orgId, status, persona, kind, campaign, list, officeCc, q, page = 1, pageSize = 50 } = {}) {
   let a = await allContacts();
   if (orgId) a = a.filter((c) => c.orgId === orgId);
   if (status) a = a.filter((c) => c.status === status);
   if (persona) a = a.filter((c) => c.persona === persona);
   if (kind) a = a.filter((c) => (c.kind || 'person') === kind);
   if (campaign) a = a.filter((c) => c.campaign === campaign);
+  if (officeCc) { const oc = String(officeCc).toUpperCase(); const om = new Map((await allOrgs()).map((o) => [o.id, o.cc])); a = a.filter((c) => (c.officeCc || om.get(c.orgId)) === oc); }
   if (list) { const ol = new Map((await allOrgs()).map((o) => [o.id, o.lists || []])); a = a.filter((c) => (ol.get(c.orgId) || []).includes(list)); }
   if (q) { const s = String(q).toLowerCase(); a = a.filter((c) => `${c.name} ${c.role} ${c.email} ${c.purpose || ''}`.toLowerCase().includes(s)); }
   const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
@@ -533,14 +589,14 @@ const DEFAULT_SEQS = [
 async function listSequences() { return (await store.settings.get(SEQS)) || DEFAULT_SEQS; }
 async function getSeq(id) { const s = (await listSequences()).find((x) => x.id === id); if (!s) throw err(404, 'sequence_not_found'); return s; }
 
-async function enroll({ contactIds, orgType, persona, list: listTag, country, campaign, sequenceId = 'standard', limit = 500 } = {}) {
+async function enroll({ contactIds, orgType, persona, list: listTag, country, officeCc, campaign, sequenceId = 'standard', limit = 500 } = {}) {
   const seq = await getSeq(sequenceId); const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
   let list = Array.isArray(contactIds) && contactIds.length ? (await Promise.all(contactIds.map((i) => store.settings.get(CON + i)))).filter(Boolean) : await allContacts();
-  list = list.filter((c) => c.status === 'new' && !c.seq && !c.optedOut && (!orgType || (orgs.get(c.orgId) || {}).type === orgType) && (!persona || c.persona === persona) && (!listTag || ((orgs.get(c.orgId) || {}).lists || []).includes(listTag)) && (!country || (orgs.get(c.orgId) || {}).cc === String(country).toUpperCase())).slice(0, limit);
+  list = list.filter((c) => c.status === 'new' && !c.seq && !c.optedOut && (!orgType || (orgs.get(c.orgId) || {}).type === orgType) && (!persona || c.persona === persona) && (!listTag || ((orgs.get(c.orgId) || {}).lists || []).includes(listTag)) && (!country || (c.officeCc || (orgs.get(c.orgId) || {}).cc) === String(country).toUpperCase()) && (!officeCc || (c.officeCc || (orgs.get(c.orgId) || {}).cc) === String(officeCc).toUpperCase())).slice(0, limit);
   let n = 0; let held = 0; const cfg = await getConfig();
   for (const c of list) {
     if (await anySuppressed(c)) continue;
-    if (c.email && reachOf(orgs.get(c.orgId), cfg).held && seq.steps.some((st) => st.channel === 'email')) { held++; continue; } // country awaiting legal review
+    if (c.email && reachOf(placeOf(orgs.get(c.orgId), c), cfg).held && seq.steps.some((st) => st.channel === 'email')) { held++; continue; } // country awaiting legal review
     c.seq = { id: seq.id, step: 0, nextAt: now() }; c.status = 'queued'; c.campaign = String(campaign || listTag || '').slice(0, 60) || c.campaign || null; note(c, { type: 'enrolled', sequence: seq.id }); await saveContact(c); n++;
   }
   return { enrolled: n, held, sequence: seq.id };
@@ -606,7 +662,7 @@ async function stepOne(c, org, seq, cfg, { dry } = {}) {
   const skip = async (why) => { if (!dry) await advance('skipped:' + why); return { ...out, result: 'skipped', reason: why }; };
 
   if (await anySuppressed(c)) { if (!dry) { c.seq = null; c.optedOut = true; await saveContact(c); } return { ...out, result: 'suppressed' }; }
-  const rc = reachOf(org, cfg);
+  const rc = reachOf(placeOf(org, c), cfg);
   if (step.channel === 'email' && rc.held) return skip('country_needs_review');
   if (step.channel === 'sms' && rc.held) return skip('country_needs_review');
   if (step.channel === 'sms' && rc.known && !rc.sms) return skip('sms_not_allowed_in_country');
@@ -800,7 +856,7 @@ async function addPartnerByAdmin(b) {
 
 module.exports = {
   TYPES, PERSONAS, PHONE_TYPES, classifyPhone, roleOf, ORG_STATUS, getConfig, setConfig, publicConfig,
-  seedOrgs, seedCountries, seedAfricaReport, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
+  seedOrgs, seedCountries, seedAfricaReport, seedCoreBanking, addOffice, removeOffice, officesReach, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
   getReferrer, joinAsPartner, trackReferralClick, referralStats, introduce, addReward, referralOverview, addPartnerByAdmin,
   listSequences, enroll, pause, runDue, preview, listTasks, completeTask, trackClick, submitFeedback, listFeedback, overview, isSuppressed, suppress,
 };

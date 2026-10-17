@@ -1147,3 +1147,9 @@ group** (Master Control → Outreach → Country and index lists) tags organisat
 ones; sub-groups are `africa-report-2024-bank-groups`, `-banks` and `-insurers`. In **Run a campaign** pick the group
 and give the campaign a name to enrol only those contacts; first emails to them open with a line noting the ranking.
 A few scanned rows were unreadable and were completed by hand, so check names against the magazine.
+
+### Core banking top 15 and regional offices
+
+"Load top 15 core banking group" (Master Control, Outreach, Country and index lists) loads 15 core banking software vendors (Temenos, Oracle, Finastra, FIS, Fiserv, Infosys Finacle, TCS BaNCS, Jack Henry, Mambu, Thought Machine, nCino, Sopra Banking Software, Avaloq, HCLTech, Unisys) as the group `core-banking-top15`, each with head and regional offices. The vendor list and office cities are starter data from market reports: verify on each company's public contact page, and edit with the Offices button on an organisation.
+
+Every contact can belong to an office (`officeCc`, for example `US`). Legal-review holds, the no-cold-SMS rule and the default language follow the office country, not the head office. So if a vendor's South Africa office is held, add its sales@ address from the USA office, and enrol with "Office country only" = US. API: `POST /packs/core-banking`, `GET|POST /orgs/:id/offices`, `DELETE /orgs/:id/offices/:oid`; `officeCc` on contacts, list and enrol.
