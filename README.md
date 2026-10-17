@@ -1123,3 +1123,18 @@ replied or opted in; daily caps per channel, sending hours (UTC), pacing; dry-ru
   come from what the referred person does (reply, sandbox, meeting, partner organisation), tiers and rewards are free
   text you set, and a daily introduction limit applies per referrer. Partners (consultants, agents) can sign up at
   `/o/refer` or be added from Master Control.
+
+### Country and index lists
+
+Beyond the ranked African lists, Master Control → Outreach → **Country and index lists** adds whole markets: all
+Commonwealth countries, the French-, Portuguese-, Spanish-, Arabic-, Chinese- and Hindi-speaking markets, and index
+packs (Ghana Club 100, Fortune 500, FTSE 100, CAC 40, PSI and more). Starter lists hold organisation names only and may
+be stale, so each pack links its public source; **Import a list** takes a pasted ranking (ranks ignored, sector detected
+from the name, existing names recognised) so the full Ghana Club 100 or Fortune 500 can be loaded from the publisher's
+file. Organisations carry a country, a default language (contacts inherit it) and list tags, and you can filter by
+country, list, language, Commonwealth or region.
+
+Country policy: EU/EEA and Switzerland, Canada, Australia, New Zealand, South Africa, China and Brazil are **held**: the
+engine will not enrol their contacts for email or SMS until you tick the country as legally reviewed. Cold SMS is never
+sent to the US, Canada, India or China. Calls, manual LinkedIn and referrals-by-hand are unaffected. This table is a
+conservative starting point, not legal advice.

@@ -22,6 +22,7 @@ email._setRequestImplForTests(async (url, o) => { const j = JSON.parse(o.body); 
 messaging._setRequestImplForTests(async (url, o) => { const f = new URLSearchParams(o.body); sent.sms.push({ to: f.get('to'), message: f.get('message') }); return { status: 201, body: JSON.stringify({ SMSMessageData: { Recipients: [{ number: f.get('to'), status: 'Success', messageId: 'x' + sent.sms.length }] } }) }; });
 i18n._setRequestImplForTests(async (m, url, body) => url.endsWith('/languages') ? { status: 200, body: [{ code: 'en' }, { code: 'fr' }] } : { status: 200, body: { translatedText: `[fr] ${body.q}` } });
 
+let countryRows;
 (async () => {
   await store.init?.();
   await operatingMode.set({ settlement: { sandbox: true }, messaging: { sandbox: false } });
@@ -205,6 +206,30 @@ i18n._setRequestImplForTests(async (m, url, body) => url.endsWith('/languages') 
   const ovr = await outreach.referralOverview(); ok(ovr.referrers[0].code === esiCode && ovr.referrers[0].rewards.length === 1 && ovr.totals.intros === 2 && ovr.totals.meetings === 2, 'overview ranks referrers and tracks rewards given');
   res = await fetch(`${base}/refer`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'name=Self+Signup&email=s%40x.test&org=X', redirect: 'manual' }); ok(res.status === 302 && /\/o\/refer\/p/.test(res.headers.get('location')), 'public sign-up as a referral partner returns a personal page');
   await outreach.eraseContact(c3.id); ok(!(await store.settings.get('out:ref:' + esiCode)), 'erasing a person also removes their referrer record');
+
+  // ---- country and index lists
+  const cs1 = await outreach.seedCountries({ commonwealth: true });
+  ok(cs1.added > 300 && (await outreach.seedCountries({ commonwealth: true })).added === 0, `Commonwealth lists load (${cs1.added} organisations) and repeat loads add nothing`);
+  const gh = await outreach.listOrgs({ cc: 'GH', pageSize: 200 });
+  ok(gh.total >= 60 && gh.rows.every((o) => o.lang === 'en') && gh.rows.some((o) => /Acacia Health Insurance/.test(o.name)) && gh.rows.some((o) => /Mahama Cares/.test(o.name)), 'Ghana domestic list includes banks, health insurers/TPAs and hospitals');
+  ok((await outreach.listOrgs({ list: 'ghana-club-100' })).total >= 1 || (await outreach.seedCountries({ packs: ['ghana-club-100'] })).added >= 0, 'Ghana Club 100 pack is available');
+  await outreach.seedCountries({ packs: ['ghana-club-100', 'fortune500', 'ftse100', 'cac40', 'psi', 'francophone', 'lusophone', 'arabic', 'asia'] });
+  ok((await outreach.listOrgs({ list: 'fortune500' })).total >= 50 && (await outreach.listOrgs({ list: 'cac40' })).total >= 5 && (await outreach.listOrgs({ list: 'psi' })).total >= 2, 'Fortune 500, CAC 40 and PSI starter packs load');
+  ok((await outreach.listOrgs({ cc: 'US', pageSize: 200 })).rows.every((o) => o.reach.sms === false), 'US organisations: cold SMS never offered');
+  const frOrg = (await outreach.listOrgs({ cc: 'FR', type: 'bank' })).rows[0];
+  ok(frOrg.lang === 'fr' && frOrg.reach.held && /legal review/.test(frOrg.reach.reason), 'French organisations default to French and are held pending legal review');
+  const frc = await outreach.addContact({ orgId: frOrg.id, name: 'Claire Dupont', persona: 'cto', email: 'claire@fr-bank.test', source: 'https://fr-bank.test/team' });
+  ok(frc.lang === 'fr', 'a contact inherits the organisation language');
+  let en = await outreach.enroll({ contactIds: [frc.id], sequenceId: 'email-only' }); ok(en.enrolled === 0 && en.held === 1, 'enrolment holds contacts in a country awaiting legal review');
+  await outreach.setConfig({ approvedCountries: ['FR'] }, 't'); en = await outreach.enroll({ contactIds: [frc.id], sequenceId: 'email-only' }); ok(en.enrolled === 1, 'ticking the country as reviewed releases it');
+  e = await rej(outreach.setConfig({ approvedCountries: ['ZZ'] })); ok(e && e.status === 422, 'unknown country code refused');
+  const imp2 = await outreach.importList({ listId: 'ghana-club-100', country: 'Ghana', text: '1. Newmont Ghana Gold\n2. Scancom PLC\n3, GCB Bank\n"4"|Stanbic Bank Ghana|Banking\n5 Ghana Medical Hospital\n7. Star Assurance\n\nnot a rank 12345' });
+  ok(imp2.read >= 6 && imp2.known >= 3 && imp2.tagged >= 1 && imp2.added >= 1, 'pasted ranking is imported: ranks stripped, known organisations tagged, new ones added');
+  ok(outreach.classifyName('Acme Life Assurance') === 'insurer' && outreach.classifyName('First Savings Bank') === 'bank' && outreach.classifyName('Korle Clinic') === 'hospital' && outreach.classifyName('Newmont Gold') === 'other', 'sector is detected from the name');
+  const imp3 = await outreach.importList({ listId: 'fortune500', country: 'USA', text: 'Costco\nNew Employer Inc' }); ok(imp3.added === 1 && imp3.tagged === 0 && imp3.read === 2, 'Fortune 500 import recognises names already on the list and adds only new ones');
+  const packs = await outreach.listPacks(); ok(packs.find((p) => p.id === 'fortune500').loaded >= 50 && packs.find((p) => p.id === 'commonwealth').starterSize > 100, 'pack list shows starter size and loaded count');
+  ok((await outreach.listOrgs({ commonwealth: true, pageSize: 5 })).total > 200 && (await outreach.listOrgs({ lang: 'pt' })).total > 10, 'filter by Commonwealth and by language');
+  ok(!JSON.stringify(countryRows = await outreach.countryTable()).includes('@') && countryRows.find((c) => c.code === 'DE').level === 'review' && countryRows.find((c) => c.code === 'FR').approved, 'country table reports level and approval');
 
   srv.close();
   console.log(`\n${a} assertions${process.exitCode ? ' — WITH FAILURES' : ' — all passed'}`);

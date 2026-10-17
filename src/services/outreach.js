@@ -27,6 +27,8 @@ const messaging = require('./messaging');
 const email = require('./email');
 const i18n = require('./i18n');
 const seed = require('../data/outreachSeed');
+const countries = require('../data/countries');
+const countrySeed = require('../data/outreachCountrySeed');
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const now = () => new Date().toISOString();
@@ -109,6 +111,7 @@ const DEFAULTS = {
   enabled: false, senderName: '', senderRole: '', senderOrg: 'HNN Biller / TrimesterSave', postalAddress: '', replyTo: '',
   sandboxUrl: 'https://hnnbiller.xchangeinsure.com', patientAppUrl: 'https://tmsapp.trimestersave.com', publicBaseUrl: '',
   caps: { email: 50, sms: 30, whatsapp: 30 }, hours: { from: 8, to: 16 }, paceMs: 400,
+  approvedCountries: [],
   referral: {
     enabled: false, maxIntrosPerDay: 5, terms: '',
     points: { replied: 0, sandbox: 1, meeting: 3, partner: 10 },
@@ -125,6 +128,11 @@ async function setConfig(p = {}, by) {
   for (const k of ['senderName', 'senderRole', 'senderOrg', 'postalAddress', 'replyTo', 'sandboxUrl', 'patientAppUrl', 'publicBaseUrl']) if (p[k] !== undefined) c[k] = String(p[k] || '').trim().slice(0, 300);
   for (const k of ['sandboxUrl', 'patientAppUrl', 'publicBaseUrl']) if (c[k] && !/^https?:\/\//i.test(c[k])) throw err(422, `${k} must start with http:// or https://`);
   if (p.enabled !== undefined) c.enabled = !!p.enabled;
+  if (p.approvedCountries !== undefined) {
+    if (!Array.isArray(p.approvedCountries)) throw err(422, 'approvedCountries must be a list of country codes');
+    const codes = p.approvedCountries.map((x) => { const k = countries.find(x); if (!k) throw err(422, `unknown country: ${x}`); return k.code; });
+    c.approvedCountries = Array.from(new Set(codes));
+  }
   if (p.caps) for (const ch of ['email', 'sms', 'whatsapp']) if (p.caps[ch] !== undefined) { const n = Number(p.caps[ch]); if (!(n >= 0 && n <= 2000)) throw err(422, 'caps must be 0-2000'); c.caps[ch] = Math.floor(n); }
   if (p.hours) { const f = Number(p.hours.from); const t = Number(p.hours.to); if (!(f >= 0 && t <= 24 && f < t)) throw err(422, 'hours must be 0-24 with from < to'); c.hours = { from: f, to: t }; }
   if (p.referral) {
@@ -148,38 +156,50 @@ async function publicConfig() {
   if (!c.senderName) ready.push('sender name');
   if (!c.postalAddress) ready.push('postal address');
   if (!c.publicBaseUrl) ready.push('public base URL (for unsubscribe/tracking links)');
-  return { ...c, readyToSend: ready.length === 0, missing: ready, emailConfigured: email.configured() };
+  return { ...c, reviewCountries: countries.list.filter((k) => k.level === 'review').map((k) => k.code), readyToSend: ready.length === 0, missing: ready, emailConfigured: email.configured() };
 }
 
 // ----------------------------------------------------------- organisations
 const ORGS = 'out:orgs';
-async function allOrgs() { return (await store.settings.get(ORGS)) || []; }
+const normName = (n) => String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ')
+  .replace(/\b(plc|ltd|limited|inc|corp|corporation|sa|ag|nv|se|co|company|group|holdings?|the|of|de|du|des|la|le|les)\b/g, ' ').replace(/\s+/g, ' ').trim();
+const geoOf = (o) => countries.find(o && (o.cc || o.country));
+async function allOrgs() {
+  const a = (await store.settings.get(ORGS)) || [];
+  for (const o of a) { if (!o.cc) { const g = countries.find(o.country); if (g) o.cc = g.code; } if (!o.lists) o.lists = []; if (!o.lang && o.cc) { const g = countries.find(o.cc); if (g) o.lang = g.langs[0]; } }
+  return a;
+}
 async function saveOrgs(a) { await store.settings.set(ORGS, a); }
 async function seedOrgs() {
   const cur = await allOrgs(); const have = new Set(cur.map((o) => `${o.type}|${o.name.toUpperCase()}`));
   let added = 0;
   for (const s of seed) {
     if (have.has(`${s.type}|${s.name.toUpperCase()}`)) continue;
-    cur.push({ id: rid('org'), name: s.name, type: s.type, country: s.country || '', website: '', note: s.note || '', tier: s.rank || '', status: 'new', createdAt: now() });
+    const g = countries.find(s.country); cur.push({ id: rid('org'), name: s.name, type: s.type, country: s.country || '', cc: g ? g.code : '', lang: g ? g.langs[0] : '', lists: [], website: '', note: s.note || '', tier: s.rank || '', status: 'new', createdAt: now() });
     added++;
   }
   await saveOrgs(cur); return { added, total: cur.length };
 }
-async function listOrgs({ type, status, q, country, page = 1, pageSize = 50 } = {}) {
-  let a = await allOrgs();
+async function listOrgs({ type, status, q, country, cc, list, lang, commonwealth, region, page = 1, pageSize = 50 } = {}) {
+  let a = await allOrgs(); const cfg0 = await getConfig();
   if (type) a = a.filter((o) => o.type === type);
   if (status) a = a.filter((o) => o.status === status);
-  if (country) a = a.filter((o) => (o.country || '').toLowerCase() === String(country).toLowerCase());
+  if (country) { const g = countries.find(country); a = a.filter((o) => (g ? o.cc === g.code : (o.country || '').toLowerCase() === String(country).toLowerCase())); }
+  if (cc) a = a.filter((o) => o.cc === String(cc).toUpperCase());
+  if (list) a = a.filter((o) => (o.lists || []).includes(list));
+  if (lang) a = a.filter((o) => o.lang === lang);
+  if (commonwealth === true || commonwealth === 'true' || commonwealth === '1') a = a.filter((o) => (geoOf(o) || {}).commonwealth);
+  if (region) a = a.filter((o) => (geoOf(o) || {}).region === region);
   if (q) { const s = String(q).toLowerCase(); a = a.filter((o) => `${o.name} ${o.country} ${o.note}`.toLowerCase().includes(s)); }
   const counts = {}; for (const c of await allContacts()) counts[c.orgId] = (counts[c.orgId] || 0) + 1;
   const total = a.length; const p = Math.max(1, +page || 1); const n = Math.min(200, Math.max(1, +pageSize || 50));
-  return { total, page: p, pageSize: n, rows: a.slice((p - 1) * n, p * n).map((o) => ({ ...o, contacts: counts[o.id] || 0 })) };
+  return { total, page: p, pageSize: n, rows: a.slice((p - 1) * n, p * n).map((o) => ({ ...o, contacts: counts[o.id] || 0, reach: reachOf(o, cfg0) })) };
 }
 async function addOrg(b = {}) {
   const name = String(b.name || '').trim().slice(0, 120); if (!name) throw err(422, 'name_required');
   if (!TYPES.includes(b.type)) throw err(422, `type must be one of ${TYPES.join(', ')}`);
   const a = await allOrgs();
-  const o = { id: rid('org'), name, type: b.type, country: String(b.country || '').slice(0, 60), website: String(b.website || '').slice(0, 200), note: String(b.note || '').slice(0, 400), tier: '', status: 'new', createdAt: now() };
+  const g = countries.find(b.country); const o = { id: rid('org'), name, type: b.type, country: g ? g.name : String(b.country || '').slice(0, 60), cc: g ? g.code : '', lang: g ? g.langs[0] : '', lists: Array.isArray(b.lists) ? b.lists.slice(0, 10) : [], website: String(b.website || '').slice(0, 200), note: String(b.note || '').slice(0, 400), tier: '', status: 'new', createdAt: now() };
   a.push(o); await saveOrgs(a); return o;
 }
 async function updateOrg(id, b = {}) {
@@ -189,6 +209,91 @@ async function updateOrg(id, b = {}) {
   if (b.status !== undefined) { if (!ORG_STATUS.includes(b.status)) throw err(422, 'bad_status'); o.status = b.status; }
   await saveOrgs(a); return o;
 }
+
+/** What the campaign can do for an organisation, from its country. */
+function reachOf(o, cfg) {
+  const g = geoOf(o);
+  if (!g) return { known: false, email: true, sms: true, call: true, whatsapp: 'opt-in only', linkedin: 'manual', held: false };
+  const held = g.level === 'review' && !((cfg && cfg.approvedCountries) || []).includes(g.code);
+  return { known: true, country: g.code, level: g.level, email: !held, sms: !held && !g.noColdSms, call: true, whatsapp: 'opt-in only', linkedin: 'manual', held, reason: held ? 'needs a legal review for ' + g.name : (g.noColdSms ? 'cold SMS not sent in ' + g.name : '') };
+}
+const countryTable = async () => {
+  const cfg = await getConfig(); const orgs = await allOrgs(); const cons = await allContacts(); const orgCc = new Map(orgs.map((o) => [o.id, o.cc]));
+  return countries.list.map((c) => ({ ...c, approved: c.level === 'open' || cfg.approvedCountries.includes(c.code), orgs: orgs.filter((o) => o.cc === c.code).length, contacts: cons.filter((x) => orgCc.get(x.orgId) === c.code).length }));
+};
+function derivedTags(c) {
+  const t = [];
+  if (c.commonwealth) t.push('commonwealth'); const l0 = c.langs[0];
+  if (l0 === 'fr') t.push('francophone'); if (l0 === 'pt') t.push('lusophone'); if (l0 === 'es') t.push('hispanic'); if (l0 === 'ar' || ['DZ', 'MA', 'TN'].includes(c.code)) t.push('arabic');
+  if (c.region === 'Asia') t.push('asia'); return t;
+}
+/** Load the country / index starter lists. Pick countries, "commonwealth", "all", or named packs; safe to repeat. */
+async function seedCountries({ countries: codes, commonwealth, all, packs } = {}) {
+  const want = new Set((codes || []).map((x) => { const c = countries.find(x); return c && c.code; }).filter(Boolean));
+  if (commonwealth) for (const c of countries.list) if (c.commonwealth) want.add(c.code);
+  if (all) for (const c of countries.list) want.add(c.code);
+  const packSet = new Set(packs || []);
+  if (!want.size && !packSet.size) throw err(422, 'choose countries, commonwealth, all, or at least one list');
+  const cur = await allOrgs(); const idx = new Map(cur.map((o) => [normName(o.name), o]));
+  let added = 0, merged = 0;
+  for (const sd of countrySeed.orgs) {
+    const c = countries.find(sd.cc); if (!c) continue; const tags = Array.from(new Set([...sd.tags, ...derivedTags(c)]));
+    if (!(want.has(sd.cc) || tags.some((t) => packSet.has(t)))) continue;
+    const key = normName(sd.name); let o = idx.get(key);
+    if (o) {
+      const before = JSON.stringify([o.cc, o.lang, o.lists]); o.cc = o.cc || c.code; o.lang = o.lang || c.langs[0]; o.country = o.country || c.name; o.lists = Array.from(new Set([...(o.lists || []), ...tags]));
+      if (before !== JSON.stringify([o.cc, o.lang, o.lists])) merged++; continue;
+    }
+    o = { id: rid('org'), name: sd.name, type: sd.type, country: c.name, cc: c.code, lang: c.langs[0], lists: tags, website: '', note: 'country list (starter; verify against the source)', tier: '', status: 'new', createdAt: now() };
+    cur.push(o); idx.set(key, o); added++;
+  }
+  await saveOrgs(cur); return { added, merged, total: cur.length };
+}
+function classifyName(name) {
+  const n = String(name || '');
+  if (/\b(insurance|insurer|assurance|assurances|assurer|seguros|seguradora|versicherung|assicurazioni|takaful|reinsurance|reassurance|life|medical aid|medical scheme|health plan|hmo|mutuelle|mutualit|mutual)\b/i.test(n) && !/\bbank\b/i.test(n)) return 'insurer';
+  if (/\b(bank|banque|banco|banca|bancorp|bancshares|sparkasse|building society|savings|microfinance|mobile money|momo|payments?|credit union)\b/i.test(n)) return 'bank';
+  if (/\b(hospital|hopital|hôpital|clinic|clinique|cl[ií]nica|medical cent(er|re)|teaching hospital|krankenhaus|klinik|ospedale)\b/i.test(n)) return 'hospital';
+  if (/\b(emr|ehr|health information|health it|medical software|healthtech)\b/i.test(n)) return 'ehr';
+  if (/\b(claims|adjudication)\b/i.test(n)) return 'adjudication';
+  if (/\b(core banking|temenos|finastra|finacle)\b/i.test(n)) return 'core_banking';
+  return 'other';
+}
+const PACK_CUSTOM = 'out:packs';
+async function listPacks() {
+  const orgs = await allOrgs(); const custom = (await store.settings.get(PACK_CUSTOM)) || [];
+  const derived = [{ id: 'commonwealth' }, { id: 'francophone' }, { id: 'lusophone' }, { id: 'hispanic' }, { id: 'arabic' }, { id: 'asia' }];
+  const seedCount = {}; for (const sd of countrySeed.orgs) { const c = countries.find(sd.cc); if (!c) continue; for (const t of new Set([...sd.tags, ...derivedTags(c)])) seedCount[t] = (seedCount[t] || 0) + 1; }
+  const loaded = {}; for (const o of orgs) for (const t of o.lists || []) loaded[t] = (loaded[t] || 0) + 1;
+  void derived;
+  return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
+}
+/** Import a pasted/uploaded list of organisation names into a list pack (one name per line; leading ranks are ignored). */
+async function importList({ listId, listName, country, type, text, names } = {}) {
+  const id = String(listId || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (id.length < 2) throw err(422, 'listId required (for example fortune500 or ghana-club-100)');
+  const g = country ? countries.find(country) : null; if (country && !g) throw err(422, `unknown country: ${country}`);
+  if (type && !TYPES.includes(type)) throw err(422, 'bad type');
+  let rows = Array.isArray(names) ? names.map(String) : String(text || '').split(/\r?\n/);
+  rows = rows.map((l) => {
+    const cols = l.replace(/^\s*\d{1,4}\s*[.)]\s+/, '').split(/\t|\|/).map((c) => c.trim().replace(/^"|"$/g, '').replace(/^\d{1,4}\s*[,:;-]\s*/, '').trim());
+    while (cols.length > 1 && /^[\d\s.,]*$/.test(cols[0])) cols.shift();
+    return cols[0] || '';
+  }).filter((l) => l && /[a-z]/i.test(l) && l.length <= 120).slice(0, 3000);
+  if (!rows.length) throw err(422, 'no organisation names found');
+  const packs = (await listPacks()); if (!packs.some((p) => p.id === id)) {
+    const custom = (await store.settings.get(PACK_CUSTOM)) || []; custom.push({ id, name: String(listName || id).slice(0, 80), country: g ? g.code : '', source: '', note: 'custom list', complete: false, custom: true }); await store.settings.set(PACK_CUSTOM, custom);
+  }
+  const cur = await allOrgs(); const idx = new Map(cur.map((o) => [normName(o.name), o])); let added = 0, tagged = 0, known = 0; const types = {};
+  for (const name of rows) {
+    const key = normName(name); if (!key) continue; let o = idx.get(key);
+    if (o) { known++; if (!o.lists.includes(id)) { o.lists.push(id); tagged++; } continue; }
+    const t = type || classifyName(name);
+    o = { id: rid('org'), name, type: t, country: g ? g.name : '', cc: g ? g.code : '', lang: g ? g.langs[0] : '', lists: [id], website: '', note: 'imported to ' + id + (t === 'other' ? ' (sector unclear: review before pitching)' : ''), tier: '', status: 'new', createdAt: now() };
+    cur.push(o); idx.set(key, o); added++; types[t] = (types[t] || 0) + 1;
+  }
+  await saveOrgs(cur); return { listId: id, read: rows.length, added, tagged, known, types };
+}
+
 async function bumpOrg(orgId, status) {
   const a = await allOrgs(); const o = a.find((x) => x.id === orgId); if (!o) return;
   if (ORG_STATUS.indexOf(status) > ORG_STATUS.indexOf(o.status) && o.status !== 'declined') { o.status = status; await saveOrgs(a); }
@@ -257,7 +362,7 @@ async function addContact(b = {}, { by } = {}) {
   const all = await allContacts();
   const dup = all.find((c) => (em && c.email === em) || phones.some((p) => phonesOf(c).some((q) => q.number === p.number)) || (b.linkedin && c.linkedin === b.linkedin));
   if (dup) throw err(409, 'duplicate_contact');
-  const lang = b.lang && i18n.isKnown(b.lang) ? i18n.normalise(b.lang) : 'en';
+  const lang = b.lang && i18n.isKnown(b.lang) ? i18n.normalise(b.lang) : (org.lang && i18n.isKnown(org.lang) ? i18n.normalise(org.lang) : 'en');
   const c = {
     id: rid('con'), orgId: org.id, kind, name, role: String(b.role || '').slice(0, 100), purpose, persona, email: em, phones, phone: '', landline: '', linkedin: b.linkedin || '',
     lang, source, lawfulBasis: 'legitimate_interest_b2b', waOptIn: !!b.waOptIn, status: 'new', seq: null, history: [], token: crypto.randomBytes(9).toString('base64url'),
@@ -412,12 +517,13 @@ async function enroll({ contactIds, orgType, persona, sequenceId = 'standard', l
   const seq = await getSeq(sequenceId); const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
   let list = Array.isArray(contactIds) && contactIds.length ? (await Promise.all(contactIds.map((i) => store.settings.get(CON + i)))).filter(Boolean) : await allContacts();
   list = list.filter((c) => c.status === 'new' && !c.seq && !c.optedOut && (!orgType || (orgs.get(c.orgId) || {}).type === orgType) && (!persona || c.persona === persona)).slice(0, limit);
-  let n = 0;
+  let n = 0; let held = 0; const cfg = await getConfig();
   for (const c of list) {
     if (await anySuppressed(c)) continue;
+    if (c.email && reachOf(orgs.get(c.orgId), cfg).held && seq.steps.some((st) => st.channel === 'email')) { held++; continue; } // country awaiting legal review
     c.seq = { id: seq.id, step: 0, nextAt: now() }; c.status = 'queued'; note(c, { type: 'enrolled', sequence: seq.id }); await saveContact(c); n++;
   }
-  return { enrolled: n, sequence: seq.id };
+  return { enrolled: n, held, sequence: seq.id };
 }
 async function pause(contactId) { const c = await getContact(contactId); c.seq = null; if (c.status === 'queued') c.status = 'new'; note(c, { type: 'paused' }); await saveContact(c); return conPublic(c); }
 
@@ -476,6 +582,10 @@ async function stepOne(c, org, seq, cfg, { dry } = {}) {
   const skip = async (why) => { if (!dry) await advance('skipped:' + why); return { ...out, result: 'skipped', reason: why }; };
 
   if (await anySuppressed(c)) { if (!dry) { c.seq = null; c.optedOut = true; await saveContact(c); } return { ...out, result: 'suppressed' }; }
+  const rc = reachOf(org, cfg);
+  if (step.channel === 'email' && rc.held) return skip('country_needs_review');
+  if (step.channel === 'sms' && rc.held) return skip('country_needs_review');
+  if (step.channel === 'sms' && rc.known && !rc.sms) return skip('sms_not_allowed_in_country');
   if (step.channel === 'email' && !c.email) return skip('no_email');
   if (step.channel === 'sms' && !c.phone) return skip(phonesOf(c).length ? 'no_mobile_number' : 'no_phone');
   if (step.channel === 'whatsapp') { if (!c.phone) return skip(phonesOf(c).length ? 'no_mobile_number' : 'no_phone'); if (!c.waOptIn) return skip('whatsapp_requires_opt_in'); }
@@ -549,7 +659,7 @@ async function submitFeedback(b = {}) {
 async function listFeedback() { const out = []; for (const k of await store.settings.keys('out:fb:')) { const f = await store.settings.get(k); if (f) out.push(f); } return out.sort((a, b) => b.at.localeCompare(a.at)); }
 
 async function overview() {
-  const orgs = await allOrgs(); const cons = await allContacts();
+  const orgs = await allOrgs(); const cons = await allContacts(); const cfgO = await getConfig();
   const by = (arr, f) => arr.reduce((m, x) => { const k = f(x); m[k] = (m[k] || 0) + 1; return m; }, {});
   const clicks = cons.filter((c) => (c.history || []).some((h) => h.type === 'sandbox_click')).length;
   return {
@@ -559,6 +669,7 @@ async function overview() {
     sandboxVisitors: clicks, feedback: (await listFeedback()).length, openTasks: (await listTasks()).length,
     sentToday: { email: await sentToday('email'), sms: await sentToday('sms'), whatsapp: await sentToday('whatsapp') },
     suppressed: (await store.settings.keys('out:sup:')).length,
+    orgsByCountry: Object.fromEntries(Object.entries(by(orgs, (o) => o.cc || 'unknown')).sort((a, b) => b[1] - a[1]).slice(0, 25)), orgsByList: by(orgs.flatMap((o) => (o.lists || []).map((l) => ({ l }))), (x) => x.l), orgsHeld: orgs.filter((o) => reachOf(o, cfgO).held).length,
   };
 }
 /** Preview the first step for one contact without sending (Master Control "Preview"). */
@@ -664,7 +775,7 @@ async function addPartnerByAdmin(b) {
 
 module.exports = {
   TYPES, PERSONAS, PHONE_TYPES, classifyPhone, roleOf, ORG_STATUS, getConfig, setConfig, publicConfig,
-  seedOrgs, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
+  seedOrgs, seedCountries, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
   getReferrer, joinAsPartner, trackReferralClick, referralStats, introduce, addReward, referralOverview, addPartnerByAdmin,
   listSequences, enroll, pause, runDue, preview, listTasks, completeTask, trackClick, submitFeedback, listFeedback, overview, isSuppressed, suppress,
 };

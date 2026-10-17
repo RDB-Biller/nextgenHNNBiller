@@ -35,9 +35,22 @@
       <div class="field"><label>Sending hours (UTC) from</label><input id="ou_hf" type="number"/></div><div class="field"><label>to</label><input id="ou_ht" type="number"/></div></div>
     <p><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ou_on"/> Outreach ON (sweeps send due steps every 30 minutes)</label>
     <button class="primary" onclick="ouSaveCfg()">Save</button> <span class="muted" id="ou_cfgmsg"></span></p></div>
+  <div class="card" style="margin-bottom:14px"><h2>Country and index lists</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Add whole markets: Commonwealth countries, the French-, Portuguese-, Spanish-, Arabic-, Chinese- and Hindi-speaking markets, plus index lists such as the Ghana Club 100 and Fortune 500. Starter lists hold organisation names only (no people, no emails) and need checking against the source; use <b>Import a list</b> to load the full published ranking. Countries with strict direct-marketing law are <b>held</b> (no automated email/SMS) until you tick them as legally reviewed.</p>
+    <div class="row"><div class="field"><label>Load by pack</label><select id="cp_pack"></select></div>
+      <div class="field"><label>or one country</label><select id="cp_country"></select></div>
+      <div class="field" style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap"><button class="primary" onclick="cpLoad('pack')">Load pack</button><button onclick="cpLoad('country')">Load country</button><button onclick="cpLoad('commonwealth')">All Commonwealth</button><button onclick="cpLoad('all')">All countries</button></div></div>
+    <p class="muted" id="cp_msg" style="font-size:13px"></p><div id="cp_packs"></div>
+    <details style="margin:8px 0"><summary>Import a list (paste names, one per line, ranks are ignored)</summary>
+      <div class="row"><div class="field"><label>List id</label><input id="cpi_id" placeholder="fortune500, ghana-club-100, my-list"/></div><div class="field"><label>Country</label><select id="cpi_c"></select></div>
+        <div class="field"><label>Force type (optional)</label><select id="cpi_t"><option value="">Detect from the name</option>${opt(TYPES)}</select></div></div>
+      <textarea id="cpi_text" rows="6" style="width:100%" placeholder="1. Newmont Ghana Gold&#10;2. Scancom PLC&#10;..."></textarea>
+      <button onclick="cpImport()">Import</button> <span class="muted" id="cpi_msg"></span></details>
+    <h3 style="margin:10px 0 4px">Countries: reach and legal review</h3><div id="cp_countries"></div></div>
   <div class="card" style="margin-bottom:14px"><h2>Organisations</h2>
     <div class="row"><div class="field"><label>Type</label><select id="ou_ftype"><option value="">All</option>${opt(TYPES)}</select></div>
-      <div class="field"><label>Search</label><input id="ou_fq" placeholder="name or country"/></div>
+      <div class="field"><label>Country</label><select id="ou_fcc"></select></div><div class="field"><label>List</label><select id="ou_flist"></select></div>
+      <div class="field"><label>Search</label><input id="ou_fq" placeholder="name"/></div>
       <div class="field" style="display:flex;align-items:flex-end;gap:6px"><button onclick="ouOrgs()">Filter</button><button onclick="ouSeed()">Load seed lists</button></div></div>
     <div id="ou_orgs" style="margin-top:8px"></div>
     <div class="row" style="margin-top:8px"><div class="field"><label>Add organisation</label><input id="ou_on_name"/></div><div class="field"><label>Type</label><select id="ou_on_type">${opt(TYPES)}</select></div><div class="field"><label>Country</label><input id="ou_on_c"/></div>
@@ -85,7 +98,7 @@
     q('ou_ce').value = cfg.caps.email; q('ou_cs').value = cfg.caps.sms; q('ou_cw').value = cfg.caps.whatsapp; q('ou_hf').value = cfg.hours.from; q('ou_ht').value = cfg.hours.to; q('ou_on').checked = cfg.enabled;
     q('ou_cfgmsg').textContent = cfg.readyToSend ? 'Ready to send' + (cfg.emailConfigured ? '' : ' (email provider not configured: email will not go out)') : 'Missing: ' + cfg.missing.join(', ');
     q('ou_es').innerHTML = seqs.sequences.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-    await ouOrgs(); await ouContacts(); await ouTasks(); await ouFb(); await rfLoad();
+    await cpLoadMeta(); await ouOrgs(); await ouContacts(); await ouTasks(); await ouFb(); await rfLoad();
   });
   window.ouSaveCfg = guard(async () => {
     await api('/config', 'PUT', { senderName: q('ou_name').value, senderRole: q('ou_role').value, senderOrg: q('ou_org').value, replyTo: q('ou_reply').value, postalAddress: q('ou_addr').value, publicBaseUrl: q('ou_base').value, sandboxUrl: q('ou_sbx').value, enabled: q('ou_on').checked, caps: { email: q('ou_ce').value, sms: q('ou_cs').value, whatsapp: q('ou_cw').value }, hours: { from: q('ou_hf').value, to: q('ou_ht').value } });
@@ -93,9 +106,9 @@
   });
   window.ouSeed = guard(async () => { const r = await api('/seed', 'POST'); msg(`Added ${r.added} organisations (${r.total} total)`); ouLoad(); });
   window.ouOrgs = guard(async () => {
-    const r = await api('/orgs?pageSize=100&type=' + encodeURIComponent(q('ou_ftype').value) + '&q=' + encodeURIComponent(q('ou_fq').value));
+    const r = await api('/orgs?pageSize=100&type=' + encodeURIComponent(q('ou_ftype').value) + '&q=' + encodeURIComponent(q('ou_fq').value) + '&cc=' + encodeURIComponent(q('ou_fcc').value) + '&list=' + encodeURIComponent(q('ou_flist').value));
     ORGS = r.rows; q('ou_co').innerHTML = ORGS.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
-    q('ou_orgs').innerHTML = `<div class="muted" style="font-size:12px">${r.total} match (showing ${r.rows.length})</div><table><tr><th>Organisation</th><th>Type</th><th>Country</th><th>Status</th><th>Contacts</th></tr>${r.rows.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.type}</td><td>${esc(o.country)}</td><td>${o.status}</td><td>${o.contacts}</td></tr>`).join('')}</table>`;
+    q('ou_orgs').innerHTML = `<div class="muted" style="font-size:12px">${r.total} match (showing ${r.rows.length})</div><table><tr><th>Organisation</th><th>Type</th><th>Country</th><th>Language</th><th>Reach</th><th>Status</th><th>Contacts</th></tr>${r.rows.map((o) => `<tr><td>${esc(o.name)}<div class="muted" style="font-size:11px">${(o.lists || []).map(esc).join(' · ')}</div></td><td>${o.type}</td><td>${esc(o.country)}</td><td>${esc(o.lang || '')}</td><td>${o.reach && o.reach.held ? '<span title="' + esc(o.reach.reason) + '">⏸ held</span>' : '✉' + (o.reach && o.reach.sms === false ? '' : ' 💬') + ' ☎'}</td><td>${o.status}</td><td>${o.contacts}</td></tr>`).join('')}</table>`;
   });
   window.ouAddOrg = guard(async () => { await api('/orgs', 'POST', { name: q('ou_on_name').value, type: q('ou_on_type').value, country: q('ou_on_c').value }); q('ou_on_name').value = ''; ouOrgs(); });
   window.ouAddContact = guard(async () => {
@@ -147,4 +160,29 @@
   });
   window.rfAddPartner = guard(async () => { const r = await api('/referrals/partners', 'POST', { name: q('rf_pn').value, email: q('rf_pe').value, org: q('rf_po').value }); q('rf_pn').value = q('rf_pe').value = q('rf_po').value = ''; msg('Partner link: ' + r.pageLink); rfLoad(); });
   window.rfReward = guard(async (code) => { const note = prompt('What did you give this referrer?'); if (!note) return; await api(`/referrals/${code}/reward`, 'POST', { note }); rfLoad(); });
+  let CT = [];
+  window.cpLoadMeta = guard(async () => {
+    const [pk, ct] = await Promise.all([api('/packs'), api('/countries')]); CT = ct.countries;
+    const co = CT.map((c) => `<option value="${c.code}">${esc(c.name)}${c.orgs ? ' (' + c.orgs + ')' : ''}</option>`).join('');
+    q('cp_pack').innerHTML = pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${p.starterSize} starter, ${p.loaded} loaded)</option>`).join('');
+    q('cp_country').innerHTML = co; q('cpi_c').innerHTML = '<option value="">(none)</option>' + co;
+    const keepC = q('ou_fcc').value, keepL = q('ou_flist').value;
+    q('ou_fcc').innerHTML = '<option value="">All</option>' + co; q('ou_flist').innerHTML = '<option value="">All</option>' + pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); q('ou_fcc').value = keepC; q('ou_flist').value = keepL;
+    q('cp_packs').innerHTML = `<table><tr><th>Pack</th><th>Source</th><th>Starter</th><th>Loaded</th><th>Note</th></tr>${pk.packs.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.source ? '<a href="' + esc(p.source) + '" target="_blank" rel="noopener">source</a>' : ''}</td><td>${p.starterSize}</td><td>${p.loaded}</td><td class="muted" style="font-size:12px">${esc(p.note || '')}</td></tr>`).join('')}</table>`;
+    q('cp_countries').innerHTML = `<table><tr><th>Country</th><th>Languages</th><th>Level</th><th>Orgs</th><th>Contacts</th><th>Legally reviewed</th></tr>${CT.filter((c) => c.orgs || c.level === 'review').map((c) => `<tr><td>${esc(c.name)}${c.commonwealth ? ' <span class="muted">CW</span>' : ''}</td><td>${c.langs.join(', ')}</td><td>${c.level}${c.noColdSms ? ' · no cold SMS' : ''}</td><td>${c.orgs}</td><td>${c.contacts}</td><td>${c.level === 'review' ? `<input type="checkbox" ${c.approved ? 'checked' : ''} onchange="cpApprove('${c.code}', this.checked)"/>` : 'not needed'}</td></tr>`).join('')}</table>`;
+  });
+  window.cpApprove = guard(async (code, on) => {
+    const cfg = await api('/config'); const set = new Set(cfg.approvedCountries || []); on ? set.add(code) : set.delete(code);
+    if (on && !confirm('Only tick this once a lawyer has confirmed that business email and SMS outreach is acceptable in this country. Continue?')) { cpLoadMeta(); return; }
+    await api('/config', 'PUT', { approvedCountries: Array.from(set) }); msg('Saved'); cpLoadMeta();
+  });
+  window.cpLoad = guard(async (mode) => {
+    const body = mode === 'pack' ? { packs: [q('cp_pack').value] } : mode === 'country' ? { countries: [q('cp_country').value] } : mode === 'commonwealth' ? { commonwealth: true } : { all: true };
+    if (mode === 'all' && !confirm('Load every country? This adds well over a thousand organisations.')) return;
+    const r = await api('/packs/seed', 'POST', body); q('cp_msg').textContent = `Added ${r.added} organisations, updated ${r.merged} existing (${r.total} in total). Review the list before pitching.`; ouLoad();
+  });
+  window.cpImport = guard(async () => {
+    const r = await api('/packs/import', 'POST', { listId: q('cpi_id').value, country: q('cpi_c').value || undefined, type: q('cpi_t').value || undefined, text: q('cpi_text').value });
+    q('cpi_msg').textContent = `Read ${r.read}: added ${r.added}, already known ${r.known} (${r.tagged} newly tagged). ` + Object.entries(r.types).map(([k, v]) => k + ' ' + v).join(', '); ouLoad();
+  });
 })();
