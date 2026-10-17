@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Product Lab working group</title>
+<style>
+:root{--bg:#f6f8fa;--card:#fff;--ink:#17202b;--mut:#5b6675;--line:#d9dfe7;--acc:#0b6e4f;--acc2:#e6f3ee}
+@media(prefers-color-scheme:dark){:root{--bg:#10151b;--card:#18202a;--ink:#e8edf2;--mut:#9aa6b4;--line:#2a3542;--acc:#35c08f;--acc2:#12332a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card)}h1{margin:0;font-size:19px}h2{font-size:16px;margin:0 0 8px}.m{color:var(--mut);font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:12px 16px;display:grid;gap:14px;grid-template-columns:1fr}@media(min-width:900px){main{grid-template-columns:1.3fr 1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+input,textarea,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;margin:3px 0 8px}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}button.s{background:var(--acc2);color:var(--acc)}
+#thread{max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:8px}.msg{padding:8px 10px;border-radius:10px;background:var(--acc2);max-width:92%}.msg.mine{align-self:flex-end;background:var(--bg);border:1px solid var(--line)}
+.who{font-size:12px;color:var(--mut)}.orig{font-size:12px;color:var(--mut);cursor:pointer}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:10px;padding:0 7px;margin-right:4px;color:var(--mut)}
+.idea{border-top:1px solid var(--line);padding:8px 0}.idea b{display:block}#room{display:contents}.hide{display:none!important}.chal{background:var(--acc2);padding:8px 10px;border-radius:8px;margin:0 0 10px}
+</style></head><body>
+<header><h1 id="gname">Working group</h1><div class="m" id="gtopic"></div></header>
+<main id="app"><div class="card" id="joinbox" style="grid-column:1/-1;max-width:520px">
+  <h2>Join this working group</h2><p class="m">Write in your own language; everyone reads the group in theirs. Other members see only your first name, organisation, country and language, never your email.</p>
+  <label>Your name<input id="jn"></label><label>Email (not shown to anyone)<input id="je" type="email"></label><label>Organisation<input id="jo"></label>
+  <label>Country<input id="jc" placeholder="Ghana, France, Brazil..."></label><label>Language<select id="jl"></select></label><label>Your role<select id="jr"></select></label>
+  <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="jk" style="width:auto;margin-top:5px"> I agree to take part and to share my first name, organisation, country and language with the group.</label>
+  <button id="jb">Join</button><p class="m" id="jm" aria-live="polite"></p></div>
+<section id="room" class="hide"></section></main>
+<script>
+(function(){
+var code=location.pathname.split('/').filter(Boolean).pop(), qs=new URLSearchParams(location.search), TK='hnn_lab_'+code, token='';
+try{token=localStorage.getItem(TK)||''}catch(e){}
+var LANGS={en:'English',fr:'Français',pt:'Português',es:'Español',ar:'العربية',sw:'Kiswahili',ha:'Hausa',yo:'Yorùbá',tw:'Twi',gaa:'Ga',de:'Deutsch',hi:'हिन्दी',zh:'中文'};
+function $(i){return document.getElementById(i)}function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function api(path,body){var o=body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{};return fetch('/o/api/lab/'+code+path,o).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Error');return j})})}
+$('jl').innerHTML=Object.keys(LANGS).map(function(k){return '<option value="'+k+'">'+LANGS[k]+'</option>'}).join('');
+$('jr').innerHTML=['product','engineering','claims','compliance','clinical','sales','leadership','other'].map(function(k){return '<option>'+k+'</option>'}).join('');
+try{var nl=(navigator.language||'en').slice(0,2);if(LANGS[nl])$('jl').value=nl}catch(e){}
+api('').then(function(g){$('gname').textContent=g.name;$('gtopic').textContent=g.topic+(g.languages.length?'  ·  '+g.members+' members, '+g.languages.map(function(l){return LANGS[l]||l}).join(', '):'');document.title=g.name}).catch(function(){});
+$('jb').onclick=function(){$('jm').textContent='Joining...';api('/join',{name:$('jn').value,email:$('je').value,org:$('jo').value,country:$('jc').value,lang:$('jl').value,role:$('jr').value,consent:$('jk').checked,ref:qs.get('ref')||''}).then(function(o){token=o.token;try{localStorage.setItem(TK,token)}catch(e){}start()}).catch(function(e){$('jm').textContent=e.message})};
+var timer;
+function start(){ $('joinbox').classList.add('hide'); $('room').classList.remove('hide'); load(); clearInterval(timer); timer=setInterval(function(){ if(!document.hidden && !document.activeElement.matches('textarea,input')) load()},15000)}
+function load(){api('/view?m='+encodeURIComponent(token)).then(render).catch(function(e){if(/join/i.test(e.message)){token='';try{localStorage.removeItem(TK)}catch(x){}location.reload()}})}
+var draft='';
+function render(v){
+  var chal=v.group.challenge?'<div class="chal"><b>This week\'s challenge</b><br>'+esc(v.group.challenge)+'</div>':'';
+  var ros=v.roster.map(function(m){return '<span class="tag" title="'+esc(m.role)+'">'+esc(m.name)+(m.org?' · '+esc(m.org):'')+(m.cc?' · '+esc(m.cc):'')+' · '+esc(LANGS[m.lang]||m.lang)+(m.invitedBy?' (invited by '+esc(m.invitedBy)+')':'')+'</span>'}).join('');
+  var thread=v.messages.map(function(m){return '<div class="msg'+(m.mine?' mine':'')+'"><div class="who">'+esc(m.from.name)+(m.from.org?' · '+esc(m.from.org):'')+(m.from.cc?' · '+esc(m.from.cc):'')+'</div>'+esc(m.text)+(m.translated?'<div class="orig" data-o="'+esc(m.original)+'">translated from '+esc(LANGS[m.lang]||m.lang)+' (show original)</div>':'')+'</div>'}).join('')||'<p class="m">No messages yet. Say hello in your own language.</p>';
+  var ideas=v.ideas.map(function(i){return '<div class="idea"><b>'+esc(i.title)+'</b><span class="m">'+esc(i.from.name)+(i.from.org?' · '+esc(i.from.org):'')+' · '+esc(i.status)+'</span>'+(i.problem?'<div><span class="m">Problem:</span> '+esc(i.problem)+'</div>':'')+(i.proposal?'<div><span class="m">Idea:</span> '+esc(i.proposal)+'</div>':'')+(i.metric?'<div><span class="m">We will know it works when:</span> '+esc(i.metric)+'</div>':'')+'<button class="s" data-v="'+esc(i.id)+'">'+(i.voted?'Voted':'Vote')+' · '+i.votes+'</button></div>'}).join('')||'<p class="m">No ideas yet.</p>';
+  $('room').innerHTML='<div class="card">'+chal+'<h2>Conversation</h2>'+(v.translatorOn?'':'<p class="m">Automatic translation is not switched on yet, so messages appear in the language they were written in.</p>')+'<div id="thread">'+thread+'</div><textarea id="pt" rows="3" placeholder="Write in '+esc(LANGS[v.me.lang]||v.me.lang)+' (or any language)"></textarea><button id="pb">Send</button></div>'+
+   '<div><div class="card"><h2>Ideas</h2>'+ideas+'<details><summary>Suggest an idea</summary><input id="it" placeholder="Short title"><textarea id="ip" rows="2" placeholder="What problem does it solve?"></textarea><textarea id="ib" rows="2" placeholder="What would you build?"></textarea><input id="im" placeholder="How will we know it works?"><button id="ia">Add idea</button></details></div>'+
+   '<div class="card" style="margin-top:14px"><h2>Members</h2><div>'+ros+'</div><h2 style="margin-top:12px">Bring a colleague</h2><p class="m">Invite someone from another office or team. When they join through your link, you are credited and the group shows who invited whom.</p><input readonly id="il" value="'+esc(v.me.inviteLink)+'"><button class="s" id="ic">Copy link</button></div></div>';
+  var th=$('thread');th.scrollTop=th.scrollHeight;$('pt').value=draft;$('pt').oninput=function(){draft=this.value};
+  $('pb').onclick=function(){var t=$('pt').value;if(!t.trim())return;api('/post',{m:token,text:t}).then(function(){draft='';load()}).catch(function(e){alert(e.message)})};
+  $('ia').onclick=function(){api('/idea',{m:token,title:$('it').value,problem:$('ip').value,proposal:$('ib').value,metric:$('im').value}).then(load).catch(function(e){alert(e.message)})};
+  $('ic').onclick=function(){$('il').select();try{navigator.clipboard.writeText($('il').value)}catch(e){document.execCommand('copy')}};
+  [].forEach.call(document.querySelectorAll('[data-v]'),function(b){b.onclick=function(){api('/vote',{m:token,ideaId:b.getAttribute('data-v')}).then(load)}});
+  [].forEach.call(document.querySelectorAll('.orig'),function(o){o.onclick=function(){alert(o.getAttribute('data-o'))}});
+}
+if(qs.get('ref')){try{sessionStorage.setItem('hnn_lab_ref',qs.get('ref'))}catch(e){}}
+if(token)start();
+})();
+</script></body></html>

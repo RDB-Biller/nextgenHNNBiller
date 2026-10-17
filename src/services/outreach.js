@@ -39,7 +39,7 @@ const rid = (p) => `${p}_${crypto.randomBytes(5).toString('hex')}`;
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 32);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'other'];
+const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'pharmacy', 'other'];
 const PERSONAS = ['ceo', 'cto', 'cmo', 'product', 'sales', 'claims', 'ops', 'general', 'comms', 'partnerships', 'other'];
 const PHONE_TYPES = ['mobile', 'landline', 'tollfree', 'unknown'];
 
@@ -117,7 +117,7 @@ const DEFAULTS = {
   approvedCountries: [],
   referral: {
     enabled: false, maxIntrosPerDay: 5, terms: '',
-    points: { replied: 0, sandbox: 1, meeting: 3, partner: 10 },
+    points: { replied: 0, sandbox: 1, meeting: 3, partner: 10, contributed: 1, labJoined: 1 },
     tiers: [{ at: 1, label: 'Founding Referrer', reward: '' }, { at: 5, label: 'Sandbox Champion', reward: '' }, { at: 15, label: 'Ecosystem Partner', reward: '' }],
   },
 };
@@ -317,6 +317,7 @@ function classifyName(name) {
   const n = String(name || '');
   if (/\b(insurance|insurer|assurance|assurances|assurer|seguros|seguradora|versicherung|assicurazioni|takaful|reinsurance|reassurance|life|medical aid|medical scheme|health plan|hmo|mutuelle|mutualit|mutual)\b/i.test(n) && !/\bbank\b/i.test(n)) return 'insurer';
   if (/\b(bank|banque|banco|banca|bancorp|bancshares|sparkasse|building society|savings|microfinance|mobile money|momo|payments?|credit union)\b/i.test(n)) return 'bank';
+  if (/\b(pharmacy|pharmacies|pharmacie|farmacia|chemist|chemists|pharmaceuticals?)\b/i.test(n)) return 'pharmacy';
   if (/\b(hospital|hopital|hôpital|clinic|clinique|cl[ií]nica|medical cent(er|re)|teaching hospital|krankenhaus|klinik|ospedale)\b/i.test(n)) return 'hospital';
   if (/\b(emr|ehr|health information|health it|medical software|healthtech)\b/i.test(n)) return 'ehr';
   if (/\b(claims|adjudication)\b/i.test(n)) return 'adjudication';
@@ -330,7 +331,7 @@ async function listPacks() {
   const seedCount = {}; for (const sd of countrySeed.orgs) { const c = countries.find(sd.cc); if (!c) continue; for (const t of new Set([...sd.tags, ...derivedTags(c)])) seedCount[t] = (seedCount[t] || 0) + 1; }
   const loaded = {}; for (const o of orgs) for (const t of o.lists || []) loaded[t] = (loaded[t] || 0) + 1;
   void derived;
-  const cbSize = { [coreBank.GROUP]: coreBank.vendors.length };
+  const cbSize = { [coreBank.GROUP]: coreBank.vendors.length, 'ghana-healthcare': require('../data/ghanaHealthSeed').rows.length };
   const arSize = { [AR.all]: africaReport.banks.length + africaReport.insurers.length, [AR.groups]: africaReport.banks.filter((b) => b[3] === 'group').length, [AR.banks]: africaReport.banks.filter((b) => b[3] !== 'group').length, [AR.ins]: africaReport.insurers.length };
   return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: cbSize[p.id] || arSize[p.id] || seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
 }
@@ -530,6 +531,7 @@ const segmentOf = (org, contact) => {
     case 'ehr': return 'ehr';
     case 'adjudication': return 'adjudication';
     case 'hospital': return 'hospital';
+    case 'pharmacy': return 'pharmacy';
     default: return 'bank';
   }
 };
@@ -557,6 +559,10 @@ const T = {
   adjudication: {
     subject: 'Partner on adjudication and patient finance: {org} + HNN Biller',
     pitch: 'an adjudication and settlement layer that can run beside or inside your platform, with rule packs, optional AI assistance, APIs and webhooks, plus embedded micro-credit and savings for the patient at the point of care. We would like your feedback on what is missing.',
+  },
+  pharmacy: {
+    subject: 'Price quotes, claims and patient credit for {org}: free sandbox',
+    pitch: 'a pharmacy workbench that quotes medicines against payer price lists, supports claims and prior approval, and lets patients pay with savings or an InsureCredit micro-loan, with SMS/WhatsApp receipts.',
   },
   hospital: {
     subject: 'Bill faster, get claims paid, offer patients credit: sandbox for {org}',
@@ -643,6 +649,7 @@ async function compose(c, org, step, cfg) {
   }
   if (step.channel === 'email' && cfg.referral && cfg.referral.enabled) body += `\n\nKnow a colleague or partner who should see this? Share your link or introduce them: ${urls.referral}`;
   if (step.channel === 'email') body += `\n\n--\nYou are receiving this business message because your role at ${org.name} appears on a public page (${c.source}). ${cfg.senderOrg}, ${cfg.postalAddress}.\nNot relevant? Unsubscribe in one click: ${urls.unsub}`;
+  if ((step.channel === 'sms' || step.channel === 'whatsapp') && cfg.referral && cfg.referral.enabled) body += `\nKnow someone who should see this? ${urls.referral}`;
   if (step.channel === 'linkedin') body = body.slice(0, 290);
   return { channel: step.channel, subject, body, translated, lang: translated ? c.lang : 'en', links: urls };
 }
@@ -804,6 +811,7 @@ async function referralStats(code) {
   const cfg = await getConfig(); const rc = cfg.referral; const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
   const rows = []; let points = 0; const partnerPaid = new Set();
   for (const i of await introsOf(r.code)) {
+    if (i.kind === 'contribution' || i.kind === 'lab') { const st = i.kind === 'lab' ? 'labJoined' : 'contributed'; const pt = rc.points[st] || 0; points += pt; rows.push({ first: firstWord(i.name), org: i.orgName || '', stage: st, points: pt, at: i.at }); continue; }
     const c = await store.settings.get(CON + i.contactId); const org = orgs.get(i.orgId); const stage = stageOf(c, org);
     let pts = rc.points[stage] || 0;
     if (stage === 'partner') { if (partnerPaid.has(i.orgId)) pts = 0; else partnerPaid.add(i.orgId); } // partner points once per organisation
@@ -837,6 +845,21 @@ async function introduce(code, b = {}) {
   await store.settings.set(RFL + rid('i'), { code: r.code, contactId: c.id, orgId: org.id, name: c.name, at: now() });
   return { ok: true };
 }
+/** A referrer record for anyone who identifies themselves (found by email, created if new); works whether or not the public programme page is open. */
+async function ensurePartner(b = {}) {
+  const name = String(b.name || '').trim().slice(0, 100); if (!name) throw err(422, 'name_required');
+  const em = String(b.email || '').trim().toLowerCase(); if (!EMAIL_RE.test(em)) throw err(422, 'email_invalid');
+  for (const k of await store.settings.keys(REF)) { const r = await store.settings.get(k); if (r && r.kind === 'partner' && r.email === em) { if (b.org && !r.org) { r.org = String(b.org).slice(0, 120); await store.settings.set(REF + r.code, r); } return r; } }
+  const rec = { code: 'p' + crypto.randomBytes(5).toString('hex'), kind: 'partner', name, email: em, org: String(b.org || '').trim().slice(0, 120), clicks: 0, rewards: [], createdAt: now() };
+  await store.settings.set(REF + rec.code, rec); return rec;
+}
+/** Record a credited event (a verified contribution, a working-group join) against a referrer so points and tiers include it. */
+async function creditReferrer(code, { kind, name, orgName, ref }) {
+  const r = await getReferrer(code); if (!r) return false;
+  await store.settings.set(RFL + rid('i'), { code: r.code, kind, name: name || '', orgName: orgName || '', ref: ref || '', contactId: '', orgId: '', at: now() }); return true;
+}
+/** Mark a contact as coming from a referrer / contributor and record its provenance. */
+async function stampContact(id, patch) { const c = await getContact(id); Object.assign(c, patch); note(c, { type: 'provenance', ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 80) : v])) }); await saveContact(c); return conPublic(c); }
 async function addReward(code, text, by) {
   const r = await getReferrer(code); if (!r) throw err(404, 'referrer_not_found');
   r.rewards = (r.rewards || []).concat({ at: now(), note: String(text || 'reward given').slice(0, 300), by: by || null }); await store.settings.set(REF + r.code, r); return r.rewards;
@@ -857,6 +880,7 @@ async function addPartnerByAdmin(b) {
 module.exports = {
   TYPES, PERSONAS, PHONE_TYPES, classifyPhone, roleOf, ORG_STATUS, getConfig, setConfig, publicConfig,
   seedOrgs, seedCountries, seedAfricaReport, seedCoreBanking, addOffice, removeOffice, officesReach, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
+  ensurePartner, creditReferrer, stampContact, _x: { allOrgs, saveOrgs, getContact, saveContact, normName, rid, now, err, FREE_MAIL, EMAIL_RE, canonPhone, validPhone, derivedTags, reachOf, geoOf, cleanOffice },
   getReferrer, joinAsPartner, trackReferralClick, referralStats, introduce, addReward, referralOverview, addPartnerByAdmin,
   listSequences, enroll, pause, runDue, preview, listTasks, completeTask, trackClick, submitFeedback, listFeedback, overview, isSuppressed, suppress,
 };
