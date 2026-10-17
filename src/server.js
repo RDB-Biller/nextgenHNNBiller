@@ -34,6 +34,7 @@ const solutionsApiRoutes = require('./routes/solutionsApi');
 const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
 const erheatRoutes = require('./routes/erheat');
+const partnerRoutes = require('./routes/partners');
 const erheat = require('./services/erheat');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
@@ -102,6 +103,7 @@ app.use('/insurecredit-hooks', creditHooks.hooks);
 app.use('/erheat/api', erheatRoutes.api);
 app.use('/erheat', erheatRoutes.pages);
 app.use('/erheat-hooks', erheatRoutes.hooks);
+app.use('/partner-api', partnerRoutes.api);
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 // Public trial sign-up — the link a prospecting campaign's "YES" reply sends
@@ -120,6 +122,7 @@ app.use('/sms-hooks', smsHooksRoutes);
 app.use('/api/platform/i18n', authPlatform, platformI18n);
 app.use('/api/platform/outreach', authPlatform, outreachRoutes.admin);
 app.use('/api/platform/erheat', authPlatform, erheatRoutes.admin);
+app.use('/api/platform/partners', authPlatform, partnerRoutes.admin);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);

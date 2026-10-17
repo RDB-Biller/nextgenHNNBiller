@@ -423,7 +423,28 @@ async function sweep() {
   return { expired: n };
 }
 
+// ------------------------------------------------------------------ partner console
+/** What a sector partner may see. 'mine' = requests that name one of the partner's phones as payee or verifier;
+ *  'all' (granted by Master Control) = every request in the partner's lines. Borrowers stay masked either way. */
+async function partnerList({ lines: allowed = [], phones = [], all = false, status } = {}) {
+  const mine = new Set(phones.map(dial)); const rows = [];
+  for (const k of await store.settings.keys(APP)) {
+    const a = await store.settings.get(k);
+    if (!a || !allowed.includes(a.line) || (status && a.status !== status)) continue;
+    const you = mine.has(a.payee.phone) || a.verifiers.some((v) => mine.has(v.phone));
+    if (!all && !you) continue;
+    const l = LINES[a.line];
+    rows.push({ appNo: a.appNo, line: a.line, lineLabel: l.label, status: a.status, amount: a.amount, verifiedAmount: a.verifiedAmount, approvedAmount: (a.lender || {}).approvedAmount || null,
+      borrower: first(a.borrower.name), phone: mask(a.borrower.phone), payee: { name: a.payee.name, you: mine.has(a.payee.phone) },
+      verifiers: a.verifiers.map((v) => ({ label: v.label, status: v.status, you: mine.has(v.phone) })), fields: l.fields.filter((f) => a.evidence[f.key] !== undefined).map((f) => ({ label: f.label, value: a.evidence[f.key] })),
+      voucher: a.voucher ? { redeemed: !!a.voucher.redeemedAt, expiresAt: a.voucher.expiresAt } : null, named: you, flags: all ? a.flags : [], createdAt: a.createdAt });
+  }
+  rows.sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  const byStatus = {}; let amount = 0; for (const r of rows) { byStatus[r.status] = (byStatus[r.status] || 0) + 1; if (!TERMINAL.includes(r.status)) amount += r.amount; }
+  return { total: rows.length, byStatus, openAmount: round2(amount), rows: rows.slice(0, 200) };
+}
+
 module.exports = {
   HARD_CAP, LINES, CONSENT_TEXT, getConfig, setConfig, rotateSecret, checkSecret, hookUrls, lines, passport, apply, resendVerifier, myApps, getMine, cancel,
-  verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, listAll, adminGet, simulate, sweep, _setPostImplForTests,
+  verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, partnerList, listAll, adminGet, simulate, sweep, _setPostImplForTests,
 };
