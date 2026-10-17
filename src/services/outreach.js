@@ -223,7 +223,7 @@ const countryTable = async () => {
 };
 function derivedTags(c) {
   const t = [];
-  if (c.commonwealth) t.push('commonwealth'); const l0 = c.langs[0];
+  if (c.commonwealth) t.push('commonwealth'); if (c.code === 'GH') t.push('ghana-health-finance'); const l0 = c.langs[0];
   if (l0 === 'fr') t.push('francophone'); if (l0 === 'pt') t.push('lusophone'); if (l0 === 'es') t.push('hispanic'); if (l0 === 'ar' || ['DZ', 'MA', 'TN'].includes(c.code)) t.push('arabic');
   if (c.region === 'Asia') t.push('asia'); return t;
 }
