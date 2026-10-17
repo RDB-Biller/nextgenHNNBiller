@@ -34,6 +34,8 @@ const tokenIn = (m) => /erheat\/v\/([a-z0-9]+)/.exec(m)[1];
   let e = await rej(erheat.apply(ama, { line: 'rent', amount: 300 })); ok(e && e.status === 404, 'closed until the operator opens it');
   await erheat.setConfig({ enabled: true });
   e = await rej(erheat.apply(ama, { line: 'rent', amount: 100 })); ok(e && e.status === 403 && /verify your phone/.test(e.message), 'an unverified phone cannot borrow');
+  await accounts.register({ first_name: 'Efua', last_name: 'Mail', email: 'efua@mail.com', password: 'secret1' }); const efua = await accounts.byEmail('efua@mail.com');
+  e = await rej(erheat.apply(efua, { line: 'rent', amount: 100 })); ok(e && e.status === 403 && /mobile number/.test(e.message), 'an email-only account must add a mobile number before it can borrow');
   await erheat.setConfig({ requireVerifiedPhone: false });
   const cat = await erheat.lines(ama.phone);
   ok(cat.lines.length === 6 && cat.lines.find((l) => l.key === 'rent').enabled && cat.lines.find((l) => l.key === 'health').enabled && !cat.lines.find((l) => l.key === 'education').enabled && cat.lines.find((l) => l.key === 'education').comingSoon, 'six lines; Rent and Health open, the rest coming soon');

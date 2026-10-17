@@ -12,6 +12,10 @@ const messagingAccount = require('../src/services/messagingAccount');
 const sav = require('../src/services/savingsPlans');
 const patientApi = require('../src/routes/patientApi');
 const accounts = require('../src/services/patientAccounts');
+const emailSvc = require('../src/services/email');
+process.env.EMAIL_PROVIDER = 'resend'; process.env.EMAIL_API_KEY = 'test'; process.env.EMAIL_FROM = 'noreply@hnn.test';
+const mails = [];
+emailSvc._setRequestImplForTests(async (url, opts) => { const b = JSON.parse(opts.body); mails.push({ to: [].concat(b.to)[0], text: b.text || '' }); return { status: 200, body: JSON.stringify({ id: 'em_' + mails.length }) }; });
 
 let a = 0;
 const ok = (cond, label) => { a++; if (!cond) { console.error(`FAIL #${a}: ${label}`); process.exitCode = 1; } else console.log(`ok  : ${label}`); };
@@ -201,6 +205,37 @@ const lastCode = () => /\b(\d{6})\b/.exec(sms[sms.length - 1].message)[1];
   // CORS preflight for the browser app
   const pre = await fetch(base + '/patient/login', { method: 'OPTIONS' });
   ok(pre.status === 204 && /Authorization/.test(pre.headers.get('access-control-allow-headers') || ''), 'CORS preflight allows the Authorization header');
+
+
+  // ---- email as an alternative way to open an account (Master Control can make the phone mandatory again) ----
+  let cfgR = await (await fetch(base + '/patient/auth_options')).json(); ok(cfgR.result.requirePhone === false && cfgR.result.emailSignup === true, 'default: email sign-up is allowed, phone not mandatory');
+  let bad = await fetch(base + '/patient/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: 'Esi', last_name: 'Owusu', password: 'secret1' }) }); ok(bad.status === 422, 'sign-up needs a phone or an email');
+  bad = await fetch(base + '/patient/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: 'Esi', last_name: 'Owusu', email: 'not-an-email', password: 'secret1' }) }); ok(bad.status === 422, 'a malformed email is refused');
+  let er = await fetch(base + '/patient/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: 'Esi', last_name: 'Owusu', email: 'Esi.Owusu@Mail.com', password: 'secret1', source: 'erheat' }) }); let ej = await er.json();
+  ok(er.status === 201 && ej.result.email === 'esi.owusu@mail.com' && !ej.result.phone && ej.result.emailVerified === false && !JSON.stringify(ej).includes('passwordHash'), 'an account opens with an email only (email lower-cased, no phone)');
+  er = await fetch(base + '/patient/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: 'X', last_name: 'Y', email: 'ESI.OWUSU@mail.com', password: 'secret1' }) }); ok(er.status === 409, 'the same email cannot open a second account');
+  er = await fetch(base + '/patient/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'esi.owusu@mail.com', password: 'wrong' }) }); ok(er.status === 401, 'wrong password refused for an email login');
+  er = await fetch(base + '/patient/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'ESI.owusu@mail.com', password: 'secret1' }) }); ej = await er.json(); ok(er.status === 200 && ej.result.tokens[0].token, 'signs in with the email as the identifier');
+  const etok = ej.result.tokens[0].token; const EH = { Authorization: 'Bearer ' + etok, 'Content-Type': 'application/json' };
+  let sv = await fetch(base + '/patient/email/start', { method: 'POST', headers: EH }); let sj = await sv.json(); ok(sv.status === 200 && sj.result.sent && mails.length === 1 && mails[0].to === 'esi.owusu@mail.com' && /\b\d{6}\b/.test(mails[0].text), 'a confirmation code is emailed');
+  sv = await fetch(base + '/patient/email/start', { method: 'POST', headers: EH }); ok(sv.status === 429, 'codes cannot be requested back to back');
+  const ecode = /\b(\d{6})\b/.exec(mails[0].text)[1];
+  let ve = await fetch(base + '/patient/verify_email', { method: 'PATCH', headers: EH, body: JSON.stringify({ code: ecode === '000000' ? '111111' : '000000' }) }); ok(ve.status === 401, 'a wrong email code is refused');
+  ve = await fetch(base + '/patient/verify_email', { method: 'PATCH', headers: EH, body: JSON.stringify({ code: ecode }) }); let vj = await ve.json(); ok(ve.status === 200 && vj.result.emailVerified === true, 'the right code confirms the email');
+  ve = await fetch(base + '/patient/verify_email', { method: 'PATCH', headers: EH, body: JSON.stringify({ code: ecode }) }); ok(ve.status === 401, 'a used code cannot be reused');
+  // adding a mobile number later (needed before borrowing)
+  const newPhone = '+233241119999'; await sav.startVerification(newPhone); const chk2 = await sav.verifyAndReceipt(newPhone, lastCode());
+  let ap = await fetch(base + '/patient/add_phone', { method: 'PATCH', headers: EH, body: JSON.stringify({ phone: newPhone, ...chk2 }) }); let aj = await ap.json(); ok(ap.status === 200 && aj.result.phone === newPhone && aj.result.phoneVerified === true, 'an email account adds and proves its mobile number');
+  ap = await fetch(base + '/patient/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0241119999', password: 'secret1' }) }); ok(ap.status === 200, 'after that the phone also signs in');
+  // password reset by email
+  let fp = await fetch(base + '/patient/forgot_password', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'esi.owusu@mail.com' }) }); ok(fp.status === 200 && mails.length === 2 && /reset code is (\d{6})/.test(mails[1].text), 'a reset code is emailed');
+  const rc = /reset code is (\d{6})/.exec(mails[1].text)[1]; fp = await fetch(base + '/patient/reset_password?code=' + rc, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'newsecret1' }) }); ok(fp.status === 200, 'the emailed code resets the password');
+  fp = await fetch(base + '/patient/forgot_password', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'nobody@mail.com' }) }); ok(fp.status === 200 && mails.length === 2, 'an unknown email gets the same answer and no email');
+  // Master Control makes the phone mandatory again
+  await accounts.setAuthConfig({ requirePhone: true }); cfgR = await (await fetch(base + '/patient/auth_options')).json(); ok(cfgR.result.requirePhone === true && cfgR.result.emailSignup === false, 'Master Control can require the mobile phone again');
+  bad = await accounts.register({ first_name: 'Kojo', last_name: 'Ansah', email: 'kojo@mail.com', password: 'secret1' }).then(() => null, (e) => e); ok(bad && bad.status === 422 && /mobile phone/.test(bad.message), 'with the phone required, an email-only sign-up is refused');
+  bad = await fetch(base + '/patient/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'esi.owusu@mail.com', password: 'newsecret1' }) }); ok(bad.status === 200, 'existing email accounts can still sign in');
+  await accounts.setAuthConfig({ requirePhone: false });
 
   server.close();
   console.log(`\nPATIENT ACCOUNTS CHECK: ${a} assertions ${process.exitCode ? 'WITH FAILURES' : 'passed'}`);

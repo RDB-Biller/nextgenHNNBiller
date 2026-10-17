@@ -183,8 +183,8 @@ async function apply(account, b = {}) {
   const cfg = await getConfig(); if (!cfg.enabled) throw err(404, 'ERHEAT Shield is not open yet.');
   const line = LINES[b.line]; if (!line) throw err(422, 'Choose a loan type.');
   const lc = cfg.lines[b.line]; if (!lc.enabled) throw err(409, `${line.label} loans are coming soon.`);
+  const borrowerPhone = dial(account.phone); if (!validPhone(borrowerPhone)) throw err(403, 'Add and confirm your mobile number before you borrow. Lenders pay and contact you on it.');
   if (cfg.requireVerifiedPhone && !account.phoneVerified) throw err(403, 'Please verify your phone number first.');
-  const borrowerPhone = dial(account.phone); if (!validPhone(borrowerPhone)) throw err(422, 'Your account needs a valid phone number.');
   const mine = await appsOfPhone(borrowerPhone); const pass = passportOf(mine, cfg);
   const amount = round2(b.amount); const cap = Math.min(lc.cap, cfg.hardCap, pass.ceiling);
   if (!(amount >= lc.min)) throw err(422, `The smallest amount is GHS ${lc.min}.`);

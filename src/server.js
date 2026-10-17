@@ -35,6 +35,7 @@ const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
 const erheatRoutes = require('./routes/erheat');
 const partnerRoutes = require('./routes/partners');
+const patientAuthAdmin = require('./routes/patientAuthAdmin');
 const erheat = require('./services/erheat');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
@@ -123,6 +124,7 @@ app.use('/api/platform/i18n', authPlatform, platformI18n);
 app.use('/api/platform/outreach', authPlatform, outreachRoutes.admin);
 app.use('/api/platform/erheat', authPlatform, erheatRoutes.admin);
 app.use('/api/platform/partners', authPlatform, partnerRoutes.admin);
+app.use('/api/platform/patient-auth', authPlatform, patientAuthAdmin);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);

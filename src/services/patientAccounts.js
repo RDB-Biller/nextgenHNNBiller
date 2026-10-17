@@ -5,6 +5,7 @@ const store = require('../store');
 const messaging = require('./messaging');
 const i18n = require('./i18n');
 const savings = require('./savingsPlans');
+const email = require('./email');
 
 /**
  * Patient accounts for the Afriyie / TrimesterSave app, hosted by the Biller so the whole product runs on
@@ -70,6 +71,19 @@ async function byPhone(phoneRaw) {
 }
 const save = (acct) => store.settings.set(keyOf(acct._id), acct);
 
+// ---- sign-up rules (Master Control): is a mobile phone mandatory, or may people open an account with an email address? ----
+const CFG_KEY = 'pacct:cfg';
+async function authConfig() { const c = (await store.settings.get(CFG_KEY)) || {}; return { requirePhone: c.requirePhone === true, emailSignup: c.requirePhone !== true, updatedAt: c.updatedAt || null }; }
+async function setAuthConfig({ requirePhone } = {}) { const cur = await authConfig(); const next = { requirePhone: requirePhone === undefined ? cur.requirePhone : !!requirePhone, updatedAt: iso() }; await store.settings.set(CFG_KEY, next); return authConfig(); }
+const normEmail = (e) => String(e || '').trim().toLowerCase();
+const emailKey = (e) => `pacct:email:${normEmail(e)}`;
+async function byEmail(raw) { const e = normEmail(raw); if (!email.isEmail(e)) return null; const idx = await store.settings.get(emailKey(e)); return idx ? byId(idx.id) : null; }
+/** Sign-in identifier: an email address, or a phone number. */
+async function byLogin({ identifier, phone, email: em } = {}) {
+  const id = String(identifier || em || phone || '').trim();
+  return id.includes('@') ? byEmail(id) : byPhone(id);
+}
+
 /** What the app sees: never the hash, budgets or vitals arrays. */
 function publicUser(a, extra = {}) {
   const { passwordHash, budgets, vitals, appointments, notifications, files, ...rest } = a;
@@ -80,27 +94,38 @@ async function session(a) {
   return publicUser(a, { tokens: [{ token }] });
 }
 
-async function register({ first_name, last_name, phone, password, language, source } = {}) {
-  const p = dial(phone);
-  if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
+async function register({ first_name, last_name, phone, email: em, password, language, source } = {}) {
+  const cfg = await authConfig();
+  const hasPhone = String(phone || '').trim() !== ''; const hasEmail = String(em || '').trim() !== '';
+  if (cfg.requirePhone && !hasPhone) throw err(422, 'Please enter your mobile phone number');
+  if (!hasPhone && !hasEmail) throw err(422, 'Please enter a mobile phone number or an email address');
+  const p = hasPhone ? dial(phone) : '';
+  if (hasPhone && !validPhone(p)) throw err(422, 'Please enter a valid phone number');
+  const e = hasEmail ? normEmail(em) : '';
+  if (hasEmail && !email.isEmail(e)) throw err(422, 'Please enter a valid email address');
   if (!String(first_name || '').trim() || !String(last_name || '').trim()) throw err(422, 'Please enter your first and last name');
   if (String(password || '').length < 6) throw err(422, 'Your password must be at least 6 characters');
-  if (await byPhone(p)) throw err(409, 'An account with this phone number already exists. Sign in instead.');
+  if (hasPhone && (await byPhone(p))) throw err(409, 'An account with this phone number already exists. Sign in instead.');
+  if (hasEmail && (await byEmail(e))) throw err(409, 'An account with this email address already exists. Sign in instead.');
   const a = {
     _id: `pt_${crypto.randomBytes(9).toString('hex')}`, first_name: String(first_name).trim(), last_name: String(last_name).trim(),
-    phone: p, passwordHash: hashPassword(password), phoneVerified: false, createdAt: iso(), budgets: [], vitals: [],
+    passwordHash: hashPassword(password), phoneVerified: false, emailVerified: false, createdAt: iso(), budgets: [], vitals: [],
   };
+  if (hasPhone) a.phone = p;
+  if (hasEmail) { a.email = e; a.emailLogin = true; }
   if (language && i18n.isKnown(language)) a.language = i18n.normalise(language);
-  if (source === 'erheat') await notify(a, { title: 'Welcome to ER HEAT', message: 'Your account is ready. Verify your phone, then ask for an emergency loan for rent, health, school fees, energy, food or travel.', kind: 'welcome' });
-  else await notify(a, { title: 'Welcome to TrimesterSave', message: 'Your account is ready. Verify your phone, then start a savings plan, keep your records and book your visits.', kind: 'welcome' });
-  await store.settings.set(phoneKey(p), { id: a._id });
+  const how = hasPhone ? 'Verify your phone' : 'Confirm your email';
+  if (source === 'erheat') await notify(a, { title: 'Welcome to ER HEAT', message: `Your account is ready. ${how}${hasPhone ? '' : ' and add a mobile number before you borrow'}, then ask for an emergency loan for rent, health, school fees, energy, food or travel.`, kind: 'welcome' });
+  else await notify(a, { title: 'Welcome to TrimesterSave', message: `Your account is ready. ${how}, then start a savings plan, keep your records and book your visits.`, kind: 'welcome' });
+  if (hasPhone) await store.settings.set(phoneKey(p), { id: a._id });
+  if (hasEmail) await store.settings.set(emailKey(e), { id: a._id });
   await save(a);
   return publicUser(a);
 }
 
-async function login({ phone, password } = {}) {
-  const a = await byPhone(phone);
-  if (!a || !checkPassword(password, a.passwordHash)) throw err(401, 'Incorrect phone number or password');
+async function login({ phone, email: em, identifier, password } = {}) {
+  const a = await byLogin({ identifier, phone, email: em });
+  if (!a || !checkPassword(password, a.passwordHash)) throw err(401, 'Incorrect phone number, email or password');
   return session(a);
 }
 
@@ -118,7 +143,7 @@ async function updateProfile(a, body = {}) {
     if (!i18n.isKnown(body.language)) throw err(422, 'Unknown language');
     a.language = i18n.normalise(body.language);
   }
-  for (const f of PROFILE_FIELDS) if (body[f] !== undefined) a[f] = typeof body[f] === 'string' ? body[f].trim().slice(0, 200) : body[f];
+  for (const f of PROFILE_FIELDS) if (body[f] !== undefined && !(f === 'email' && a.emailLogin)) a[f] = typeof body[f] === 'string' ? body[f].trim().slice(0, 200) : body[f];
   if (!a.first_name || !a.last_name) throw err(422, 'First and last name are required');
   a.updatedAt = iso();
   await save(a);
@@ -135,17 +160,19 @@ async function changePassword(a, { old_password, current_password, password, new
   return { changed: true };
 }
 
-/** Texts a reset code through the Biller's SMS provider. Never reveals whether the phone has an account. */
-async function forgotPassword({ phone } = {}) {
-  const p = dial(phone);
-  if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
-  const a = await byPhone(p);
-  const out = { sent: true, to: p.replace(/\d(?=\d{3})/g, '•') };
+/** Sends a reset code by SMS (phone) or email. Never reveals whether the phone or email has an account. */
+async function forgotPassword({ phone, email: em, identifier } = {}) {
+  const id = String(identifier || em || phone || '').trim(); const byMail = id.includes('@');
+  let p = ''; if (byMail) { if (!email.isEmail(id)) throw err(422, 'Please enter a valid email address'); } else { p = dial(id); if (!validPhone(p)) throw err(422, 'Please enter a valid phone number'); }
+  const a = byMail ? await byEmail(id) : await byPhone(p);
+  const out = { sent: true, to: byMail ? id.replace(/^(.).*(@.*)$/, '$1•••$2') : p.replace(/\d(?=\d{3})/g, '•') };
   if (!a) return out;
   let code; let tries = 0;
   do { code = messaging.genOtp(); tries++; } while (tries < 20 && (await store.settings.get(`pacct:reset:${code}`)) && new Date((await store.settings.get(`pacct:reset:${code}`)).expiresAt) > new Date());
   await store.settings.set(`pacct:reset:${code}`, { id: a._id, expiresAt: new Date(Date.now() + RESET_TTL_MS).toISOString() });
-  const r = await messaging.send({ channel: 'sms', to: p, body: i18n.t('sms.reset', a.language, { code }), tenant: null });
+  const r = byMail
+    ? await email.send({ to: normEmail(id), subject: 'Your password reset code', text: `Your reset code is ${code}. It works for 30 minutes. If you did not ask for it, ignore this email.` })
+    : await messaging.send({ channel: 'sms', to: p, body: i18n.t('sms.reset', a.language, { code }), tenant: null });
   if (r.sandbox) out.codeSandbox = code;
   return out;
 }
@@ -170,6 +197,39 @@ async function verifyPhone({ phone, verifiedAt, receipt } = {}) {
   if (!fresh || !(await savings.checkReceipt({ phone: a.phone, verifiedAt, receipt }))) throw err(401, 'Phone verification could not be confirmed');
   a.phoneVerified = true; a.phoneVerifiedAt = iso();
   await save(a);
+  return session(a);
+}
+
+/** Emails a 6 digit code to the signed-in account's email address. */
+async function startEmailVerification(a) {
+  if (!a.email || !a.emailLogin) throw err(422, 'This account has no email address to confirm.');
+  if (a.emailVerified) return { sent: false, alreadyVerified: true };
+  const k = `pacct:emailotp:${a._id}`; const prev = await store.settings.get(k);
+  if (prev && Date.now() - Date.parse(prev.sentAt) < 45000) throw err(429, 'Please wait a moment before asking for another code.');
+  const code = messaging.genOtp();
+  await store.settings.set(k, { code, attempts: 0, sentAt: iso(), expiresAt: new Date(Date.now() + 10 * 60000).toISOString() });
+  const r = await email.send({ to: a.email, subject: 'Your confirmation code', text: `Your confirmation code is ${code}. It works for 10 minutes. If you did not create an account, ignore this email.` });
+  if (!r.ok && !r.sandbox) throw err(503, 'We could not send the email right now. Please try again, or use a mobile number instead.');
+  const out = { sent: true, to: a.email.replace(/^(.).*(@.*)$/, '$1•••$2'), expiresInMinutes: 10 };
+  if (r.sandbox) out.codeSandbox = code;
+  return out;
+}
+async function verifyEmail(a, { code } = {}) {
+  const k = `pacct:emailotp:${a._id}`; const rec = await store.settings.get(k);
+  if (!rec || Date.parse(rec.expiresAt) < Date.now()) throw err(401, 'That code has expired. Ask for a new one.');
+  if (rec.attempts >= 5) throw err(429, 'Too many wrong codes. Ask for a new one.');
+  if (String(code || '').trim() !== rec.code) { rec.attempts += 1; await store.settings.set(k, rec); throw err(401, 'That code is not right.'); }
+  a.emailVerified = true; a.emailVerifiedAt = iso(); await save(a); await store.settings.set(k, { ...rec, expiresAt: new Date(0).toISOString() });
+  return session(a);
+}
+/** An account opened with an email adds (and proves) its mobile number later, e.g. before borrowing. Same signed receipt as verify_phone. */
+async function addPhone(a, { phone, verifiedAt, receipt } = {}) {
+  const p = dial(phone); if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
+  if (a.phone && a.phone !== p) throw err(409, 'This account already has a different phone number.');
+  const other = await byPhone(p); if (other && other._id !== a._id) throw err(409, 'That phone number belongs to another account.');
+  const fresh = verifiedAt && Date.now() - new Date(verifiedAt).getTime() < 15 * 60000;
+  if (!fresh || !(await savings.checkReceipt({ phone: p, verifiedAt, receipt }))) throw err(401, 'Phone verification could not be confirmed');
+  a.phone = p; a.phoneVerified = true; a.phoneVerifiedAt = iso(); await store.settings.set(phoneKey(p), { id: a._id }); await save(a);
   return session(a);
 }
 
@@ -361,6 +421,6 @@ async function deleteFile(a, id) {
 
 /** Add an in-app notification for the account that owns this phone (no-op when there is none). */
 async function notifyPhone(phoneRaw, payload) { const a = await byPhone(phoneRaw); if (!a) return false; await notify(a, payload); await save(a); return true; }
-module.exports = { notifyPhone, register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
+module.exports = { authConfig, setAuthConfig, byEmail, startEmailVerification, verifyEmail, addPhone, notifyPhone, register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
   notify, listNotifications, readNotification, addAppointment, updateAppointment, deleteAppointment, listAppointments, getAppointment, runAppointmentReminders,
   addFile, listFiles, getFile, updateFile, deleteFile };

@@ -54,11 +54,14 @@
 
   // ------------------------------------------------------------ ERHEAT: switches, ceilings, lender, requests
   mk('ERHEAT', 'erheat', `
+    <div class="card" style="margin-bottom:14px"><h2>Account sign-up (ER HEAT and TrimesterSave)</h2><div id="eh_auth" class="muted">Loading</div></div>
     <div class="card" style="margin-bottom:14px"><h2>ERHEAT Shield: emergency loans</h2><div id="eh_cfg" class="muted">Loading</div></div>
     <div class="card" style="margin-bottom:14px"><h2>Lender hand-off</h2><div id="eh_hooks" class="muted"></div></div>
     <div class="card"><h2>Requests</h2><div id="eh_apps" class="muted"></div></div>`, () => ehLoad());
   const ehLoad = guard(async () => {
-    const [o, apps] = await Promise.all([E('/config'), E('/apps')]); const c = o.config;
+    const [o, apps, au] = await Promise.all([E('/config'), E('/apps'), call('/api/platform/patient-auth', '')]); const c = o.config;
+    q('eh_auth').innerHTML = `<label><input type="checkbox" id="eh_rp" ${au.requirePhone ? 'checked' : ''} style="width:auto" onchange="ehAuth()"/> <b>Require a mobile phone to open an account</b></label>
+      <p class="muted" style="font-size:13px;margin:6px 0 0">${au.requirePhone ? 'On: people must give a mobile number and confirm it by SMS code.' : 'Off: people may open an account with an email address instead, confirmed by an emailed code. Loans still need a confirmed mobile number, because lenders pay and contact borrowers on it.'} Existing accounts keep working either way. Email codes need EMAIL_PROVIDER, EMAIL_API_KEY and EMAIL_FROM on the Biller.</p>`;
     q('eh_cfg').innerHTML = `<label><input type="checkbox" id="eh_on" ${c.enabled ? 'checked' : ''} style="width:auto"/> <b>ERHEAT is open to borrowers</b></label>
       <label style="display:block;margin-top:6px"><input type="checkbox" id="eh_rv" ${c.requireVerifiedPhone ? 'checked' : ''} style="width:auto"/> Borrowers must have a verified phone</label>
       <table style="margin-top:10px"><tr><th>Line</th><th>Open</th><th>Smallest (GHS)</th><th>Largest (GHS)</th><th>Verifier</th></tr>${Object.entries(o.lines).map(([k, l]) => `<tr><td><b>${esc(l.label)}</b>${l.voucher ? ' <span class="muted">(voucher)</span>' : ''}</td><td><input type="checkbox" id="eh_l_${k}" ${c.lines[k].enabled ? 'checked' : ''} style="width:auto"/></td><td><input id="eh_min_${k}" type="number" value="${c.lines[k].min}" style="width:90px"/></td><td><input id="eh_cap_${k}" type="number" value="${c.lines[k].cap}" max="${o.hardCap}" style="width:90px"/></td><td class="muted">${esc(l.verifier)}</td></tr>`).join('')}</table>
@@ -70,6 +73,7 @@
     q('eh_apps').innerHTML = `<div class="muted" style="font-size:13px;margin-bottom:6px">${apps.total} requests${apps.flagged ? `, <b>${apps.flagged} flagged</b>` : ''}. ${Object.entries(apps.byStatus).map(([k, n]) => esc(k) + ' ' + n).join(', ')}</div>` + (apps.rows.length ? `<table><tr><th>Ref</th><th>Line</th><th>Borrower</th><th>Amount</th><th>Status</th><th>Payee</th><th>Flags</th><th>Sandbox</th></tr>${apps.rows.map((a) => `<tr><td>${esc(a.appNo)}</td><td>${esc(a.line)}</td><td>${esc(a.borrower)}<br><span class="muted">${esc(a.phone)}</span></td><td>${n2(a.verifiedAmount || a.amount)}</td><td>${esc(a.status)}</td><td>${esc(a.payee)}</td><td>${esc((a.flags || []).join(', '))}</td><td>${['submitted', 'approved', 'payee_paid', 'repaying'].includes(a.status) ? [['approve', 'Approve'], ['paid', 'Paid'], ['repay', 'Repay'], ['decline', 'Decline']].map((x) => `<button onclick="ehSim('${a.id}','${x[0]}')">${x[1]}</button>`).join('') : ''}</td></tr>`).join('')}</table>` : 'No requests yet.');
   });
   window.ehLoad = ehLoad;
+  window.ehAuth = guard(async () => { await call('/api/platform/patient-auth', '', 'PUT', { requirePhone: q('eh_rp').checked }); toast(q('eh_rp').checked ? 'Mobile phone is now required' : 'Email sign-up is allowed'); ehLoad(); });
   window.ehSave = guard(async () => {
     const lines = {}; document.querySelectorAll('[id^="eh_l_"]').forEach((el) => { const k = el.id.slice(5); lines[k] = { enabled: el.checked, min: +q('eh_min_' + k).value, cap: +q('eh_cap_' + k).value }; });
     await E('/config', 'PUT', { enabled: q('eh_on').checked, requireVerifiedPhone: q('eh_rv').checked, lines, ladder: { new: +q('eh_n').value, trusted: +q('eh_t').value, preferred: +q('eh_p').value }, maxApps30d: +q('eh_m').value, verifierTtlHours: +q('eh_vh').value, appTtlDays: +q('eh_ad').value, lender: { name: q('eh_ln').value, pushUrl: q('eh_lu').value } });
