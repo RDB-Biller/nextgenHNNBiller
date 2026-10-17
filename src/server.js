@@ -33,6 +33,10 @@ const solutionsPortalRoutes = require('./routes/solutionsPortal');
 const solutionsApiRoutes = require('./routes/solutionsApi');
 const creditPortalRoutes = require('./routes/creditPortal');
 const creditHooks = require('./routes/creditHooks');
+const erheatRoutes = require('./routes/erheat');
+const partnerRoutes = require('./routes/partners');
+const patientAuthAdmin = require('./routes/patientAuthAdmin');
+const erheat = require('./services/erheat');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
 const patientApi = require('./routes/patientApi');
@@ -97,6 +101,10 @@ app.use('/chat', express.static(PUBLIC, { index: 'devchat.html' }));
 app.use('/chat-hooks', devChat.hooks);
 app.use('/ussd', creditHooks.ussd);
 app.use('/insurecredit-hooks', creditHooks.hooks);
+app.use('/erheat/api', erheatRoutes.api);
+app.use('/erheat', erheatRoutes.pages);
+app.use('/erheat-hooks', erheatRoutes.hooks);
+app.use('/partner-api', partnerRoutes.api);
 app.use('/report/api', reportPortalRoutes);
 app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 // Public trial sign-up — the link a prospecting campaign's "YES" reply sends
@@ -114,6 +122,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/sms-hooks', smsHooksRoutes);
 app.use('/api/platform/i18n', authPlatform, platformI18n);
 app.use('/api/platform/outreach', authPlatform, outreachRoutes.admin);
+app.use('/api/platform/erheat', authPlatform, erheatRoutes.admin);
+app.use('/api/platform/partners', authPlatform, partnerRoutes.admin);
+app.use('/api/platform/patient-auth', authPlatform, patientAuthAdmin);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);
@@ -169,6 +180,7 @@ if (require.main === module) {
       aiAdjudication.runPendingPass().catch((e) => console.error('[aiAdjudication] pending pass failed:', e));
       savingsPlans.runReminders().catch((e) => console.error('[savings] reminders failed:', e));
       patientAccounts.runAppointmentReminders().catch((e) => console.error('[patient-accounts] appointment reminders failed:', e));
+      erheat.sweep().catch((e) => console.error('[erheat] sweep failed:', e));
       outreach.runDue({ dryRun: false }).catch((e) => console.error('[outreach] sweep failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away

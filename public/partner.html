@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ER HEAT partner console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&display=swap" rel="stylesheet"/>
+<style>
+:root{--ink:#0f1d2b;--paper:#f4f6f7;--white:#fff;--muted:#566575;--rule:#d6dde3;--flame:#f04a23;--flame-d:#c93a17;--glow:#ffc93c;--ok:#1f7a4a;--bad:#b3261e;--head:"Bricolage Grotesque","Atkinson Hyperlegible",system-ui,sans-serif;--body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.5 var(--body)}
+h1,h2,h3{font-family:var(--head);margin:0;letter-spacing:-.01em;line-height:1.15}
+:focus-visible{outline:3px solid var(--glow);outline-offset:2px;border-radius:4px}
+.top{background:var(--ink);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .brand{font:800 18px var(--head);display:flex;align-items:center;gap:8px}.top .who{margin-left:auto;text-align:right;font-size:14px;color:#cbd6e0}.top .who b{color:#fff;display:block}
+.badge{display:inline-block;background:var(--glow);color:var(--ink);font:700 12px var(--body);padding:2px 9px;border-radius:999px;margin-left:6px}
+main{max-width:980px;margin:0 auto;padding:22px 20px 60px}
+.login{max-width:420px;margin:7vh auto;padding:0 20px}.login h1{font-size:2rem;margin:16px 0 6px}.lede{color:var(--muted);margin:0 0 22px}
+.field{margin:0 0 14px}label{display:block;font-weight:700;margin-bottom:5px}
+input,select,textarea{width:100%;font:inherit;color:inherit;padding:12px 13px;background:var(--white);border:2px solid var(--rule);border-radius:10px;min-height:46px}
+input:focus,select:focus{border-color:var(--ink);outline:none;box-shadow:0 0 0 3px var(--glow)}
+.btn{background:var(--flame);color:#fff;border:0;border-radius:11px;padding:12px 18px;font:800 1rem var(--head);min-height:48px;cursor:pointer}.btn:hover:not(:disabled){background:var(--flame-d)}.btn:disabled{opacity:.5}
+.btn.line{background:none;color:var(--ink);border:2px solid var(--ink)}.link{background:none;border:0;color:var(--flame-d);font:700 1rem var(--body);text-decoration:underline;cursor:pointer;padding:6px 0}
+.notice{padding:11px 14px;border-radius:10px;margin:0 0 14px;background:#e6edf3;font-size:15px}.notice.bad{background:#fde7e5;color:#7a1913}.notice.ok{background:#e2f3e9;color:#14502f}
+nav.tabs{display:flex;gap:4px;border-bottom:2px solid var(--rule);margin:0 0 20px;overflow-x:auto}nav.tabs button{background:none;border:0;font:700 1rem var(--body);color:var(--muted);padding:12px 16px;cursor:pointer;border-bottom:4px solid transparent;margin-bottom:-2px;white-space:nowrap}nav.tabs button.on{color:var(--ink);border-color:var(--flame)}
+.intro{margin:0 0 20px}.intro h1{font-size:1.9rem}.intro p{color:var(--muted);margin:6px 0 0;max-width:60ch}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 22px}.kpi{border-top:4px solid var(--ink);padding:10px 0}.kpi dt{font-size:13px;color:var(--muted)}.kpi dd{margin:2px 0 0;font:800 1.9rem var(--head)}.kpi.hot{border-color:var(--flame)}
+.row{display:grid;grid-template-columns:8px 1fr auto;gap:14px;background:var(--white);border:1px solid var(--rule);border-radius:10px;margin:0 0 10px;overflow:hidden;cursor:pointer}.row .sp{background:var(--c,#2f6fde)}.row .b{padding:12px 0}.row .r{padding:12px 14px 12px 0;text-align:right}
+.row b.t{font:800 1.05rem var(--head)}.row small{color:var(--muted);display:block}.pill{display:inline-block;font:700 12px var(--body);padding:3px 10px;border-radius:999px;background:#e6edf3}.pill.ask{background:var(--flame);color:#fff}.pill.good{background:#e2f3e9;color:#14502f}.pill.bad{background:#fde7e5;color:#7a1913}
+.detail{display:none;grid-column:1/-1;padding:0 16px 14px 22px;border-top:1px dashed var(--rule)}.row.open .detail{display:block}.detail dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:12px 0 0}.detail dt{color:var(--muted)}.detail dd{margin:0;font-weight:700}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.filters button{border:2px solid var(--rule);background:var(--white);border-radius:999px;padding:6px 14px;font:700 14px var(--body);cursor:pointer}.filters button.on{border-color:var(--ink);background:var(--ink);color:#fff}
+.panel{background:var(--white);border:1px solid var(--rule);border-radius:12px;padding:18px;margin:0 0 16px}.panel h2{font-size:1.2rem;margin:0 0 8px}.two{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}@media(max-width:620px){.two{grid-template-columns:1fr}}
+.empty{text-align:center;color:var(--muted);padding:36px 0}.muted{color:var(--muted)}.hide{display:none!important}
+</style></head><body>
+<div id="app"></div>
+<script>
+'use strict';
+const $=(s,r=document)=>r.querySelector(s);
+const esc=(x)=>String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ghs=(n)=>'GHS '+Number(n||0).toLocaleString('en-GH',{maximumFractionDigits:2});
+const when=(i)=>{try{return new Date(i).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}catch(e){return i}};
+const COLOR={rent:'#2f6fde',health:'#d8365b',education:'#7a4fd6',energy:'#e9a100',agriculture:'#2e8b4f',transport:'#0e8e91'};
+const STATUS={needs_verification:'Waiting for confirmation',verified:'Confirmed, with the borrower',submitted:'With the lender',approved:'Approved',payee_paid:'Paid',repaying:'Repaying',closed:'Repaid',declined:'Not approved',cancelled:'Cancelled',expired:'Expired',defaulted:'Overdue'};
+const LOGO='<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 3.8 6 6.3 6 12.2a6 6 0 0 1-12 0c0-2.7 1.2-4.2 2.6-5.5.1 2.4 1 3.6 2.4 4C10.2 9.3 11 5.7 12 2z" fill="#F04A23"/><path d="M12 12.5c.5 1.7 2.6 2.7 2.6 4.7a2.6 2.6 0 0 1-5.2 0c0-1.2.6-2 1.2-2.6 0 .9.5 1.4 1 1.6-.3-1.3-.1-2.4.4-3.7z" fill="#FFC93C"/></svg>';
+let TOKEN='',ME=null,TAB='requests',FILTER='all',DATA=null;
+try{TOKEN=sessionStorage.getItem('erheat.partner')||''}catch(e){}
+const save=(t)=>{TOKEN=t;try{t?sessionStorage.setItem('erheat.partner',t):sessionStorage.removeItem('erheat.partner')}catch(e){}};
+async function call(path,method,body){
+  const r=await fetch('/partner-api'+path,{method:method||'GET',headers:{'Content-Type':'application/json',...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},body:body?JSON.stringify(body):undefined});
+  const o=await r.json().catch(()=>null);
+  if(r.status===401&&TOKEN&&!path.startsWith('/login')){save('');ME=null;render();throw new Error((o&&o.error)||'Please sign in again.')}
+  if(!r.ok)throw new Error((o&&(o.error||o.message))||'Something went wrong. Please try again.');return o;
+}
+const msg=(kind,t)=>`<div class="notice ${kind||''}" role="${kind==='bad'?'alert':'status'}">${esc(t)}</div>`;
+function flash(id,kind,t){const e=$('#'+id);if(e)e.innerHTML=t?msg(kind,t):''}
+
+function loginView(){
+  $('#app').innerHTML=`<div class="login"><div class="brand" style="display:flex;gap:8px;align-items:center;font:800 18px var(--head)">${LOGO} ER HEAT partners</div>
+  <h1>Sign in</h1><p class="lede">Your login is issued by HNN. Landlords, clinics, schools, transport operators and suppliers each get a console for their own sector.</p>
+  <form id="lf"><div class="field"><label for="h">Email or phone number</label><input id="h" autocomplete="username" required/></div>
+  <div class="field"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required/></div>
+  <div id="le"></div><button class="btn" style="width:100%">Sign in</button></form></div>`;
+  $('#lf').onsubmit=async(e)=>{e.preventDefault();try{const o=await call('/login','POST',{handle:$('#h').value,password:$('#p').value});save(o.token);ME=o.account;render()}catch(x){flash('le','bad',x.message)}};
+}
+function mustChangeView(){
+  $('#app').innerHTML=`<div class="login"><h1>Choose your own password</h1><p class="lede">You signed in with a temporary password. Set a new one (at least 8 characters) to continue.</p>
+  <form id="cf"><div class="field"><label for="c">Temporary password</label><input id="c" type="password" required/></div><div class="field"><label for="n">New password</label><input id="n" type="password" autocomplete="new-password" minlength="8" required/></div>
+  <div id="ce"></div><button class="btn" style="width:100%">Save and continue</button></form></div>`;
+  $('#cf').onsubmit=async(e)=>{e.preventDefault();try{const o=await call('/password','POST',{current:$('#c').value,password:$('#n').value});save(o.token);ME=o.account;render()}catch(x){flash('ce','bad',x.message)}};
+}
+function shell(inner){
+  const tabs=[['requests','Requests'],...(ME.tools.includes('redeem')?[['redeem','Redeem a voucher']]:[]),['account','Account']];
+  return `<div class="top"><span class="brand">${LOGO} ER HEAT</span><span class="who"><b>${esc(ME.org||ME.name)}<span class="badge">${esc(ME.sectorLabel)}</span></b>${esc(ME.name)}  <button class="link" id="so" style="color:#ffc93c;padding:0 0 0 8px">Sign out</button></span></div>
+  <main><nav class="tabs" aria-label="Sections">${tabs.map(t=>`<button data-t="${t[0]}" class="${TAB===t[0]?'on':''}">${t[1]}</button>`).join('')}</nav>${inner}</main>`;
+}
+function bind(){
+  $('#so').onclick=()=>{save('');ME=null;DATA=null;render()};
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{TAB=b.dataset.t;render()});
+}
+async function requestsView(){
+  $('#app').innerHTML=shell(`<div class="intro"><h1>${esc(ME.sectorLabel)} requests</h1><p>${esc(ME.verifyHelp)} You confirm by the link we text to your registered number, so there is nothing to approve here. This page shows where each request stands.</p></div><div id="rq"><p class="muted">Loading</p></div>`);bind();
+  try{DATA=await call('/requests')}catch(x){$('#rq').innerHTML=msg('bad',x.message);return}
+  paint();
+}
+function paint(){
+  const d=DATA,rows=d.rows,by=d.byStatus||{};
+  const asked=rows.filter(r=>r.status==='needs_verification'&&r.verifiers.some(v=>v.you&&v.status==='pending')).length;
+  const active=['submitted','approved','verified'].reduce((s,k)=>s+(by[k]||0),0)+(by.needs_verification||0)-asked;
+  const paid=(by.payee_paid||0)+(by.repaying||0)+(by.closed||0);
+  const fl=FILTER==='all'?rows:FILTER==='ask'?rows.filter(r=>r.status==='needs_verification'&&r.verifiers.some(v=>v.you&&v.status==='pending')):FILTER==='paid'?rows.filter(r=>['payee_paid','repaying','closed'].includes(r.status)):rows.filter(r=>!['payee_paid','repaying','closed','declined','cancelled','expired','defaulted'].includes(r.status));
+  const closedLines=d.lines.filter(l=>!l.enabled);
+  $('#rq').innerHTML=`${closedLines.length?msg('',closedLines.map(l=>l.label).join(', ')+' is not open to borrowers yet.'):''}
+  <dl class="kpis"><div class="kpi ${asked?'hot':''}"><dt>Waiting for your text link</dt><dd>${asked}</dd></div><div class="kpi"><dt>In progress</dt><dd>${active<0?0:active}</dd></div><div class="kpi"><dt>Paid or repaid</dt><dd>${paid}</dd></div><div class="kpi"><dt>Open amount</dt><dd>${ghs(d.openAmount)}</dd></div></dl>
+  <div class="filters" role="group" aria-label="Filter">${[['all','All'],['ask','Needs you'],['live','In progress'],['paid','Paid']].map(f=>`<button data-f="${f[0]}" class="${FILTER===f[0]?'on':''}">${f[1]}</button>`).join('')}</div>
+  ${fl.length?fl.map(r=>{const ask=r.status==='needs_verification'&&r.verifiers.some(v=>v.you&&v.status==='pending');const cls=ask?'ask':['payee_paid','repaying','closed','approved'].includes(r.status)?'good':['declined','cancelled','expired','defaulted'].includes(r.status)?'bad':'';
+    return `<div class="row" style="--c:${COLOR[r.line]}" tabindex="0" role="button" aria-expanded="false"><span class="sp"></span><div class="b"><b class="t">${esc(r.borrower)} · ${esc(r.lineLabel)}</b><small>${esc(r.appNo)} · ${when(r.createdAt)} · ${esc(r.payee.name)}${r.payee.you?' (you)':''}</small></div><div class="r"><b class="t">${ghs(r.approvedAmount||r.verifiedAmount||r.amount)}</b><br><span class="pill ${cls}">${ask?'Check your texts':esc(STATUS[r.status]||r.status)}</span></div>
+    <div class="detail"><dl><dt>Borrower</dt><dd>${esc(r.borrower)}, ${esc(r.phone)}</dd><dt>Asked for</dt><dd>${ghs(r.amount)}${r.verifiedAmount&&r.verifiedAmount<r.amount?' (confirmed lower: '+ghs(r.verifiedAmount)+')':''}</dd>${r.fields.map(f=>`<dt>${esc(f.label)}</dt><dd>${esc(f.value)}</dd>`).join('')}${r.verifiers.map(v=>`<dt>${esc(v.label)}${v.you?' (you)':''}</dt><dd>${esc(v.status)}</dd>`).join('')}${r.voucher?`<dt>Voucher</dt><dd>${r.voucher.redeemed?'Redeemed':'Not redeemed, valid until '+when(r.voucher.expiresAt)}</dd>`:''}${r.flags&&r.flags.length?`<dt>Flags</dt><dd>${esc(r.flags.join(', '))}</dd>`:''}</dl></div></div>`}).join(''):`<div class="empty">No ${esc(ME.unit)} here yet.${d.scope==='mine'?'<br>You will see a request when a borrower names one of your registered numbers.':''}</div>`}`;
+  document.querySelectorAll('.filters button').forEach(b=>b.onclick=()=>{FILTER=b.dataset.f;paint()});
+  document.querySelectorAll('.row').forEach(r=>{const t=()=>{r.classList.toggle('open');r.setAttribute('aria-expanded',r.classList.contains('open'))};r.onclick=t;r.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();t()}}});
+}
+function redeemView(){
+  $('#app').innerHTML=shell(`<div class="intro"><h1>Redeem a voucher</h1><p>Release goods or services only after this page confirms the voucher. You need the voucher code and the one-time code the customer received by text.</p></div>
+  <form class="panel" id="rf" style="max-width:480px"><div class="field"><label for="vc">Voucher code</label><input id="vc" autocapitalize="characters" required/></div><div class="field"><label for="vo">Customer one-time code</label><input id="vo" inputmode="numeric" required/></div>
+  <div class="field"><label for="vp">Your registered number</label><select id="vp">${ME.phones.map(p=>`<option>${esc(p)}</option>`).join('')}</select></div><div id="re"></div><button class="btn">Redeem</button></form>`);bind();
+  if(!ME.phones.length)$('#re').innerHTML=msg('bad','No phone number is registered to your account. Ask HNN to add one.');
+  $('#rf').onsubmit=async(e)=>{e.preventDefault();try{const o=await call('/redeem','POST',{code:$('#vc').value.trim(),otp:$('#vo').value.trim(),phone:$('#vp').value});flash('re','ok',`Accepted: ${ghs(o.amount)} for ${o.payee}. ${o.note}`);$('#vc').value='';$('#vo').value=''}catch(x){flash('re','bad',x.message)}};
+}
+async function accountView(){
+  let d;try{d=await call('/requests')}catch(x){d={lines:[],scope:ME.view}}
+  $('#app').innerHTML=shell(`<div class="intro"><h1>${esc(ME.name)}</h1><p>${esc(ME.handle)}</p></div>
+  <section class="panel"><h2>What your console covers</h2><p>${esc(ME.sectorLabel)}${ME.universal?' (universal access, approved by HNN)':''}: ${ME.lines.map(k=>esc(k)).join(', ')}.</p>
+  <ul style="padding-left:18px;margin:8px 0">${d.lines.map(l=>`<li><b>${esc(l.label)}</b>: ${l.enabled?'open to borrowers':'not open yet'}, GHS ${l.min} to ${l.cap}</li>`).join('')}</ul>
+  <p class="muted">You see ${ME.view==='all'?'every request in your lines':'requests that name one of your registered numbers'}. Registered numbers: ${ME.phones.length?ME.phones.map(esc).join(', '):'none yet'}. HNN manages these for your security.</p></section>
+  ${ME.universal?'':`<section class="panel"><h2>Need more than one sector?</h2><p>A universal account works every line. HNN approves these one by one.</p><div id="ue"></div>${ME.universalRequested?msg('ok','Request sent. HNN will contact you.'):'<button class="btn line" id="ur">Ask for universal access</button>'}</section>`}
+  <section class="panel"><h2>Change password</h2><form id="pf" style="max-width:380px"><div class="field"><label for="cp">Current password</label><input id="cp" type="password" required/></div><div class="field"><label for="np">New password</label><input id="np" type="password" minlength="8" autocomplete="new-password" required/></div><div id="pe"></div><button class="btn">Change password</button></form></section>`);bind();
+  const ur=$('#ur');if(ur)ur.onclick=async()=>{try{ME=(await call('/request-universal','POST',{})).account;render()}catch(x){flash('ue','bad',x.message)}};
+  $('#pf').onsubmit=async(e)=>{e.preventDefault();try{const o=await call('/password','POST',{current:$('#cp').value,password:$('#np').value});save(o.token);ME=o.account;flash('pe','ok','Password changed.');$('#cp').value='';$('#np').value=''}catch(x){flash('pe','bad',x.message)}};
+}
+async function render(){
+  if(!TOKEN){loginView();return}
+  if(!ME){try{ME=(await call('/me')).account}catch(x){loginView();return}}
+  if(ME.mustChange){mustChangeView();return}
+  if(!ME.tools.includes(TAB==='redeem'?'redeem':'requests')&&TAB==='redeem')TAB='requests';
+  if(TAB==='redeem')redeemView();else if(TAB==='account')accountView();else requestsView();
+}
+render();
+</script></body></html>
