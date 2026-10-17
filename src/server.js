@@ -39,6 +39,8 @@ const patientApi = require('./routes/patientApi');
 const i18nApi = require('./routes/i18nApi');
 const devChat = require('./routes/devChat');
 const platformI18n = require('./routes/platformI18n');
+const outreachRoutes = require('./routes/outreach');
+const outreach = require('./services/outreach');
 const patientAccounts = require('./services/patientAccounts');
 const savingsPlans = require('./services/savingsPlans');
 const insurecredit = require('./services/insurecredit');
@@ -89,6 +91,7 @@ app.use('/savings', express.static(PUBLIC, { index: 'savings.html' }));
 app.use('/savings-hooks', savingsHooks.hooks);
 app.use('/patient-api/v1', patientApi);
 app.use('/i18n/api', i18nApi);
+app.use('/o', outreachRoutes.pub);
 app.use('/chat/api', devChat.api);
 app.use('/chat', express.static(PUBLIC, { index: 'devchat.html' }));
 app.use('/chat-hooks', devChat.hooks);
@@ -110,6 +113,7 @@ app.use('/api/admin', adminRoutes);
 // Master control board (SaaS owners) — x-platform-key
 app.use('/sms-hooks', smsHooksRoutes);
 app.use('/api/platform/i18n', authPlatform, platformI18n);
+app.use('/api/platform/outreach', authPlatform, outreachRoutes.admin);
 app.use('/api/platform', authPlatform, platformRoutes);
 // Collection gateway webhook
 app.use('/api/v1/webhooks', webhookRoutes);
@@ -165,6 +169,7 @@ if (require.main === module) {
       aiAdjudication.runPendingPass().catch((e) => console.error('[aiAdjudication] pending pass failed:', e));
       savingsPlans.runReminders().catch((e) => console.error('[savings] reminders failed:', e));
       patientAccounts.runAppointmentReminders().catch((e) => console.error('[patient-accounts] appointment reminders failed:', e));
+      outreach.runDue({ dryRun: false }).catch((e) => console.error('[outreach] sweep failed:', e));
     };
     setTimeout(runSweeps, 60 * 1000);       // first pass shortly after startup, not a full interval away
     setInterval(runSweeps, SWEEP_INTERVAL_MS);

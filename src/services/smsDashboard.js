@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const store = require('../store');
 const messaging = require('./messaging');
 const campaigns = require('./campaigns');
+const outreach = require('./outreach');
 const clinicalLinks = require('./clinicalLinks');
 const verification = require('./verification');
 
@@ -188,7 +189,8 @@ async function recordInbound(b = {}) {
   };
   if (text) {
     try {
-      const result = (await clinicalLinks.handleInboundReply({ from, text, channel: 'sms' }))
+      const result = (await outreach.handleInboundText(from, text))
+        || (await clinicalLinks.handleInboundReply({ from, text, channel: 'sms' }))
         || (await campaigns.handleInboundReply({ from, text, channel: 'sms' }))
         || (await verification.handleInboundReply({ from, text, channel: 'sms' }));
       row.outcome = result?.outcome || null;

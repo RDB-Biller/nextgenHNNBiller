@@ -1090,3 +1090,18 @@ Twi, Hausa, Yoruba and Ga. `GET /i18n/api/languages`, `GET /i18n/api/catalog/:la
   Control (`/chat-hooks/<secret>/whatsapp`) at your WhatsApp provider; it needs a WhatsApp-enabled sender
   (`waNumber` for Africa's Talking). This is per person: provider APIs cannot post into WhatsApp *groups*.
 * Test: `npm run smoke:i18n`.
+
+## Outreach (Master Control > Outreach)
+
+B2B prospecting to bring banks, insurers, core-banking / EHR / adjudication vendors and hospitals into the sandbox:
+organisations (365 seeded from the ranked lists, no people), contacts with a mandatory public source, templates per
+segment and persona (translated to the contact's language through LibreTranslate when configured), sequences across
+email, SMS, WhatsApp and LinkedIn, a tracked sandbox link (`/o/t/<token>`), a feedback form (`/o/feedback`), and a
+one-click unsubscribe (`/o/u/<token>`).
+
+Guard rails (by design, not options): off by default; needs sender identity + postal address + public base URL;
+work email addresses only; STOP / unsubscribe / erase put the address and number on a permanent hashed suppression list
+that blocks every channel; LinkedIn steps are manual tasks (never automated); WhatsApp steps only for contacts who
+replied or opted in; daily caps per channel, sending hours (UTC), pacing; dry-run before every send. Email needs
+`EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM` (see `.env.example`). Test: `npm run smoke:outreach`.
+

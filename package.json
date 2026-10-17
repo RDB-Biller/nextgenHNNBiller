@@ -21,7 +21,8 @@
     "smoke:gaps-http": "node scripts/smoke-gaps-http.js",
     "smoke:clinical-entry": "node scripts/smoke-clinical-entry.js",
     "provision": "node scripts/provision.js",
-    "smoke:i18n": "node scripts/smoke-i18n.js"
+    "smoke:i18n": "node scripts/smoke-i18n.js",
+    "smoke:outreach": "node scripts/smoke-outreach.js"
   },
   "engines": {
     "node": ">=18"
