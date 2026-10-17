@@ -1105,3 +1105,21 @@ that blocks every channel; LinkedIn steps are manual tasks (never automated); Wh
 replied or opted in; daily caps per channel, sending hours (UTC), pacing; dry-run before every send. Email needs
 `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM` (see `.env.example`). Test: `npm run smoke:outreach`.
 
+
+### Team mailboxes, phone line types and the referral programme
+
+- **Team / role mailboxes** (`sales@`, `info@`, `enquiries@`, `communications@`, or product ones like
+  `ghanahomeloans@bank.com`) are accepted without a person's name, still need a public `source`, and get the same
+  opt-out and suppression. `sales@` maps to the sales persona, `communications@` to comms, `claims@` to claims. Careers,
+  HR, privacy, abuse and no-reply mailboxes are refused. Emails to a team mailbox greet "Dear team" and ask to forward.
+- **Phone numbers** are stored with a line type: `mobile`, `landline`, `tollfree` or `unknown`, detected from the country
+  calling code (Ghana, Nigeria, Kenya, South Africa, Egypt, Morocco and more; a heuristic, correctable by hand). SMS and
+  WhatsApp only go to mobiles; landlines and switchboards become **call tasks** (the `switchboard` sequence) with a
+  script. A STOP from any number suppresses the whole contact.
+- **Bulk import** accepts CSV (`org,name,email,phones,purpose,source,lang`; several phones separated by `;`) or JSON.
+- **Referral programme** (off by default): each contacted person gets a personal link (`/o/refer/<code>`) in our emails.
+  They can share a tracked link (`/o/r/<code>`) or introduce a colleague, only after confirming they know that person;
+  the colleague gets one short, sourced email naming the referrer plus two follow-ups, with the normal opt-out. Points
+  come from what the referred person does (reply, sandbox, meeting, partner organisation), tiers and rewards are free
+  text you set, and a daily introduction limit applies per referrer. Partners (consultants, agents) can sign up at
+  `/o/refer` or be added from Master Control.

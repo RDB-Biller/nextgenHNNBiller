@@ -133,6 +133,79 @@ i18n._setRequestImplForTests(async (m, url, body) => url.endsWith('/languages') 
   ok(er.erased && await outreach.isSuppressed('yaw@insurer.test') && !(await outreach.listContacts({ q: 'Yaw Claims' })).rows.length, 'erase removes the person and keeps only a hash on the suppression list');
   ok(!JSON.stringify(await store.settings.keys('out:sup:')).includes('yaw'), 'suppression keys hold no plain address');
 
+  // ---- role / team mailboxes and phone line types
+  const fnb = await outreach.addOrg({ name: 'First National Bank Ghana', type: 'bank', country: 'Ghana', website: 'https://fnb.test' });
+  const hl = await outreach.addContact({ orgId: fnb.id, email: 'ghanahomeloans@fnb.test', phones: ['+233 30 222 4444', '024 111 3333'], purpose: 'home loans', source: 'https://fnb.test/contact' });
+  ok(hl.kind === 'role' && hl.persona === 'general' && /First National Bank Ghana/.test(hl.name), 'a product team mailbox (ghanahomeloans@) is stored as a role contact without a person name');
+  ok(hl.phone === '+233241113333' && hl.landline === '+233302224444' && hl.phones.find((p) => p.number === '+233302224444').type === 'landline', 'Ghana mobile vs landline are told apart');
+  const sales = await outreach.addContact({ orgId: fnb.id, email: 'Sales@fnb.test', source: 'https://fnb.test/contact' });
+  ok(sales.kind === 'role' && sales.persona === 'sales' && sales.purpose === 'sales', 'sales@ maps to the sales persona');
+  const comms = await outreach.addContact({ orgId: fnb.id, email: 'communications@fnb.test', source: 'https://fnb.test/contact' });
+  ok(comms.persona === 'comms', 'communications@ maps to the comms persona');
+  for (const bad of ['careers@fnb.test', 'no-reply@fnb.test', 'privacy@fnb.test', 'hr@fnb.test']) { e = await rej(outreach.addContact({ orgId: fnb.id, email: bad, source: 's' })); ok(e && /not_a_business_enquiry_mailbox/.test(e.message), `${bad} is refused`); }
+  e = await rej(outreach.addContact({ orgId: fnb.id, email: 'info@gmail.com', source: 's' })); ok(e && /free-mail/.test(e.message), 'free-mail team mailbox still refused');
+  const cl = outreach.classifyPhone;
+  ok(cl('+2348031234567') === 'mobile' && cl('+27821234567') === 'mobile' && cl('+27111234567') === 'landline' && cl('+254201234567') === 'landline' && cl('+254712345678') === 'mobile' && cl('+27800123456') === 'tollfree' && cl('+15551234567') === 'unknown', 'classifier: Nigeria/SA/Kenya mobile, landline, toll-free, unknown');
+  const sw = await outreach.addContact({ orgId: fnb.id, name: 'Head office switchboard', persona: 'general', landline: '+233 30 222 5555', source: 'https://fnb.test/contact' });
+  ok(sw.phone === '' && sw.landline === '+233302225555', 'landline-only contact has no SMS number');
+  const fixed = await outreach.patchContact(sw.id, { phoneType: { number: '+233302225555', type: 'mobile' } });
+  ok(fixed.phone === '+233302225555', 'line type can be corrected by hand');
+  await outreach.patchContact(sw.id, { phoneType: { number: '+233302225555', type: 'landline' } });
+  const mp = await outreach.preview(hl.id, 'switchboard', 0);
+  ok(/^Dear team,/.test(mp.body) && /not the right team/.test(mp.body), 'team mailbox email greets the team and asks to forward');
+  await outreach.enroll({ contactIds: [sw.id, hl.id], sequenceId: 'switchboard' });
+  const bump = async (id) => { const c = await store.settings.get('out:con:' + id); c.seq.nextAt = new Date(Date.now() - 1000).toISOString(); await store.settings.set('out:con:' + id, c); };
+  await outreach.setConfig({ caps: { email: 500, sms: 50, whatsapp: 50 } }, 't');
+  await bump(sw.id); await bump(hl.id); await outreach.runDue({ dryRun: false });   // step 1: email (sw has none -> skipped)
+  await bump(sw.id); await bump(hl.id); r = await outreach.runDue({ dryRun: true });
+  ok(r.results.filter((x) => x.channel === 'call').length === 2 && r.results.every((x) => x.result !== 'would_send' || x.channel !== 'sms'), 'switchboard sequence plans phone-call tasks for numbers');
+  await bump(sw.id); await bump(hl.id); r = await outreach.runDue({ dryRun: false });
+  const callTasks = (await outreach.listTasks()).filter((t) => t.kind === 'call');
+  ok(callTasks.length === 2 && callTasks.some((t) => t.phone === '+233302224444' && t.phoneType === 'landline') && /Ask for/.test(callTasks[0].text), 'call tasks carry the number, its line type and a script (landline preferred over mobile)');
+  const smsOnly = await outreach.addContact({ orgId: fnb.id, name: 'Landline Larry', landline: '+233 30 222 6666', source: 'https://fnb.test/team' });
+  await outreach.enroll({ contactIds: [smsOnly.id], sequenceId: 'standard' }); await bump(smsOnly.id);
+  // advance Larry to the SMS step
+  let L = await store.settings.get('out:con:' + smsOnly.id); L.seq.step = 3; L.seq.nextAt = new Date(Date.now() - 1000).toISOString(); await store.settings.set('out:con:' + smsOnly.id, L);
+  r = await outreach.runDue({ dryRun: false });
+  ok(r.results.some((x) => x.name === 'Landline Larry' && x.channel === 'sms' && x.result === 'skipped' && x.reason === 'no_mobile_number'), 'SMS never goes to a non-mobile number');
+  const ov2 = await outreach.overview();
+  ok(ov2.roleMailboxes >= 3 && ov2.nonMobileNumbers >= 2, 'overview counts team mailboxes and non-mobile numbers');
+  const stopSw = await outreach.handleInboundText('0241113333', 'STOP');
+  ok(stopSw.outcome === 'outreach_opt_out' && await outreach.isSuppressed('+233302224444') && await outreach.isSuppressed('ghanahomeloans@fnb.test'), 'STOP from the mobile suppresses the whole team contact (email and landline too)');
+
+  // ---- referral programme
+  let ro = await fetch(`${base}/refer`); ok(ro.status === 404, 'referral pages are closed while the programme is OFF');
+  e = await rej(outreach.introduce('p000', { attest: true })); ok(e && e.status === 404, 'introductions refused while OFF');
+  await outreach.setConfig({ referral: { enabled: true, maxIntrosPerDay: 2, terms: 'Recognition only, no cash.', tiers: [{ at: 1, label: 'Founding Referrer', reward: 'Named thank-you' }, { at: 3, label: 'Champion', reward: 'Early access' }] } }, 't');
+  const refEmail = await outreach.preview(sales.id, 'standard', 0);
+  ok(/\/o\/refer\/c/.test(refEmail.body), 'emails carry the recipient personal referral link when ON');
+  const esiCode = 'c' + (await store.settings.get('out:con:' + c3.id)).token;
+  res = await fetch(`${base}/r/${esiCode}`, { redirect: 'manual' });
+  ok(res.status === 302 && /ref=c/.test(res.headers.get('location')), 'share link redirects to the sandbox with the referral code attached');
+  let st = await outreach.referralStats(esiCode); ok(st.clicks === 1 && st.points === 0 && st.name === 'Esi', 'link visit counted for the referrer');
+  res = await fetch(`${base}/refer/${esiCode}`); const html2 = await res.text(); ok(res.status === 200 && /Introduce a colleague/.test(html2) && /Recognition only/.test(html2) && !/esi@hospital\.test/.test(html2), 'referrer page renders with terms and no email addresses');
+  e = await rej(outreach.introduce(esiCode, { name: 'Kwame Mensah', email: 'kwame@rival.test', org: 'Rival Bank' })); ok(e && e.status === 422, 'introduction without the "I know this person" confirmation is refused');
+  e = await rej(outreach.introduce(esiCode, { attest: true, name: 'X', email: 'x@gmail.com', org: 'Rival Bank' })); ok(e && /free-mail/.test(e.message), 'introducing a free-mail address is refused');
+  const iv = await outreach.introduce(esiCode, { attest: true, name: 'Kwame Mensah', role: 'CTO', email: 'kwame@rival.test', org: 'Rival Bank', orgType: 'bank' });
+  const kw = (await outreach.listContacts({ q: 'Kwame' })).rows[0];
+  ok(iv.ok && kw.seq && kw.seq.id === 'referral' && /Introduced by Esi/.test(kw.source) && kw.lawfulBasis === 'legitimate_interest_b2b', 'introduction creates a sourced contact enrolled in the referral sequence');
+  const rp = await outreach.preview(kw.id, 'referral', 0);
+  ok(/Esi suggested we get in touch/.test(rp.subject) && /Esi/.test(rp.body) && /Unsubscribe in one click/.test(rp.body), 'introduction email names the referrer and carries the opt-out');
+  ok((await outreach.introduce(esiCode, { attest: true, name: 'Kwame', email: 'kwame@rival.test', org: 'Rival Bank' })).already, 'introducing someone already known is a polite no-op');
+  await outreach.introduce(esiCode, { attest: true, name: 'Abena', email: 'abena@rival.test', org: 'Rival Bank' });
+  e = await rej(outreach.introduce(esiCode, { attest: true, name: 'Third', email: 'third@rival.test', org: 'Rival Bank' })); ok(e && e.status === 429, 'daily introduction limit enforced per referrer');
+  res = await fetch(`${base}/refer/${esiCode}/intro`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'name=Z&email=z%40rival.test&org=Rival+Bank&attest=yes' }); ok(res.status === 429, 'form post also hits the limit');
+  await outreach.setContactStatus(kw.id, 'sandbox'); st = await outreach.referralStats(esiCode);
+  ok(st.points === 1 && st.tier && st.tier.label === 'Founding Referrer' && st.next.label === 'Champion' && st.intros.length === 2, 'points follow what the referred person does (sandbox = 1) and set the tier');
+  await outreach.setContactStatus(kw.id, 'meeting'); await outreach.updateOrg(kw.orgId, { status: 'partner' });
+  st = await outreach.referralStats(esiCode); ok(st.points === 10 && st.tier.label === 'Champion', 'partner organisation earns the partner points');
+  const partner = await outreach.addPartnerByAdmin({ name: 'Ama Consultant', email: 'ama@consult.test', org: 'Consult Ltd' });
+  ok(/^p/.test(partner.code) && (await outreach.publicConfig()).referral.enabled, 'admin can create a referral partner link');
+  await outreach.addReward(esiCode, 'Named in launch post', 'admin');
+  const ovr = await outreach.referralOverview(); ok(ovr.referrers[0].code === esiCode && ovr.referrers[0].rewards.length === 1 && ovr.totals.intros === 2 && ovr.totals.meetings === 2, 'overview ranks referrers and tracks rewards given');
+  res = await fetch(`${base}/refer`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'name=Self+Signup&email=s%40x.test&org=X', redirect: 'manual' }); ok(res.status === 302 && /\/o\/refer\/p/.test(res.headers.get('location')), 'public sign-up as a referral partner returns a personal page');
+  await outreach.eraseContact(c3.id); ok(!(await store.settings.get('out:ref:' + esiCode)), 'erasing a person also removes their referrer record');
+
   srv.close();
   console.log(`\n${a} assertions${process.exitCode ? ' — WITH FAILURES' : ' — all passed'}`);
 })().catch((x) => { console.error(x); process.exit(1); });

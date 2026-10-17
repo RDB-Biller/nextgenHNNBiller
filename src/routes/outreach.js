@@ -35,6 +35,11 @@ admin.post('/enroll', wrap(async (req, res) => res.json(await outreach.enroll(re
 admin.post('/run', wrap(async (req, res) => res.json(await outreach.runDue({ dryRun: (req.body || {}).dryRun !== false, force: !!(req.body || {}).force }))));
 admin.get('/tasks', wrap(async (req, res) => res.json({ tasks: await outreach.listTasks({ status: req.query.status === 'all' ? '' : 'open' }) })));
 admin.post('/tasks/:id/done', wrap(async (req, res) => res.json(await outreach.completeTask(req.params.id, (req.body || {}).status === 'skipped' ? 'skipped' : 'done'))));
+admin.get('/referrals', wrap(async (_q, res) => res.json(await outreach.referralOverview())));
+admin.put('/referrals/config', wrap(async (req, res) => { await outreach.setConfig({ referral: req.body || {} }, who(req)); res.json((await outreach.referralOverview()).config); }));
+admin.post('/referrals/partners', wrap(async (req, res) => res.status(201).json(await outreach.addPartnerByAdmin(req.body || {}))));
+admin.post('/referrals/:code/reward', wrap(async (req, res) => res.json({ rewards: await outreach.addReward(req.params.code, (req.body || {}).note, who(req)) })));
+admin.get('/classify', wrap(async (req, res) => { const n = String(req.query.phone || ''); res.json({ phone: n, type: outreach.classifyPhone(n.replace(/[^\d+]/g, '')) }); }));
 admin.get('/feedback', wrap(async (_q, res) => res.json({ feedback: await outreach.listFeedback() })));
 admin.post('/suppress', wrap(async (req, res) => { await outreach.suppress((req.body || {}).value, 'manual'); res.json({ ok: true }); }));
 
@@ -56,5 +61,41 @@ pub.get('/feedback', (req, res) => res.send(page('What should we add?', `<h2>Wha
 pub.post('/feedback', limiter(10, 60000), async (req, res) => {
   try { await outreach.submitFeedback(req.body || {}); res.send(page('Thank you', '<h2>Thank you</h2><p>We have your feedback and will come back to you.</p>')); }
   catch (e) { res.status(e.status || 500).send(page('Could not send', `<h2>Could not send</h2><p>${esc(e.message)}</p>`)); }
+});
+
+// ---- referral programme (public; the personal code in the URL is the credential)
+const closed = (res) => res.status(404).send(page('Not open', '<h2>The referral programme is not open yet</h2><p>Please check back soon.</p>'));
+const STAGE = { introduced: 'Introduced', replied: 'Replied', sandbox: 'Trying the sandbox', meeting: 'In a meeting', partner: 'Partner', declined: 'Declined', removed: 'Removed' };
+async function referrerPage(code, flash) {
+  const s = await outreach.referralStats(code);
+  const tiers = s.tiers.map((t) => `<li><b>${esc(t.label)}</b> from ${t.at} point${t.at === 1 ? '' : 's'}${t.reward ? ': ' + esc(t.reward) : ''}</li>`).join('');
+  const rows = s.intros.length ? `<table style="width:100%;border-collapse:collapse">${s.intros.map((i) => `<tr><td>${esc(i.first)} · ${esc(i.org)}</td><td>${esc(STAGE[i.stage] || i.stage)}</td><td>${i.points} pt</td></tr>`).join('')}</table>` : '<p class="m">No introductions yet.</p>';
+  return page('Refer a colleague', `<h2>Hello ${esc(s.name)}</h2>${flash ? `<p style="background:#e8f5ee;padding:10px;border-radius:8px">${esc(flash)}</p>` : ''}
+<p>Know a bank, insurer, hospital or software team that should see embedded savings, micro-credit and claims adjudication? Share your link or introduce someone.</p>
+<p><b>Your share link</b><input readonly value="${esc(s.shareLink)}" onclick="this.select()"></p>
+<p><b>${s.points}</b> point${s.points === 1 ? '' : 's'} · ${s.clicks} link visit${s.clicks === 1 ? '' : 's'}${s.tier ? ' · ' + esc(s.tier.label) : ''}${s.next ? ` · next: ${esc(s.next.label)} at ${s.next.at}` : ''}</p>
+<h3>Introduce a colleague</h3><form method="post" action="/o/refer/${esc(s.code)}/intro"><label>Their name<input name="name" required></label><label>Their role<input name="role"></label><label>Work email<input name="email" type="email" required></label><label>Organisation<input name="org" required></label>
+<label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="attest" value="yes" style="width:auto;margin-top:6px" required> I know this person and a short business introduction from me is welcome.</label><button>Send introduction</button></form>
+<p class="m">They receive one short email naming you, with a one-click opt-out. Please only introduce people you know.</p>
+<h3>Your introductions</h3>${rows}<h3>Points and tiers</h3><p>${esc(String(s.pointsTable.replied))} for a reply, ${esc(String(s.pointsTable.sandbox))} for trying the sandbox, ${esc(String(s.pointsTable.meeting))} for a meeting, ${esc(String(s.pointsTable.partner))} when their organisation becomes a partner.</p><ul>${tiers}</ul>${s.rewards.length ? `<p>Rewards given: ${s.rewards.map((r) => esc(r.note)).join('; ')}</p>` : ''}${s.terms ? `<h3>Terms</h3><p>${esc(s.terms)}</p>` : ''}`);
+}
+pub.get('/r/:code', async (req, res) => {
+  try { const to = await outreach.trackReferralClick(req.params.code); res.redirect(to || '/app/biller.html'); } catch (_e) { res.redirect('/app/biller.html'); }
+});
+pub.get('/refer', async (_req, res) => {
+  if (!(await outreach.publicConfig()).referral.enabled) return closed(res);
+  res.send(page('Join the referral programme', '<h2>Become a referral partner</h2><p>Get a personal link, introduce banks, insurers, hospitals and software teams to the sandbox, and earn recognition as they engage.</p><form method="post" action="/o/refer"><label>Your name<input name="name" required></label><label>Email<input name="email" type="email" required></label><label>Organisation<input name="org"></label><button>Get my link</button></form>'));
+});
+pub.post('/refer', limiter(6, 60000), async (req, res) => {
+  try { const r = await outreach.joinAsPartner(req.body || {}); res.redirect(`/o/refer/${r.code}`); }
+  catch (e) { res.status(e.status || 500).send(page('Could not join', `<h2>Could not join</h2><p>${esc(e.message)}</p>`)); }
+});
+pub.get('/refer/:code', async (req, res) => {
+  try { if (!(await outreach.publicConfig()).referral.enabled) return closed(res); res.send(await referrerPage(req.params.code, req.query.sent ? 'Thank you. Your introduction is queued and goes out in the next sending window.' : '')); }
+  catch (e) { res.status(e.status || 500).send(page('Not found', '<h2>Link not recognised</h2>')); }
+});
+pub.post('/refer/:code/intro', limiter(10, 60000), async (req, res) => {
+  try { const r = await outreach.introduce(req.params.code, req.body || {}); res.send(await referrerPage(req.params.code, r.already ? 'That colleague is already in touch with us. Thank you!' : 'Thank you. Your introduction is queued and goes out in the next sending window.')); }
+  catch (e) { res.status(e.status || 500).send(page('Could not send', `<h2>Could not send</h2><p>${esc(e.message)}</p><p><a href="/o/refer/${esc(req.params.code)}">Back</a></p>`)); }
 });
 module.exports = { admin, pub };
