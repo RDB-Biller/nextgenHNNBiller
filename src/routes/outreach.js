@@ -21,6 +21,7 @@ admin.put('/config', wrap(async (req, res) => res.json(await outreach.setConfig(
 admin.post('/seed', wrap(async (_q, res) => res.json(await outreach.seedOrgs())));
 admin.get('/packs', wrap(async (_q, res) => res.json({ packs: await outreach.listPacks() })));
 admin.post('/packs/seed', wrap(async (req, res) => res.json(await outreach.seedCountries(req.body || {}))));
+admin.post('/packs/africa-report', wrap(async (_q, res) => res.json(await outreach.seedAfricaReport())));
 admin.post('/packs/import', wrap(async (req, res) => res.json(await outreach.importList(req.body || {}))));
 admin.get('/countries', wrap(async (_q, res) => res.json({ countries: await outreach.countryTable() })));
 admin.get('/orgs', wrap(async (req, res) => res.json(await outreach.listOrgs(req.query))));

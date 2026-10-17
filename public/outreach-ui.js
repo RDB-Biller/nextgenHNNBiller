@@ -39,7 +39,7 @@
     <p class="muted" style="margin-top:0;font-size:13px">Add whole markets: Commonwealth countries, the French-, Portuguese-, Spanish-, Arabic-, Chinese- and Hindi-speaking markets, plus index lists such as the Ghana Club 100 and Fortune 500. Starter lists hold organisation names only (no people, no emails) and need checking against the source; use <b>Import a list</b> to load the full published ranking. Countries with strict direct-marketing law are <b>held</b> (no automated email/SMS) until you tick them as legally reviewed.</p>
     <div class="row"><div class="field"><label>Load by pack</label><select id="cp_pack"></select></div>
       <div class="field"><label>or one country</label><select id="cp_country"></select></div>
-      <div class="field" style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap"><button class="primary" onclick="cpLoad('pack')">Load pack</button><button onclick="cpLoad('country')">Load country</button><button onclick="cpLoad('commonwealth')">All Commonwealth</button><button onclick="cpLoad('all')">All countries</button></div></div>
+      <div class="field" style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap"><button class="primary" onclick="cpLoad('pack')">Load pack</button><button onclick="cpLoad('country')">Load country</button><button onclick="cpAfricaReport()">Load The Africa Report 2024 group</button><button onclick="cpLoad('commonwealth')">All Commonwealth</button><button onclick="cpLoad('all')">All countries</button></div></div>
     <p class="muted" id="cp_msg" style="font-size:13px"></p><div id="cp_packs"></div>
     <details style="margin:8px 0"><summary>Import a list (paste names, one per line, ranks are ignored)</summary>
       <div class="row"><div class="field"><label>List id</label><input id="cpi_id" placeholder="fortune500, ghana-club-100, my-list"/></div><div class="field"><label>Country</label><select id="cpi_c"></select></div>
@@ -71,6 +71,7 @@
   <div class="card" style="margin-bottom:14px"><h2>Run a campaign</h2>
     <div class="row"><div class="field"><label>Organisation type</label><select id="ou_et"><option value="">All</option>${opt(TYPES)}</select></div>
       <div class="field"><label>Persona</label><select id="ou_ep"><option value="">All</option>${opt(PERSONAS)}</select></div>
+      <div class="field"><label>Group / list (optional)</label><select id="ou_el"></select></div><div class="field"><label>Campaign name (optional)</label><input id="ou_ecn" placeholder="africa-report-insurers"/></div>
       <div class="field"><label>Sequence</label><select id="ou_es"></select></div>
       <div class="field" style="display:flex;align-items:flex-end;gap:6px"><button onclick="ouEnroll()">Enrol new contacts</button><button onclick="ouRun(true)">Dry-run</button><button class="primary" onclick="ouRun(false)">Send due now</button></div></div>
     <pre id="ou_run" class="muted" style="white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto"></pre></div>
@@ -129,7 +130,7 @@
   window.ouPreview = guard(async (id) => { const p = await api(`/contacts/${id}/preview?sequence=${q('ou_es').value}&step=0`); q('ou_run').textContent = `Channel: ${p.channel}${p.translated ? ' (translated to ' + p.lang + ')' : ''}\n${p.subject ? 'Subject: ' + p.subject + '\n' : ''}\n${p.body}`; });
   window.ouStatus = guard(async (id, s) => { await api(`/contacts/${id}/status`, 'POST', { status: s }); ouContacts(); });
   window.ouErase = guard(async (id) => { if (!confirm('Erase this person? Their address stays only as a hashed suppression entry.')) return; await api('/contacts/' + id, 'DELETE'); ouContacts(); });
-  window.ouEnroll = guard(async () => { const r = await api('/enroll', 'POST', { orgType: q('ou_et').value || undefined, persona: q('ou_ep').value || undefined, sequenceId: q('ou_es').value }); msg(`Enrolled ${r.enrolled}`); ouContacts(); });
+  window.ouEnroll = guard(async () => { const r = await api('/enroll', 'POST', { orgType: q('ou_et').value || undefined, persona: q('ou_ep').value || undefined, list: q('ou_el').value || undefined, campaign: q('ou_ecn').value || undefined, sequenceId: q('ou_es').value }); msg(`Enrolled ${r.enrolled}`); ouContacts(); });
   window.ouRun = guard(async (dry) => {
     if (!dry && !confirm('Send all due messages now? Real emails/SMS go out if providers are live.')) return;
     const r = await api('/run', 'POST', { dryRun: dry });
@@ -167,7 +168,7 @@
     q('cp_pack').innerHTML = pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${p.starterSize} starter, ${p.loaded} loaded)</option>`).join('');
     q('cp_country').innerHTML = co; q('cpi_c').innerHTML = '<option value="">(none)</option>' + co;
     const keepC = q('ou_fcc').value, keepL = q('ou_flist').value;
-    q('ou_fcc').innerHTML = '<option value="">All</option>' + co; q('ou_flist').innerHTML = '<option value="">All</option>' + pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); q('ou_fcc').value = keepC; q('ou_flist').value = keepL;
+    q('ou_fcc').innerHTML = '<option value="">All</option>' + co; q('ou_el').innerHTML = '<option value="">All contacts</option>' + pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); q('ou_flist').innerHTML = '<option value="">All</option>' + pk.packs.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); q('ou_fcc').value = keepC; q('ou_flist').value = keepL;
     q('cp_packs').innerHTML = `<table><tr><th>Pack</th><th>Source</th><th>Starter</th><th>Loaded</th><th>Note</th></tr>${pk.packs.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.source ? '<a href="' + esc(p.source) + '" target="_blank" rel="noopener">source</a>' : ''}</td><td>${p.starterSize}</td><td>${p.loaded}</td><td class="muted" style="font-size:12px">${esc(p.note || '')}</td></tr>`).join('')}</table>`;
     q('cp_countries').innerHTML = `<table><tr><th>Country</th><th>Languages</th><th>Level</th><th>Orgs</th><th>Contacts</th><th>Legally reviewed</th></tr>${CT.filter((c) => c.orgs || c.level === 'review').map((c) => `<tr><td>${esc(c.name)}${c.commonwealth ? ' <span class="muted">CW</span>' : ''}</td><td>${c.langs.join(', ')}</td><td>${c.level}${c.noColdSms ? ' · no cold SMS' : ''}</td><td>${c.orgs}</td><td>${c.contacts}</td><td>${c.level === 'review' ? `<input type="checkbox" ${c.approved ? 'checked' : ''} onchange="cpApprove('${c.code}', this.checked)"/>` : 'not needed'}</td></tr>`).join('')}</table>`;
   });
@@ -181,6 +182,7 @@
     if (mode === 'all' && !confirm('Load every country? This adds well over a thousand organisations.')) return;
     const r = await api('/packs/seed', 'POST', body); q('cp_msg').textContent = `Added ${r.added} organisations, updated ${r.merged} existing (${r.total} in total). Review the list before pitching.`; ouLoad();
   });
+  window.cpAfricaReport = guard(async () => { const r = await api('/packs/africa-report', 'POST'); q('cp_msg').textContent = `The Africa Report 2024 group: ${r.inGroup} organisations (${r.banks} banks, ${r.insurers} insurers); ${r.added} added, ${r.tagged} existing ones tagged. Pick it under "Group / list" to run a campaign on just these.`; ouLoad(); });
   window.cpImport = guard(async () => {
     const r = await api('/packs/import', 'POST', { listId: q('cpi_id').value, country: q('cpi_c').value || undefined, type: q('cpi_t').value || undefined, text: q('cpi_text').value });
     q('cpi_msg').textContent = `Read ${r.read}: added ${r.added}, already known ${r.known} (${r.tagged} newly tagged). ` + Object.entries(r.types).map(([k, v]) => k + ' ' + v).join(', '); ouLoad();

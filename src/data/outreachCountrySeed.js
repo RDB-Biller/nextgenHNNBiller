@@ -14,6 +14,10 @@
 const TYPE = { bank: 'bank', ins: 'insurer', hosp: 'hospital', ehr: 'ehr', adj: 'adjudication', core: 'core_banking', org: 'other' };
 
 const PACKS = [
+  { id: 'africa-report-2024', name: 'The Africa Report 2024: all rankings (banks and insurers)', country: '', source: 'The Africa Report, issue 129, Oct-Dec 2024', note: 'The lists HNN supplied: consolidated banking groups, the top banks and the top 100 insurers. Its own campaign group.', complete: false, campaign: true },
+  { id: 'africa-report-2024-bank-groups', name: 'The Africa Report 2024: top consolidated banking groups', country: '', source: 'The Africa Report, issue 129, Oct-Dec 2024', note: 'Top 28 groups.', complete: false, campaign: true },
+  { id: 'africa-report-2024-banks', name: 'The Africa Report 2024: ranked banks', country: '', source: 'The Africa Report, issue 129, Oct-Dec 2024', note: 'About 190 banks. Some scanned rows were unreadable and were completed by hand.', complete: false, campaign: true },
+  { id: 'africa-report-2024-insurers', name: 'The Africa Report 2024: top 100 insurers and reinsurers', country: '', source: 'The Africa Report, issue 129, Oct-Dec 2024', note: 'Includes health, life, general and reinsurance. Pitch claims adjudication, not only health.', complete: false, campaign: true },
   { id: 'ghana-club-100', name: 'Ghana Club 100', country: 'GH', source: 'https://gipc.gov.gh/category/ghana-club-100/', note: 'Ranked by GIPC each year. The public article text shows only the top 10, so import the full ranking from the GIPC publication.', complete: false },
   { id: 'ghana-health-finance', name: 'Ghana banks, insurers, health insurers/TPAs, hospitals', country: 'GH', source: 'https://www.nic.gov.gh', note: 'Regulator registers: National Insurance Commission, Bank of Ghana, NHIA.', complete: false },
   { id: 'fortune500', name: 'Fortune 500 (USA)', country: 'US', source: 'https://fortune.com/ranking/fortune500/', note: 'The full table is not readable from the public page, so this holds the banks, insurers, health and health-IT members plus the top 15. Download the list and import the rest.', complete: false },

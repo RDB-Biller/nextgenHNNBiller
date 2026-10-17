@@ -231,6 +231,21 @@ let countryRows;
   ok((await outreach.listOrgs({ commonwealth: true, pageSize: 5 })).total > 200 && (await outreach.listOrgs({ lang: 'pt' })).total > 10, 'filter by Commonwealth and by language');
   ok(!JSON.stringify(countryRows = await outreach.countryTable()).includes('@') && countryRows.find((c) => c.code === 'DE').level === 'review' && countryRows.find((c) => c.code === 'FR').approved, 'country table reports level and approval');
 
+  // ---- The Africa Report 2024 as its own campaign group
+  const ar = await outreach.seedAfricaReport();
+  ok(ar.inGroup >= 280 && ar.insurers >= 95 && ar.banks >= 180 && (await outreach.seedAfricaReport()).added === 0, `Africa Report group: ${ar.inGroup} organisations (${ar.banks} banks, ${ar.insurers} insurers); loading twice adds nothing`);
+  ok((await outreach.listOrgs({ list: 'africa-report-2024-bank-groups' })).total >= 25 && (await outreach.listOrgs({ list: 'africa-report-2024-insurers' })).total >= 95, 'the banking-group, bank and insurer sub-lists are separate groups');
+  const arIns = (await outreach.listOrgs({ list: 'africa-report-2024-insurers', cc: 'NG' })).rows[0];
+  const arCon = await outreach.addContact({ orgId: arIns.id, name: 'Tunde Ade', persona: 'claims', email: 'tunde@ng-insurer.test', source: 'https://ng-insurer.test/team' });
+  const otherCon = await outreach.addContact({ orgId: hOrg.id, name: 'Not In Group', email: 'nig@hospital2.test', source: 'https://hospital2.test' });
+  const arPv = await outreach.preview(arCon.id, 'email-only', 0);
+  ok(/The Africa Report's 2024 ranking of Africa's insurers/.test(arPv.body) && /^Dear Tunde,/.test(arPv.body), 'first email to a ranked insurer opens with the Africa Report reference');
+  ok(!/Africa Report/.test((await outreach.preview(otherCon.id, 'email-only', 0)).body), 'organisations outside the group do not get that line');
+  const enr = await outreach.enroll({ list: 'africa-report-2024-insurers', campaign: 'africa-report-insurers', sequenceId: 'email-only' });
+  const arAfter = (await outreach.listContacts({ campaign: 'africa-report-insurers' })).rows;
+  ok(enr.enrolled >= 1 && arAfter.some((c) => c.id === arCon.id) && !arAfter.some((c) => c.id === otherCon.id), 'a campaign can target just one group');
+  ok((await outreach.overview()).contactsByCampaign['africa-report-insurers'] >= 1 && (await outreach.listContacts({ list: 'africa-report-2024-insurers' })).rows.some((c) => c.id === arCon.id), 'campaign counts and per-group contact lists');
+
   srv.close();
   console.log(`\n${a} assertions${process.exitCode ? ' — WITH FAILURES' : ' — all passed'}`);
 })().catch((x) => { console.error(x); process.exit(1); });

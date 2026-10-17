@@ -29,6 +29,8 @@ const i18n = require('./i18n');
 const seed = require('../data/outreachSeed');
 const countries = require('../data/countries');
 const countrySeed = require('../data/outreachCountrySeed');
+const africaReport = require('../data/africaReportSeed');
+const AR = { all: 'africa-report-2024', groups: 'africa-report-2024-bank-groups', banks: 'africa-report-2024-banks', ins: 'africa-report-2024-insurers' };
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const now = () => new Date().toISOString();
@@ -249,6 +251,21 @@ async function seedCountries({ countries: codes, commonwealth, all, packs } = {}
   }
   await saveOrgs(cur); return { added, merged, total: cur.length };
 }
+/** The Africa Report (issue 129, Oct-Dec 2024) rankings, as one campaign group: tags existing organisations, adds the missing ones. */
+async function seedAfricaReport() {
+  const cur = await allOrgs(); const idx = new Map(cur.map((o) => [normName(o.name), o])); let added = 0, tagged = 0;
+  const put = (name, country, type, tags) => {
+    const key = normName(name); let o = idx.get(key); const g = countries.find(country);
+    if (o) { const before = (o.lists || []).length; o.lists = Array.from(new Set([...(o.lists || []), ...tags])); if (o.lists.length !== before) tagged++; o.country = o.country || (g ? g.name : country); if (!o.cc && g) o.cc = g.code; if (!o.lang && g) o.lang = g.langs[0]; return; }
+    o = { id: rid('org'), name, type, country: g ? g.name : country, cc: g ? g.code : '', lang: g ? g.langs[0] : '', lists: tags, website: '', note: 'Ranked in The Africa Report, issue 129 (Oct-Dec 2024)', tier: 'africa-report-2024', status: 'new', createdAt: now() };
+    cur.push(o); idx.set(key, o); added++;
+  };
+  for (const [n, c, , k] of africaReport.banks) put(n, c, 'bank', [AR.all, k === 'group' ? AR.groups : AR.banks]);
+  for (const [n, c, , k] of africaReport.insurers) put(n, c, k === 'reinsurer' ? 'reinsurer' : 'insurer', [AR.all, AR.ins]);
+  await saveOrgs(cur);
+  const inList = cur.filter((o) => (o.lists || []).includes(AR.all));
+  return { added, tagged, inGroup: inList.length, banks: inList.filter((o) => o.type === 'bank').length, insurers: inList.filter((o) => ['insurer', 'reinsurer'].includes(o.type)).length };
+}
 function classifyName(name) {
   const n = String(name || '');
   if (/\b(insurance|insurer|assurance|assurances|assurer|seguros|seguradora|versicherung|assicurazioni|takaful|reinsurance|reassurance|life|medical aid|medical scheme|health plan|hmo|mutuelle|mutualit|mutual)\b/i.test(n) && !/\bbank\b/i.test(n)) return 'insurer';
@@ -266,7 +283,8 @@ async function listPacks() {
   const seedCount = {}; for (const sd of countrySeed.orgs) { const c = countries.find(sd.cc); if (!c) continue; for (const t of new Set([...sd.tags, ...derivedTags(c)])) seedCount[t] = (seedCount[t] || 0) + 1; }
   const loaded = {}; for (const o of orgs) for (const t of o.lists || []) loaded[t] = (loaded[t] || 0) + 1;
   void derived;
-  return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
+  const arSize = { [AR.all]: africaReport.banks.length + africaReport.insurers.length, [AR.groups]: africaReport.banks.filter((b) => b[3] === 'group').length, [AR.banks]: africaReport.banks.filter((b) => b[3] !== 'group').length, [AR.ins]: africaReport.insurers.length };
+  return [...countrySeed.PACKS, ...custom].map((p) => ({ ...p, starterSize: arSize[p.id] || seedCount[p.id] || 0, loaded: loaded[p.id] || 0 }));
 }
 /** Import a pasted/uploaded list of organisation names into a list pack (one name per line; leading ranks are ignored). */
 async function importList({ listId, listName, country, type, text, names } = {}) {
@@ -383,12 +401,14 @@ async function importContacts(rows, opts) {
   }
   return res;
 }
-async function listContacts({ orgId, status, persona, kind, q, page = 1, pageSize = 50 } = {}) {
+async function listContacts({ orgId, status, persona, kind, campaign, list, q, page = 1, pageSize = 50 } = {}) {
   let a = await allContacts();
   if (orgId) a = a.filter((c) => c.orgId === orgId);
   if (status) a = a.filter((c) => c.status === status);
   if (persona) a = a.filter((c) => c.persona === persona);
   if (kind) a = a.filter((c) => (c.kind || 'person') === kind);
+  if (campaign) a = a.filter((c) => c.campaign === campaign);
+  if (list) { const ol = new Map((await allOrgs()).map((o) => [o.id, o.lists || []])); a = a.filter((c) => (ol.get(c.orgId) || []).includes(list)); }
   if (q) { const s = String(q).toLowerCase(); a = a.filter((c) => `${c.name} ${c.role} ${c.email} ${c.purpose || ''}`.toLowerCase().includes(s)); }
   const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
   const total = a.length; const p = Math.max(1, +page || 1); const n = Math.min(200, Math.max(1, +pageSize || 50));
@@ -513,15 +533,15 @@ const DEFAULT_SEQS = [
 async function listSequences() { return (await store.settings.get(SEQS)) || DEFAULT_SEQS; }
 async function getSeq(id) { const s = (await listSequences()).find((x) => x.id === id); if (!s) throw err(404, 'sequence_not_found'); return s; }
 
-async function enroll({ contactIds, orgType, persona, sequenceId = 'standard', limit = 500 } = {}) {
+async function enroll({ contactIds, orgType, persona, list: listTag, country, campaign, sequenceId = 'standard', limit = 500 } = {}) {
   const seq = await getSeq(sequenceId); const orgs = new Map((await allOrgs()).map((o) => [o.id, o]));
   let list = Array.isArray(contactIds) && contactIds.length ? (await Promise.all(contactIds.map((i) => store.settings.get(CON + i)))).filter(Boolean) : await allContacts();
-  list = list.filter((c) => c.status === 'new' && !c.seq && !c.optedOut && (!orgType || (orgs.get(c.orgId) || {}).type === orgType) && (!persona || c.persona === persona)).slice(0, limit);
+  list = list.filter((c) => c.status === 'new' && !c.seq && !c.optedOut && (!orgType || (orgs.get(c.orgId) || {}).type === orgType) && (!persona || c.persona === persona) && (!listTag || ((orgs.get(c.orgId) || {}).lists || []).includes(listTag)) && (!country || (orgs.get(c.orgId) || {}).cc === String(country).toUpperCase())).slice(0, limit);
   let n = 0; let held = 0; const cfg = await getConfig();
   for (const c of list) {
     if (await anySuppressed(c)) continue;
     if (c.email && reachOf(orgs.get(c.orgId), cfg).held && seq.steps.some((st) => st.channel === 'email')) { held++; continue; } // country awaiting legal review
-    c.seq = { id: seq.id, step: 0, nextAt: now() }; c.status = 'queued'; note(c, { type: 'enrolled', sequence: seq.id }); await saveContact(c); n++;
+    c.seq = { id: seq.id, step: 0, nextAt: now() }; c.status = 'queued'; c.campaign = String(campaign || listTag || '').slice(0, 60) || c.campaign || null; note(c, { type: 'enrolled', sequence: seq.id }); await saveContact(c); n++;
   }
   return { enrolled: n, held, sequence: seq.id };
 }
@@ -556,6 +576,10 @@ async function compose(c, org, step, cfg) {
     body = `Dear ${first},\n\n${who}${rr && rr.org ? ' (' + rr.org + ')' : ''} thought you would want to see this, so I am writing once. We have built ${(T[segment] || T.bank).pitch}\n\n${CTA(cfg).replace('{sandbox_link}', urls.sandbox).replace('{feedback_link}', urls.feedback)}\n\n${sig}`;
   }
   if (step.variant === 'last') { subject = subject && 'Closing the loop: ' + subject; body = `Dear ${first},\n\nI will stop here so I do not crowd your inbox. If embedded savings, micro-credit or claims adjudication is on your roadmap, the sandbox stays open: ${urls.sandbox}\nAnd if you would rather not hear from us, use the link below.\n\n${sig}`; }
+  if (step.channel === 'email' && !step.variant && (org.lists || []).includes(AR.all)) {
+    const what = (org.lists || []).includes(AR.ins) ? "insurers" : 'banks';
+    body = body.replace(/^(Dear [^\n]*,\n\n)/, `$1We came across ${org.name} in The Africa Report's 2024 ranking of Africa's ${what}, which is why I am writing to you.\n\n`);
+  }
   let translated = false;
   if (c.lang && c.lang !== 'en') {
     const tb = await i18n.translate(body, 'en', c.lang); if (tb.ok) { body = tb.text; translated = true; }
@@ -669,6 +693,7 @@ async function overview() {
     sandboxVisitors: clicks, feedback: (await listFeedback()).length, openTasks: (await listTasks()).length,
     sentToday: { email: await sentToday('email'), sms: await sentToday('sms'), whatsapp: await sentToday('whatsapp') },
     suppressed: (await store.settings.keys('out:sup:')).length,
+    contactsByCampaign: by(cons.filter((c) => c.campaign), (c) => c.campaign),
     orgsByCountry: Object.fromEntries(Object.entries(by(orgs, (o) => o.cc || 'unknown')).sort((a, b) => b[1] - a[1]).slice(0, 25)), orgsByList: by(orgs.flatMap((o) => (o.lists || []).map((l) => ({ l }))), (x) => x.l), orgsHeld: orgs.filter((o) => reachOf(o, cfgO).held).length,
   };
 }
@@ -775,7 +800,7 @@ async function addPartnerByAdmin(b) {
 
 module.exports = {
   TYPES, PERSONAS, PHONE_TYPES, classifyPhone, roleOf, ORG_STATUS, getConfig, setConfig, publicConfig,
-  seedOrgs, seedCountries, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
+  seedOrgs, seedCountries, seedAfricaReport, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
   getReferrer, joinAsPartner, trackReferralClick, referralStats, introduce, addReward, referralOverview, addPartnerByAdmin,
   listSequences, enroll, pause, runDue, preview, listTasks, completeTask, trackClick, submitFeedback, listFeedback, overview, isSuppressed, suppress,
 };

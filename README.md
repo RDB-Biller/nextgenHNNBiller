@@ -1138,3 +1138,12 @@ Country policy: EU/EEA and Switzerland, Canada, Australia, New Zealand, South Af
 engine will not enrol their contacts for email or SMS until you tick the country as legally reviewed. Cold SMS is never
 sent to the US, Canada, India or China. Calls, manual LinkedIn and referrals-by-hand are unaffected. This table is a
 conservative starting point, not legal advice.
+
+### The Africa Report 2024 group
+
+The rankings HNN supplied from The Africa Report (issue 129, Oct-Dec 2024) form their own campaign group: the top
+consolidated banking groups, the ranked banks and the top 100 insurers and reinsurers. **Load The Africa Report 2024
+group** (Master Control → Outreach → Country and index lists) tags organisations already in the seed and adds missing
+ones; sub-groups are `africa-report-2024-bank-groups`, `-banks` and `-insurers`. In **Run a campaign** pick the group
+and give the campaign a name to enrol only those contacts; first emails to them open with a line noting the ranking.
+A few scanned rows were unreadable and were completed by hand, so check names against the magazine.
