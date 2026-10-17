@@ -27,6 +27,9 @@ api.get('/lines', wrap(async (req, res) => {
   let phone = null; if (req.get('authorization')) { try { phone = (await accounts.authenticate(req.get('authorization'))).phone; } catch (_e) { /* anonymous catalogue */ } }
   res.json({ result: await erheat.lines(phone) });
 }));
+api.get('/health/facilities', wrap(async (_q, res) => res.json({ result: await erheat.healthFacilities() })));
+api.get('/health/pending', authed(async (_q, res, a) => res.json({ result: await erheat.healthPending(a) })));
+api.get('/history', authed(async (_q, res, a) => res.json({ result: await erheat.awardedHistory(a) })));
 api.get('/passport', authed(async (_q, res, a) => res.json({ result: await erheat.passport(a.phone) })));
 api.get('/apps', authed(async (_q, res, a) => res.json({ result: await erheat.myApps(a) })));
 api.post('/apply', limiter(10, 60000), authed(async (req, res, a) => res.status(201).json({ result: await erheat.apply(a, req.body || {}) })));
