@@ -273,6 +273,23 @@ async function healthContext(b, borrowerPhone, mine, amount, cap) {
   const phone = facilityPhone(t); if (!phone) throw err(422, `${t.name} has no contact number on file yet. Enter its details instead.`);
   return { billBacked: false, tenant: t, payee: { name: t.name, phone }, verifier: { name: t.name, phone }, evidence: { facility: t.name, note: (b.evidence || {}).note || '', insureCreditNo: (b.evidence || {}).insureCreditNo || '' } };
 }
+
+// ------------------------------------------------------------------ saved profile (optional, per line)
+const PROF = 'erheat:profile:';
+const cleanPerson = (x, own) => { const name = String((x || {}).name || '').trim().slice(0, 100); const phone = dial((x || {}).phone); if (!name && !(x || {}).phone) return null; if (!validPhone(phone)) throw err(422, 'A saved contact needs a valid phone number.'); if (phone === own) throw err(422, 'A saved contact cannot be your own number.'); return { name, phone }; };
+async function getProfile(account) { return (await store.settings.get(PROF + account._id)) || { lines: {}, updatedAt: null }; }
+async function saveProfile(account, body = {}) {
+  const own = dial(account.phone); const cur = await getProfile(account); const next = { lines: { ...cur.lines }, updatedAt: now() };
+  for (const [key, v] of Object.entries(body.lines || {})) {
+    const line = LINES[key]; if (!line) continue;
+    if (v === null) { delete next.lines[key]; continue; }
+    const ev = {}; for (const f of line.fields) { const x = (v.evidence || {})[f.key]; if (x === undefined || x === null || String(x).trim() === '') continue; ev[f.key] = String(x).trim().slice(0, 200); }
+    const entry = { evidence: ev }; const payee = cleanPerson(v.payee, own); const verifier = cleanPerson(v.verifier, own);
+    if (payee) entry.payee = payee; if (verifier) entry.verifier = verifier;
+    if (Object.keys(ev).length || entry.payee || entry.verifier) next.lines[key] = entry; else delete next.lines[key];
+  }
+  await store.settings.set(PROF + account._id, next); return next;
+}
 const AWARDED = ['approved', 'payee_paid', 'repaying', 'closed', 'defaulted'];
 async function awardedHistory(account) {
   const rows = []; for (const k of await store.settings.keys(APP)) { const a = await store.settings.get(k); if (a && a.borrower.id === account._id && AWARDED.includes(a.status)) rows.push(a); }
@@ -506,5 +523,5 @@ async function partnerList({ lines: allowed = [], phones = [], all = false, stat
 
 module.exports = {
   HARD_CAP, LINES, CONSENT_TEXT, getConfig, setConfig, rotateSecret, checkSecret, hookUrls, lines, passport, apply, resendVerifier, myApps, getMine, cancel,
-  healthFacilities, healthPending, awardedHistory, verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, partnerList, listAll, adminGet, simulate, sweep, _setPostImplForTests,
+  getProfile, saveProfile, healthFacilities, healthPending, awardedHistory, verifierView, verifierRespond, consent, packetByAppNo, recordDecision, recordPaid, recordRepayment, redeem, partnerList, listAll, adminGet, simulate, sweep, _setPostImplForTests,
 };

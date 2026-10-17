@@ -63,6 +63,12 @@ messaging._setRequestImplForTests(async (url, opts) => { const f = new URLSearch
   const yaw = await mk('+233241110003', 'Yaw');
   e = await rej(erheat.apply(yaw, { line: 'health', facilityId: 'nope', amount: 80 })); ok(e && e.status === 404, 'unknown facility is refused');
 
+  // profile
+  let pr = await erheat.saveProfile(yaw, { lines: { energy: { evidence: { reference: '12345', junk: 'x' }, payee: { name: 'ECG Vendor', phone: '0244000999' } }, nope: { evidence: { a: '1' } } } });
+  ok(pr.lines.energy && Object.keys(pr.lines.energy.evidence).every((k) => k !== 'junk') && pr.lines.energy.payee.phone === '+233244000999' && !pr.lines.nope, 'profile saves only known fields for known lines');
+  e = await rej(erheat.saveProfile(yaw, { lines: { energy: { payee: { name: 'Me', phone: yaw.phone } } } })); ok(e && e.status === 422, 'a saved contact cannot be the owner');
+  ok((await erheat.getProfile(ama)).updatedAt === null, 'profiles are private per account');
+  pr = await erheat.saveProfile(yaw, { lines: { energy: null } }); ok(!pr.lines.energy, 'a saved line can be cleared');
   // HTTP
   const app = express(); app.use('/erheat/api', routes.api); const srv = app.listen(0); await new Promise((r2) => setTimeout(r2, 50)); const base = `http://127.0.0.1:${srv.address().port}`;
   const sess = await accounts.login({ phone: '+233241110001', password: 'secret1' }); const bearer = { Authorization: `Bearer ${sess.tokens[0].token}` };
@@ -70,6 +76,8 @@ messaging._setRequestImplForTests(async (url, opts) => { const f = new URLSearch
   res = await fetch(`${base}/erheat/api/health/pending`); ok(res.status === 401, 'HTTP: pending needs sign-in');
   res = await fetch(`${base}/erheat/api/health/pending`, { headers: bearer }); j = await res.json(); ok(res.status === 200 && Array.isArray(j.result.items), 'HTTP: pending');
   res = await fetch(`${base}/erheat/api/history`, { headers: bearer }); j = await res.json(); ok(res.status === 200 && j.result.totals.count === 1, 'HTTP: history');
+  res = await fetch(`${base}/erheat/api/profile`, { method: 'PUT', headers: { ...bearer, 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: { energy: { evidence: { reference: '777' } } } }) }); j = await res.json(); ok(res.status === 200 && j.result.lines.energy.evidence.reference === '777', 'HTTP: save profile');
+  res = await fetch(`${base}/erheat/api/profile`, { headers: bearer }); j = await res.json(); ok(j.result.lines.energy.evidence.reference === '777', 'HTTP: read profile');
   srv.close();
   console.log(`\n${a} assertions${process.exitCode ? ' — WITH FAILURES' : ' — all passed'}`);
 })().catch((x) => { console.error(x); process.exit(1); });
