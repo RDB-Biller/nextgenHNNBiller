@@ -71,5 +71,22 @@
  "review.notice": "Diese Übersetzung wartet auf die Prüfung durch Muttersprachler.",
  "sms.otp": "Ihr Bestätigungscode lautet {code}. Er läuft in 10 Minuten ab. Ignorieren Sie diese Nachricht, wenn Sie ihn nicht angefordert haben.",
  "sms.reset": "Ihr TrimesterSave-Code zum Zurücksetzen des Passworts lautet {code}. Er läuft in 30 Minuten ab. Ignorieren Sie diese Nachricht, wenn Sie ihn nicht angefordert haben.",
- "sms.appt": "Erinnerung: {title} am {when}{where}. - TrimesterSave"
+ "sms.appt": "Erinnerung: {title} am {when}{where}. - TrimesterSave",
+ "auth.welcome": "Willkommen zurück!",
+ "auth.welcome_sub": "Melden Sie sich an, um auf Ihr Konto zuzugreifen",
+ "auth.phone_ph": "Geben Sie Ihre Telefonnummer ein",
+ "auth.password_ph": "Geben Sie Ihr Passwort ein",
+ "auth.phone_err": "Bitte geben Sie eine gültige Telefonnummer ein",
+ "auth.password_err": "Bitte geben Sie Ihr Passwort ein",
+ "auth.new_here": "Neu hier?",
+ "auth.have_account": "Haben Sie bereits ein Konto?",
+ "auth.savings_cta": "Erwarten Sie ein Baby oder planen Sie einen Eingriff?",
+ "auth.savings_link": "Sparplan starten",
+ "auth.no_account_needed": "kein Konto erforderlich",
+ "auth.firstname": "Vorname",
+ "auth.lastname": "Nachname",
+ "auth.signup_title": "Erstellen Sie Ihr Konto",
+ "nav.settings": "Einstellungen",
+ "nav.budget": "Budget",
+ "nav.report": "Bericht"
 }

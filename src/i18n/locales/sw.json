@@ -71,5 +71,22 @@
  "review.notice": "Tafsiri hii inasubiri ukaguzi wa mzungumzaji asilia.",
  "sms.otp": "Msimbo wako wa uthibitisho ni {code}. Utaisha baada ya dakika 10. Puuza ujumbe huu usipoomba.",
  "sms.reset": "Msimbo wako wa kuweka upya nenosiri la TrimesterSave ni {code}. Utaisha baada ya dakika 30. Puuza ujumbe huu usipoomba.",
- "sms.appt": "Kumbusho: {title} tarehe {when}{where}. - TrimesterSave"
+ "sms.appt": "Kumbusho: {title} tarehe {when}{where}. - TrimesterSave",
+ "auth.welcome": "Karibu tena!",
+ "auth.welcome_sub": "Ingia ili kufikia akaunti yako",
+ "auth.phone_ph": "Weka namba yako ya simu",
+ "auth.password_ph": "Weka nenosiri lako",
+ "auth.phone_err": "Tafadhali weka namba sahihi ya simu",
+ "auth.password_err": "Tafadhali weka nenosiri lako",
+ "auth.new_here": "Mgeni hapa?",
+ "auth.have_account": "Tayari una akaunti?",
+ "auth.savings_cta": "Unatarajia mtoto au unapanga upasuaji?",
+ "auth.savings_link": "Anza mpango wa akiba",
+ "auth.no_account_needed": "akaunti haihitajiki",
+ "auth.firstname": "Jina la kwanza",
+ "auth.lastname": "Jina la ukoo",
+ "auth.signup_title": "Fungua akaunti yako",
+ "nav.settings": "Mipangilio",
+ "nav.budget": "Bajeti",
+ "nav.report": "Ripoti"
 }

@@ -71,5 +71,22 @@
  "review.notice": "هذه الترجمة بانتظار مراجعة متحدث أصلي.",
  "sms.otp": "رمز التحقق الخاص بك هو {code}. تنتهي صلاحيته خلال 10 دقائق. تجاهل هذه الرسالة إن لم تطلبه.",
  "sms.reset": "رمز إعادة تعيين كلمة المرور في TrimesterSave هو {code}. تنتهي صلاحيته خلال 30 دقيقة. تجاهل هذه الرسالة إن لم تطلبه.",
- "sms.appt": "تذكير: {title} بتاريخ {when}{where}. - TrimesterSave"
+ "sms.appt": "تذكير: {title} بتاريخ {when}{where}. - TrimesterSave",
+ "auth.welcome": "مرحبًا بعودتك!",
+ "auth.welcome_sub": "سجّل الدخول للوصول إلى حسابك",
+ "auth.phone_ph": "أدخل رقم هاتفك",
+ "auth.password_ph": "أدخل كلمة المرور",
+ "auth.phone_err": "الرجاء إدخال رقم هاتف صحيح",
+ "auth.password_err": "الرجاء إدخال كلمة المرور",
+ "auth.new_here": "جديد هنا؟",
+ "auth.have_account": "هل لديك حساب بالفعل؟",
+ "auth.savings_cta": "هل تتوقعين مولودًا أو تخططين لإجراء طبي؟",
+ "auth.savings_link": "ابدأ خطة ادخار",
+ "auth.no_account_needed": "لا حاجة إلى حساب",
+ "auth.firstname": "الاسم الأول",
+ "auth.lastname": "اسم العائلة",
+ "auth.signup_title": "أنشئ حسابك",
+ "nav.settings": "الإعدادات",
+ "nav.budget": "الميزانية",
+ "nav.report": "التقرير"
 }

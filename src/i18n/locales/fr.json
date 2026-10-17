@@ -71,5 +71,22 @@
  "review.notice": "Cette traduction attend la relecture d'un locuteur natif.",
  "sms.otp": "Votre code de vérification est {code}. Il expire dans 10 minutes. Ignorez ce message si vous n'en avez pas fait la demande.",
  "sms.reset": "Votre code de réinitialisation du mot de passe TrimesterSave est {code}. Il expire dans 30 minutes. Ignorez ce message si vous n'en avez pas fait la demande.",
- "sms.appt": "Rappel : {title} le {when}{where}. - TrimesterSave"
+ "sms.appt": "Rappel : {title} le {when}{where}. - TrimesterSave",
+ "auth.welcome": "Bon retour !",
+ "auth.welcome_sub": "Connectez-vous pour accéder à votre compte",
+ "auth.phone_ph": "Saisissez votre numéro de téléphone",
+ "auth.password_ph": "Saisissez votre mot de passe",
+ "auth.phone_err": "Veuillez saisir un numéro de téléphone valide",
+ "auth.password_err": "Veuillez saisir votre mot de passe",
+ "auth.new_here": "Nouveau ici ?",
+ "auth.have_account": "Vous avez déjà un compte ?",
+ "auth.savings_cta": "Vous attendez un bébé ou prévoyez une intervention ?",
+ "auth.savings_link": "Commencer un plan d'épargne",
+ "auth.no_account_needed": "aucun compte requis",
+ "auth.firstname": "Prénom",
+ "auth.lastname": "Nom de famille",
+ "auth.signup_title": "Créez votre compte",
+ "nav.settings": "Paramètres",
+ "nav.budget": "Budget",
+ "nav.report": "Rapport"
 }

@@ -71,5 +71,22 @@
  "review.notice": "इस अनुवाद की समीक्षा मूल वक्ता द्वारा होनी बाकी है।",
  "sms.otp": "आपका सत्यापन कोड {code} है। यह 10 मिनट में समाप्त हो जाएगा। यदि आपने अनुरोध नहीं किया तो अनदेखा करें।",
  "sms.reset": "आपका TrimesterSave पासवर्ड रीसेट कोड {code} है। यह 30 मिनट में समाप्त हो जाएगा। यदि आपने अनुरोध नहीं किया तो अनदेखा करें।",
- "sms.appt": "अनुस्मारक: {title}, {when}{where}। - TrimesterSave"
+ "sms.appt": "अनुस्मारक: {title}, {when}{where}। - TrimesterSave",
+ "auth.welcome": "वापसी पर स्वागत है!",
+ "auth.welcome_sub": "अपने खाते तक पहुँचने के लिए साइन इन करें",
+ "auth.phone_ph": "अपना फ़ोन नंबर दर्ज करें",
+ "auth.password_ph": "अपना पासवर्ड दर्ज करें",
+ "auth.phone_err": "कृपया सही फ़ोन नंबर दर्ज करें",
+ "auth.password_err": "कृपया अपना पासवर्ड दर्ज करें",
+ "auth.new_here": "यहाँ नए हैं?",
+ "auth.have_account": "क्या आपके पास पहले से खाता है?",
+ "auth.savings_cta": "क्या आप बच्चे की उम्मीद कर रही हैं या कोई प्रक्रिया करवाने वाली हैं?",
+ "auth.savings_link": "बचत योजना शुरू करें",
+ "auth.no_account_needed": "खाते की आवश्यकता नहीं",
+ "auth.firstname": "पहला नाम",
+ "auth.lastname": "उपनाम",
+ "auth.signup_title": "अपना खाता बनाएँ",
+ "nav.settings": "सेटिंग्स",
+ "nav.budget": "बजट",
+ "nav.report": "रिपोर्ट"
 }

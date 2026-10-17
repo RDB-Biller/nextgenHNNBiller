@@ -71,5 +71,22 @@
  "review.notice": "此翻译正等待母语人士审校。",
  "sms.otp": "您的验证码是 {code}，10 分钟内有效。若非本人操作请忽略。",
  "sms.reset": "您的 TrimesterSave 密码重置码是 {code}，30 分钟内有效。若非本人操作请忽略。",
- "sms.appt": "提醒：{title}，时间 {when}{where}。- TrimesterSave"
+ "sms.appt": "提醒：{title}，时间 {when}{where}。- TrimesterSave",
+ "auth.welcome": "欢迎回来！",
+ "auth.welcome_sub": "登录以访问您的账户",
+ "auth.phone_ph": "输入您的手机号码",
+ "auth.password_ph": "输入您的密码",
+ "auth.phone_err": "请输入正确的手机号码",
+ "auth.password_err": "请输入密码",
+ "auth.new_here": "新用户？",
+ "auth.have_account": "已有账户？",
+ "auth.savings_cta": "正在备孕待产或计划手术？",
+ "auth.savings_link": "开始储蓄计划",
+ "auth.no_account_needed": "无需账户",
+ "auth.firstname": "名",
+ "auth.lastname": "姓",
+ "auth.signup_title": "创建您的账户",
+ "nav.settings": "设置",
+ "nav.budget": "预算",
+ "nav.report": "报告"
 }

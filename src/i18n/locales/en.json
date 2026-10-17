@@ -71,5 +71,22 @@
  "review.notice": "This translation is awaiting review by a native speaker.",
  "sms.otp": "Your verification code is {code}. It expires in 10 minutes. Ignore this if you did not request it.",
  "sms.reset": "Your TrimesterSave password reset code is {code}. It expires in 30 minutes. Ignore this if you did not ask for it.",
- "sms.appt": "Reminder: {title} on {when}{where}. - TrimesterSave"
+ "sms.appt": "Reminder: {title} on {when}{where}. - TrimesterSave",
+ "auth.welcome": "Welcome back!",
+ "auth.welcome_sub": "Sign in to access your account",
+ "auth.phone_ph": "Enter your phone number",
+ "auth.password_ph": "Enter your password",
+ "auth.phone_err": "Please enter a correct phone number",
+ "auth.password_err": "Please enter your password",
+ "auth.new_here": "New here?",
+ "auth.have_account": "Already have an account?",
+ "auth.savings_cta": "Expecting a baby or planning a procedure?",
+ "auth.savings_link": "Start a savings plan",
+ "auth.no_account_needed": "no account needed",
+ "auth.firstname": "First name",
+ "auth.lastname": "Last name",
+ "auth.signup_title": "Create your account",
+ "nav.settings": "Settings",
+ "nav.budget": "Budget",
+ "nav.report": "Report"
 }

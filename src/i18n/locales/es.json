@@ -71,5 +71,22 @@
  "review.notice": "Esta traducción está pendiente de revisión por un hablante nativo.",
  "sms.otp": "Su código de verificación es {code}. Caduca en 10 minutos. Ignórelo si no lo solicitó.",
  "sms.reset": "Su código para restablecer la contraseña de TrimesterSave es {code}. Caduca en 30 minutos. Ignórelo si no lo solicitó.",
- "sms.appt": "Recordatorio: {title} el {when}{where}. - TrimesterSave"
+ "sms.appt": "Recordatorio: {title} el {when}{where}. - TrimesterSave",
+ "auth.welcome": "¡Bienvenido de nuevo!",
+ "auth.welcome_sub": "Inicie sesión para acceder a su cuenta",
+ "auth.phone_ph": "Introduzca su número de teléfono",
+ "auth.password_ph": "Introduzca su contraseña",
+ "auth.phone_err": "Introduzca un número de teléfono válido",
+ "auth.password_err": "Introduzca su contraseña",
+ "auth.new_here": "¿Nuevo aquí?",
+ "auth.have_account": "¿Ya tiene una cuenta?",
+ "auth.savings_cta": "¿Espera un bebé o planea un procedimiento?",
+ "auth.savings_link": "Empezar un plan de ahorro",
+ "auth.no_account_needed": "sin necesidad de cuenta",
+ "auth.firstname": "Nombre",
+ "auth.lastname": "Apellido",
+ "auth.signup_title": "Cree su cuenta",
+ "nav.settings": "Ajustes",
+ "nav.budget": "Presupuesto",
+ "nav.report": "Informe"
 }
