@@ -584,6 +584,8 @@ async function startVerification(phoneRaw, { purpose = 'signup', lang } = {}) {
   if (!r.ok && !r.sandbox) {
     // Never tell a person "we texted you" when nothing went out: say so, and say what to do.
     console.error(`[verify] SMS code was NOT sent to ${maskPhone(phone)}: ${r.error || 'unknown'}`);
+    // Show the real reason in Master Control > SMS Dashboard > Message log (the code itself is never logged).
+    try { await store.smsLog.insert({ id: `sms_${crypto.randomBytes(5).toString('hex')}`, batchId: null, direction: 'out', to: phone, message: '(verification code)', status: 'failed', error: r.error || 'send_failed', createdAt: new Date().toISOString(), actor: 'verification' }); } catch (_e) { /* logging must never block */ }
     const notOn = /not_configured|credentials|sender_not_configured|unknown_provider/.test(r.error || '');
     throw err(424, 'sms_not_sent', notOn
       ? 'Text messages are not switched on for this service yet, so no code could be sent. Please try again later or contact support.'

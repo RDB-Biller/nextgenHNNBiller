@@ -1089,6 +1089,14 @@ router.put('/trial-registrations/:id/status', async (req, res, next) => {
   }
 });
 
+router.post('/trial-registrations/:id/notify', async (req, res, next) => {
+  try { res.json(await trialRegistrations.renotify(req.params.id)); }
+  catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
 // ---- Solutions (Product Lab type 'solution') ---------------------------------
 // Create/edit/promote use the generic /products routes above; these add the
 // module registry (drives the generated form) and a runner so Master Control
