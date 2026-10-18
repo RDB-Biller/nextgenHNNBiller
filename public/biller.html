@@ -58,7 +58,7 @@
       </div>
     </div>
     <div class="grid" style="align-content:start">
-      <div class="card"><h2>Live bill</h2><div id="ledger" class="ledger"><p class="muted">Add items to build the bill.</p></div></div>
+      <div class="card"><h2>Live bill</h2><div class="row" style="align-items:center;gap:8px;margin:-4px 0 8px"><label for="viewCur" class="muted" style="font-size:13px;white-space:nowrap">Show amounts in</label><select id="viewCur" onchange="setViewCur(this.value)" style="max-width:240px"><option value="GHS">GHS · Ghana cedi</option></select></div><p id="curNote" class="muted" style="font-size:12px;margin:0 0 8px"></p><div id="ledger" class="ledger"><p class="muted">Add items to build the bill.</p></div></div>
       <div class="card"><h2>Settle</h2>
         <p class="muted" style="margin-top:0">Patient pays now, or tap the payer the patient named — the payer moves money A2A to your account.</p>
         <div class="row" style="margin-bottom:12px">
@@ -169,6 +169,25 @@ const hdr=()=>({'Content-Type':'application/json','x-api-key':$('apikey').value.
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=(n)=>Number(n).toFixed(2);
+// Display currency: everything is billed and settled in GHS; this only changes how amounts are SHOWN (approximate rates set in Master Control).
+let CUR={list:[],rates:{},asOf:'',indicative:true,view:'GHS'};
+try{CUR.view=localStorage.getItem('hnn.viewcur')||'GHS';}catch(e){}
+function money(n){const v=Number(n);const code=CUR.view;const r=CUR.rates;
+  if(code==='GHS'||!r.GHS||!r[code]||!isFinite(v))return 'GHS '+num(v);
+  const meta=CUR.list.find(c=>c.code===code)||{};const d=meta.decimals==null?2:meta.decimals;
+  return code+' '+(v/r.GHS*r[code]).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
+function setViewCur(code){CUR.view=code;try{localStorage.setItem('hnn.viewcur',code);}catch(e){}drawCurNote();try{preview();}catch(e){}}
+function drawCurNote(){const el=$('curNote');if(!el)return;el.textContent=CUR.view==='GHS'?'Bills are made and settled in GHS.':'Shown in '+CUR.view+' for your convenience ('+(CUR.indicative?'indicative':'as of '+CUR.asOf)+' rate). The bill itself is in GHS.';}
+async function loadCurrencies(){
+  try{const r=await fetch('/currency/api/list');const j=(await r.json()).result;
+    CUR.rates=j.rates.perUSD||{};CUR.asOf=j.rates.asOf||'';CUR.indicative=!!j.rates.indicative;
+    CUR.list=[...j.main,...j.other];
+    if(!CUR.list.some(c=>c.code===CUR.view))CUR.view='GHS';
+    const sel=$('viewCur');if(sel){const opt=(c)=>`<option value="${esc(c.code)}">${esc(c.code)}${c.name?' · '+esc(c.name):''}</option>`;
+      sel.innerHTML='<optgroup label="Main">'+j.main.map(opt).join('')+'</optgroup><optgroup label="Other">'+j.other.map(opt).join('')+'</optgroup>';sel.value=CUR.view;}
+    drawCurNote();try{preview();}catch(e){}
+  }catch(e){const sel=$('viewCur');if(sel)sel.disabled=true;}
+}
 
 let searchTimer=null;
 function searchCatalog(){
@@ -182,7 +201,7 @@ function searchCatalog(){
       const {data}=await r.json();
       if(!data.length){ $('searchResults').innerHTML='<div style="padding:10px;color:var(--muted)">No match. Use "Add custom" below.</div>'; $('searchResults').style.display='block'; return; }
       $('searchResults').innerHTML=data.map(m=>{
-        const price=m.price==null?'—':'GHS '+num(m.price);
+        const price=m.price==null?'—':''+money(m.price);
         const lvl=m.level?`<span class="muted" style="font-size:11px"> · Level ${esc(m.level)}</span>`:'';
         return `<div class="line" style="cursor:pointer;padding:8px 10px" onclick='addFromCatalog(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
           <span>${esc(m.name)}<span class="muted" style="font-size:11px"> · ${esc(m.code)}${m.unit?' · '+esc(m.unit):''}</span>${lvl}</span>
@@ -226,21 +245,21 @@ function preview(){
       let sum=0;const parts=sp.payers.map(p=>{
         const amt=mode==='amount'?(p.amount||0):payer*((p.percent||0)/100);sum+=amt;
         const nm=(PAYERS.find(x=>x.id===p.payerId)||{}).name||p.payerId;
-        return `<div class="line"><span class="muted" style="padding-left:12px">↳ ${esc(nm)}${p.memberId?' ('+esc(p.memberId)+')':''}</span><span class="num">GHS ${num(amt)}</span></div>`;
+        return `<div class="line"><span class="muted" style="padding-left:12px">↳ ${esc(nm)}${p.memberId?' ('+esc(p.memberId)+')':''}</span><span class="num">${money(amt)}</span></div>`;
       }).join('');
       const ok=Math.abs(sum-payer)<0.01;
-      $('splitStatus').innerHTML=ok?`<span style="color:var(--brand)">✓ Split covers the full GHS ${num(payer)} payer portion</span>`:`<span style="color:var(--bad)">Split totals GHS ${num(sum)} but payer portion is GHS ${num(payer)}</span>`;
+      $('splitStatus').innerHTML=ok?`<span style="color:var(--brand)">✓ Split covers the full ${money(payer)} payer portion</span>`:`<span style="color:var(--bad)">Split totals ${money(sum)} but payer portion is ${money(payer)}</span>`;
       splitRows=parts;
     } else { $('splitStatus').textContent='Tick at least two payers and set their shares.'; }
   }
-  const rows=items.map((i,ix)=>`<div class="line"><span>${esc(i.name)}${i.qty&&i.qty>1?' ×'+i.qty:''}</span><span class="num">GHS ${num(i.cost)} <a href="#" onclick="rm(${ix});return false" style="color:var(--bad);text-decoration:none">✕</a></span></div>`).join('');
+  const rows=items.map((i,ix)=>`<div class="line"><span>${esc(i.name)}${i.qty&&i.qty>1?' ×'+i.qty:''}</span><span class="num">${money(i.cost)} <a href="#" onclick="rm(${ix});return false" style="color:var(--bad);text-decoration:none">✕</a></span></div>`).join('');
   $('ledger').innerHTML=(rows||'<p class="muted">Add items to build the bill.</p>')+
-    `<div class="line" style="border-top:2px solid var(--ink);margin-top:6px"><span class="muted">Subtotal</span><span class="num">GHS ${num(sub)}</span></div>`+
-    (disc?`<div class="line"><span class="muted">Discount</span><span class="num">− GHS ${num(sub*disc)}</span></div>`:'')+
-    `<div class="line"><span class="muted">Payer covers</span><span class="num">GHS ${num(payer)}</span></div>`+
+    `<div class="line" style="border-top:2px solid var(--ink);margin-top:6px"><span class="muted">Subtotal</span><span class="num">${money(sub)}</span></div>`+
+    (disc?`<div class="line"><span class="muted">Discount</span><span class="num">− ${money(sub*disc)}</span></div>`:'')+
+    `<div class="line"><span class="muted">Payer covers</span><span class="num">${money(payer)}</span></div>`+
     splitRows+
-    (cash?`<div class="line"><span class="muted">Cashback</span><span class="num">− GHS ${num(cash)}</span></div>`:'')+
-    `<div class="line"><strong>Patient pays</strong><span class="num"><strong>GHS ${num(patient)}</strong></span></div>`;
+    (cash?`<div class="line"><span class="muted">Cashback</span><span class="num">− ${money(cash)}</span></div>`:'')+
+    `<div class="line"><strong>Patient pays</strong><span class="num"><strong>${money(patient)}</strong></span></div>`;
 }
 ['copay','cashback','discount'].forEach(id=>$(id).addEventListener('input',preview));
 
@@ -397,7 +416,7 @@ async function routeSplit(){
   if(!r.ok){const e=await r.json().catch(()=>({}));toast('Split route failed: '+(e.error||r.status));return;}
   const {claims}=await r.json();
   $('result').innerHTML=`<span class="pill awaiting_payer">Split routed to ${claims.length} payers</span>`+
-    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · GHS ${num(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div>${sendRow('claim',c.claimId,'')}<a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
+    claims.map(c=>`<div style="margin-top:8px"><strong>${esc(c.payerName)}</strong> · ${money(c.amount)}<div class="linkbox">${location.origin}${c.payerLink}</div>${sendRow('claim',c.claimId,'')}<a href="${c.payerLink}" target="_blank">Open payer portal →</a></div>`).join('')+verifBlock();
   toast('Split routed to '+claims.length+' payers');reset();
 }
 // InsureCredit as a means of settlement: the patient gets an SMS to apply for a micro-loan covering their share.
@@ -410,7 +429,7 @@ async function offerInsureCredit(again){
   const o=await r.json().catch(()=>({}));
   if(!r.ok){toast('InsureCredit: '+(o.message||o.error||r.status)+(o.detail?' — '+o.detail:'')+(o.error==='error'||o.message==='amount_below_minimum'?' (change it in Product Lab → InsureCredit (default) → Edit)':''));return;}
   const sent=(o.sentVia||[]).length>0;
-  $('result').innerHTML=`<span class="pill awaiting_payer">InsureCredit offered</span> Application <b>${esc(o.applicationNo)}</b> · ${o.overCap?'bill is above the GHS 2,000 loan limit, so the patient was offered a medical justification note instead':'up to GHS '+num(o.loanableAmount)}
+  $('result').innerHTML=`<span class="pill awaiting_payer">InsureCredit offered</span> Application <b>${esc(o.applicationNo)}</b> · ${o.overCap?'bill is above the GHS 2,000 loan limit, so the patient was offered a medical justification note instead':'up to '+money(o.loanableAmount)}
     <p class="muted" style="margin:6px 0 0;font-size:13px">${sent?'Offer texted to '+esc(o.to||'the patient')+'.':'Offer created but the text did not go out (messaging may be in sandbox or not configured).'} ${o.reused?'An offer already existed for this bill. ':''}The bill settles automatically when the loan is approved.</p>
     ${o.link?`<div class="linkbox">${esc(o.link)}</div>`:''}
     <p style="margin:8px 0 0"><button onclick="offerInsureCredit(true)">Send again</button> <button onclick="checkInsureCredit()">Check status</button></p>`;
@@ -429,7 +448,7 @@ async function routePayer(payerId){
   const r=await fetch(`/api/v1/bills/${id}/route`,{method:'POST',headers:hdr(),body:JSON.stringify({payerId})});
   if(!r.ok){const e=await r.json().catch(()=>({}));toast('Route failed: '+(e.error||r.status));return;}
   const {claim}=await r.json();
-  $('result').innerHTML=`<span class="pill awaiting_payer">Awaiting ${esc(payerId)}</span> Claim ${esc(claim.id.slice(0,14))}… · GHS ${num(claim.amount)}
+  $('result').innerHTML=`<span class="pill awaiting_payer">Awaiting ${esc(payerId)}</span> Claim ${esc(claim.id.slice(0,14))}… · ${money(claim.amount)}
     <p style="margin:8px 0 0">Secure link delivered to payer:</p><div class="linkbox">${location.origin}${claim.link}</div>
     ${sendRow('claim',claim.id,'')}
     <p style="margin:8px 0 0"><a href="${claim.link}" target="_blank">Open payer portal →</a></p>`+verifBlock();
@@ -438,7 +457,7 @@ async function routePayer(payerId){
       body:JSON.stringify({billId:id, refundPercent:100, refundedBy:'acacia'})});
     if(t.ok){ const rec=await t.json();
       $('result').innerHTML+=`<p style="margin:8px 0 0"><span class="pill awaiting_payer">ClaimIt tracked</span>
-        ${esc(rec.id.slice(0,14))}… · expected refund GHS ${num(rec.expectedRefund)}
+        ${esc(rec.id.slice(0,14))}… · expected refund ${money(rec.expectedRefund)}
         · <a href="claimit.html" target="_blank">open tracker →</a></p>`; }
   }
   toast('Routed to '+payerId);reset();
@@ -503,13 +522,13 @@ function savBody(){
   return {goal:g,horizon:h,other,facts,patient:{name:$('pname').value,phone:$('pphone').value,memberId:$('member').value||null},billId:billId||undefined};
 }
 function savRender(v,title){
-  const sc=(v.scenarios||[]).slice(0,4).map(s=>`<div class="line"><span>${esc(s.label)}${s.date?` · ${esc(s.date)}`:''}</span><span class="num">${Math.round(s.probability*100)}% · GHS ${num(s.cost)}</span></div>`).join('');
-  const ms=(v.schedule||[]).map(m=>`<div class="line"><span>${esc(m.label)} · ${esc(m.dueDate)}</span><span class="num">${m.status==='paid'?'✓ ':''}GHS ${num(m.amount)}</span></div>`).join('');
+  const sc=(v.scenarios||[]).slice(0,4).map(s=>`<div class="line"><span>${esc(s.label)}${s.date?` · ${esc(s.date)}`:''}</span><span class="num">${Math.round(s.probability*100)}% · ${money(s.cost)}</span></div>`).join('');
+  const ms=(v.schedule||[]).map(m=>`<div class="line"><span>${esc(m.label)} · ${esc(m.dueDate)}</span><span class="num">${m.status==='paid'?'✓ ':''}${money(m.amount)}</span></div>`).join('');
   const adv=(v.advisories||[]).map(x=>`<li>${esc(x.text||x)}</li>`).join('');
-  const prog=v.progress?`<p><b>Saved GHS ${num(v.progress.saved)}</b> of ${num(v.progress.target)} (${v.progress.percent}%)${v.progress.overdueMilestones?` · <span style="color:var(--bad)">${v.progress.overdueMilestones} overdue</span>`:''}</p>`:'';
+  const prog=v.progress?`<p><b>Saved ${money(v.progress.saved)}</b> of ${num(v.progress.target)} (${v.progress.percent}%)${v.progress.overdueMilestones?` · <span style="color:var(--bad)">${v.progress.overdueMilestones} overdue</span>`:''}</p>`:'';
   const bridge=v.bridge&&v.bridge.insureCredit?`<p class="muted">${esc(v.bridge.insureCredit.note)}</p>`:'';
   return `<p><b>${esc(title)}</b>${v.planNo?` · plan <b>${esc(v.planNo)}</b> · <span class="pill ${v.status==='active'?'settled':'open'}">${esc(v.status)}</span>`:''}</p>
-    <p>Target <b>GHS ${num(v.target.target)}</b> (${esc(v.goalLabel||'')})${v.end?` by <b>${esc(v.end)}</b>`:' · open-ended'}${v.analysis?` · caesarean chance ${Math.round(v.analysis.csProbability*100)}%${v.analysis.strict?' (planned)':''}`:''}</p>
+    <p>Target <b>${money(v.target.target)}</b> (${esc(v.goalLabel||'')})${v.end?` by <b>${esc(v.end)}</b>`:' · open-ended'}${v.analysis?` · caesarean chance ${Math.round(v.analysis.csProbability*100)}%${v.analysis.strict?' (planned)':''}`:''}</p>
     ${prog}<div class="ledger">${sc}</div><p class="muted" style="margin:8px 0 4px">Milestones</p><div class="ledger">${ms}</div>${adv?`<ul style="margin:8px 0;padding-left:18px">${adv}</ul>`:''}${bridge}
     ${v.planNo?`<div class="row" style="margin-top:8px"><input id="sv_amt_${esc(v.id)}" type="number" placeholder="GHS" style="max-width:110px"/><button class="ghost" onclick="savContribute('${esc(v.id)}')">Record contribution</button><button class="ghost" onclick="savReplan('${esc(v.id)}')">Re-plan with current form</button>${billId?`<button class="ghost" onclick="savBridge('${esc(v.id)}')">InsureCredit for this bill</button>`:''}</div><div class="linkbox">${esc(v.link||'')}</div>`:''}`;
 }
@@ -659,6 +678,7 @@ async function showMasterControlLinkIfSandbox(){
   }catch(e){/* health check failing shouldn't block the billing terminal */}
 }
 showMasterControlLinkIfSandbox();
+loadCurrencies();
 </script>
 <script src="/app/i18n.js" data-audience="staff" data-auto="true"></script>
 <script src="/o/widget.js" defer></script>
