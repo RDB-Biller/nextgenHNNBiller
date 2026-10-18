@@ -123,13 +123,14 @@ async function login({ handle, password } = {}) {
   if (!a || !a.passwordHash || !check(password, a.passwordHash)) { f.push(Date.now()); fails.set(hk, f); throw err(401, 'Incorrect login or password.'); }
   if (a.status !== 'active' || (await require('./accountControl').isDisabled('subadmin', a._id))) throw err(403, 'This login is not active. Contact the chief administrator.');
   fails.delete(hk); a.lastLoginAt = now(); await save(a);
-  return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + (a.demo ? DEMO_TTL_MS : TTL_MS) }), account: view(a) };
+  return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + (a.demo ? DEMO_TTL_MS : TTL_MS), ...(a.demo || a.sandboxed ? { vid: crypto.randomBytes(9).toString('base64url') } : {}) }), account: view(a) };
 }
 async function authenticate(header) {
   const m = /^Bearer\s+(.+)$/i.exec(header || ''); const p = m && await unsign(m[1]); const a = p && await byId(p.sub);
   if (!a || a.pv !== p.pv || a.status !== 'active' || (await require('./accountControl').isDisabled('subadmin', a._id))) throw err(401, 'Please sign in again.');
   if (a.demo && !(await demoConfig()).enabled) throw err(401, 'The demo login is switched off.');
-  return a;
+  // Each demo or evaluator sign-in carries its own visitor id, which picks that visitor's private scratch copy.
+  return a.sandboxed ? { ...a, vid: p.vid || a._id } : a;
 }
 async function changePassword(a, { current, password } = {}) {
   if (!check(current, a.passwordHash)) throw err(401, 'Your current password is not right.');

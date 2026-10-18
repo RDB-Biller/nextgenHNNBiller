@@ -1,0 +1,1000 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — ERHEAT Shield API
+  version: 1.0.0
+  description: 'Emergency micro-loans on six lines (rent, health, education, energy, agriculture, transport). **The Biller
+    never lends or holds funds**: it verifies the need through the person who knows it, takes the borrower’s consent and hands
+    a Verified-Need Packet to the lender, who decides and pays the payee. Covers the borrower API (used by the ER HEAT app),
+    health sync with Biller bills, the optional profile, history, verifier and voucher pages, lender hooks, Master Control
+    and partner accounts. Everything is in GHS.
+
+
+    The lender contract (decision, paid and repayment hooks, signed push with `x-erheat-signature: sha256=<HMAC-SHA256 of
+    the raw body>`) is HNN’s own proposal and is not confirmed with any lender.
+
+
+    _6th Edition (Revised), 18 October 2026._'
+servers:
+- url: https://nextgenhnnbiller-production-bdf1.up.railway.app
+- url: http://localhost:4000
+paths:
+  /erheat/api/lines:
+    get:
+      summary: Lines, limits and the borrower’s Trust Passport
+      tags:
+      - ERHEAT borrower
+      description: Which of the six lines (rent, health, education, energy, agriculture, transport) are open, with fields,
+        limits, wording and the person’s passport.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: &id001
+                type: object
+                additionalProperties: true
+  /erheat/api/health/facilities:
+    get:
+      summary: Facilities that use the Biller (Health directory)
+      tags:
+      - ERHEAT borrower
+      description: Public. Used so a patient can pick their facility; the facility is texted to confirm.
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/health/pending:
+    get:
+      summary: Open Biller bills for the signed-in phone
+      tags:
+      - ERHEAT borrower
+      description: Each item has billId, facility, billTotal, patientPayable and a note. A Health request made from a bill
+        is confirmed by the bill itself.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/profile:
+    get:
+      summary: Saved details per line
+      tags:
+      - ERHEAT borrower
+      description: 'Optional prefill: meter number, landlord, school, supplier, route. Nothing is required.'
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    put:
+      summary: Save details per line
+      tags:
+      - ERHEAT borrower
+      description: Send null for a line to remove it. Each request still asks whether to use the details on file or different
+        ones.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              lines:
+                energy:
+                  evidence:
+                    reference: '12345678'
+                  payee:
+                    name: Shell Madina
+                    phone: '+233200000000'
+                rent: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/history:
+    get:
+      summary: Awarded requests and totals
+      tags:
+      - ERHEAT borrower
+      description: Approved onwards, with totals borrowed and repaid.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/passport:
+    get:
+      summary: Trust Passport
+      tags:
+      - ERHEAT borrower
+      description: Level (new, trusted, preferred), ceiling (500, 1000, 2000; never above the hard cap), verified, repaid,
+        defaults, open requests.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/apps:
+    get:
+      summary: The borrower’s requests
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/apps/{id}:
+    get:
+      summary: One request with its next step
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '404':
+          description: Not found
+  /erheat/api/apply:
+    post:
+      summary: Ask for a loan
+      tags:
+      - ERHEAT borrower
+      description: Creates the request and texts the verifier. With billId the Biller bill is the confirmation (amount cannot
+        exceed the patient share; one request per bill); with facilityId the facility is texted. Everything is in GHS.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              line: rent
+              amount: 900
+              purpose: November rent
+              payee:
+                name: Kojo Boateng
+                phone: '0200000000'
+              verifier:
+                name: Kojo Boateng
+                phone: '0200000000'
+              evidence:
+                monthlyRent: '450'
+                dueDate: '2026-11-01'
+              lang: en
+      responses:
+        '200':
+          description: The request in its borrower view
+          content:
+            application/json:
+              schema: *id001
+        '403':
+          description: Phone not verified
+        '404':
+          description: ERHEAT Shield is not open yet
+        '409':
+          description: Line not open, or an open request exists on the line
+        '422':
+          description: Amount above the limit or invalid details
+        '429':
+          description: Monthly request limit reached
+  /erheat/api/apps/{id}/consent:
+    post:
+      summary: Consent and submit to the lender
+      tags:
+      - ERHEAT borrower
+      description: Only when the request is verified. Stores the consent text version and, if a lender URL is set, pushes
+        the signed packet.
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              agree: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '409':
+          description: Not ready to submit
+        '422':
+          description: Consent not given
+  /erheat/api/apps/{id}/cancel:
+    post:
+      summary: Cancel an open request
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/api/apps/{id}/resend/{vid}:
+    post:
+      summary: Text the verifier again
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      - name: vid
+        in: path
+        required: true
+        description: Verifier id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/v/{token}:
+    get:
+      summary: Verifier page (HTML)
+      tags:
+      - ERHEAT verifier and voucher
+      description: No account. The one-time link in the SMS is the credential.
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        description: Link token from the SMS
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    post:
+      summary: Confirm or decline
+      tags:
+      - ERHEAT verifier and voucher
+      description: 'Form or JSON: decision confirm | decline, confirmedAmount?, accountName?, note?'
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        description: Link token
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              decision: confirm
+              confirmedAmount: 900
+              accountName: K Boateng
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat/redeem:
+    post:
+      summary: Redeem a voucher
+      tags:
+      - ERHEAT verifier and voucher
+      description: The vendor enters the voucher code and the customer’s one-time number. Rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              code: AB12CD34
+              otp: '123456'
+              phone: '+233200000000'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '422':
+          description: Wrong, used or expired voucher
+  /erheat-hooks/{secret}/decision:
+    post:
+      summary: Lender decision
+      tags:
+      - ERHEAT lender hooks
+      description: approvedAmount defaults to the verified amount; it must be above zero and at most that amount (never above
+        GHS 2,000). Voucher lines get a voucher on approval.
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              applicationNo: ERH-482913
+              decision: approved
+              approvedAmount: 900
+              reference: CU-7781
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '404':
+          description: Wrong secret
+        '409':
+          description: Request is not in a state that accepts this
+        '422':
+          description: Invalid decision or amount
+  /erheat-hooks/{secret}/paid:
+    post:
+      summary: The payee has been paid
+      tags:
+      - ERHEAT lender hooks
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              applicationNo: ERH-482913
+              reference: MOMO-55102
+              paidAt: '2026-10-18T10:05:00Z'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat-hooks/{secret}/repayment:
+    post:
+      summary: Repayment, closure or default
+      tags:
+      - ERHEAT lender hooks
+      description: 'Idempotent on reference. outstanding of 0 closes the request. { applicationNo, event: "default" } reports
+        a default.'
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              applicationNo: ERH-482913
+              amount: 300
+              reference: CU-R-1
+              outstanding: 600
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /erheat-hooks/{secret}/applications/{appNo}:
+    get:
+      summary: Verified-Need Packet
+      tags:
+      - ERHEAT lender hooks
+      description: Borrower, payee, evidence, confirmations, flags, consent, passport and payment instruction.
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      - name: appNo
+        in: path
+        required: true
+        description: Application number, e.g. ERH-482913
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '404':
+          description: application_not_found
+  /api/platform/erheat/config:
+    get:
+      summary: ERHEAT settings, lines and hook URLs
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    put:
+      summary: Change settings
+      tags:
+      - ERHEAT Master Control
+      description: 'enabled, requireVerifiedPhone, hardCap, ladder {new, trusted, preferred}, verifierTtlHours, appTtlDays,
+        maxApps30d, lender {name, pushUrl}, lines {<line>: {enabled, min, cap}}'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              enabled: true
+              lines:
+                rent:
+                  enabled: true
+                  min: 50
+                  cap: 1000
+              lender:
+                name: ConfirmU
+                pushUrl: https://lender.example/erheat
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/erheat/secret/rotate:
+    post:
+      summary: Rotate the hook secret
+      tags:
+      - ERHEAT Master Control
+      description: Old URLs stop working at once.
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/erheat/apps:
+    get:
+      summary: Every request
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      - name: line
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: Default 100
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/erheat/apps/{id}:
+    get:
+      summary: One request in full
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/erheat/apps/{id}/simulate:
+    post:
+      summary: Act as the lender (sandbox only)
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              action: approve
+              amount: 900
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '403':
+          description: Only in sandbox mode
+  /partner-api/signup-options:
+    get:
+      summary: Roles and sectors for the sign-up form
+      tags:
+      - Partner accounts
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/signup:
+    post:
+      summary: Ask for a partner account
+      tags:
+      - Partner accounts
+      description: Creates a PENDING account. Nobody signs in until Master Control approves.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              name: Esi Owusu
+              org: Ridge Clinic
+              role: hospital_admin
+              email: esi@ridge.example
+              password: at-least-8-chars
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/login:
+    post:
+      summary: Sign in
+      tags:
+      - Partner accounts
+      description: Email or phone as handle, and password. 12-hour session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              handle: esi@ridge.example
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/me:
+    get:
+      summary: The signed-in partner
+      tags:
+      - Partner accounts
+      security:
+      - PartnerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/password:
+    post:
+      summary: Change password
+      tags:
+      - Partner accounts
+      description: Ends every session.
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              current: '...'
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/requests:
+    get:
+      summary: Requests for the account’s sector
+      tags:
+      - Partner accounts
+      description: Finance accounts see every line.
+      security:
+      - PartnerToken: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/redeem:
+    post:
+      summary: Redeem a voucher
+      tags:
+      - Partner accounts
+      description: Energy, agriculture and transport sectors.
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              code: AB12CD34
+              otp: '123456'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /partner-api/request-universal:
+    post:
+      summary: Ask for the universal account
+      tags:
+      - Partner accounts
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners:
+    get:
+      summary: Accounts, roles and sectors
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    post:
+      summary: Issue a partner login
+      tags:
+      - Partner administration
+      description: 'Returns a temporary password (the person must change it) and can text it: sendSms. Give role or sector.'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              name: Esi Owusu
+              org: Ridge Clinic
+              role: hospital_admin
+              handle: esi@ridge.example
+              sendSms: false
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners/{id}:
+    patch:
+      summary: Edit an account
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              sector: health
+              status: active
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners/{id}/approve:
+    post:
+      summary: Approve a sign-up (optionally with a different role or sector)
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners/{id}/reject:
+    post:
+      summary: Reject a sign-up
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners/{id}/reset-password:
+    post:
+      summary: Issue a new temporary password
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/partners/{id}/universal:
+    post:
+      summary: Grant or remove the universal account
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+components:
+  securitySchemes:
+    BorrowerToken:
+      type: http
+      scheme: bearer
+      description: Patient-account token from POST /patient-api/v1/patient/login (30-day signed token).
+    PartnerToken:
+      type: http
+      scheme: bearer
+      description: Partner session token from POST /partner-api/login (12-hour signed token).
+    SubAdminToken:
+      type: http
+      scheme: bearer
+      description: Sub-admin session token from POST /admin-api/login. Opens only the areas the account was given; sandboxed
+        (demo and evaluator) accounts work on a private scratch copy.
+    PlatformKey:
+      type: apiKey
+      in: header
+      name: x-platform-key
+      description: Chief administrator key (env PLATFORM_ADMIN_KEY).

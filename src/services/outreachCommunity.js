@@ -28,6 +28,7 @@ const PHONE_SPLIT = /[,;\n]+/;
 // --------------------------------------------------------------- owner alerts
 /** Tell the operator something needs attention. FormSubmit (EMAIL notice to ONE fixed inbox, set in FORMSUBMIT_TO) or the configured email provider. Never throws. */
 async function notifyOwner(subject, message) {
+  if (require('../store').inScratch()) return { ok: true, demo: true };
   try {
     const to = process.env.FORMSUBMIT_TO;
     if (to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {

@@ -62,6 +62,10 @@ const APIS=[
   d:'Everything the configuration screen does, as an API — revenue rules, other charges (report fees), agnostic payer tabs, and licence redemption. Rebuild it inside your own EMR, or use our hosted page.'},
  {f:'hnn-07-master-control',t:'Master Control (SaaS owner)',ed:'all',auth:'x-platform-key',
   d:'Clients, payers, EMR partners, IT leads and licensing. Includes the edition transition endpoint — move any client between commercial and non-commercial, both directions, no data loss.'},
+ {f:'hnn-08-erheat-shield',t:'ERHEAT Shield',ed:'all',auth:'patient token, partner token, x-platform-key',
+  d:'Emergency micro-loans on six lines. Borrower API (with health sync from Biller bills, optional profile, history), verifier and voucher pages, lender hooks with signed push, partner sign-up and accounts, and Master Control. The Biller never lends or holds funds.'},
+ {f:'hnn-09-accounts-admins-currency',t:'Accounts, Sub-admins & Currencies',ed:'all',auth:'x-platform-key, sub-admin token',
+  d:'The account directory with deactivation and clearances, sub-admins and invites, the public demo login (a private scratch copy per visitor), and the currency list and converter.'},
 ];
 document.getElementById('list').innerHTML=APIS.map(a=>`
  <div class="api">

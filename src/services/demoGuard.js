@@ -3,7 +3,8 @@
 /**
  * Guard rails for the demo experience (the public dummy login and any "evaluator" account).
  * They explore the real screens but cannot hurt or leak anything:
- *   - changes are never saved: every write gets a friendly "demo mode" answer instead;
+ *   - every visitor works on a private scratch copy (see store.scratchFor): their changes show for them alone and never reach real data;
+ *   - nothing goes out: messages, money movement and AI calls are simulated inside a scratch copy;
  *   - secrets (keys, tokens, passwords, hook URLs) are removed from everything they are sent;
  *   - phone numbers and email addresses are masked.
  */
@@ -26,5 +27,5 @@ function clean(v, key) {
   }
   return v;
 }
-const DEMO_NOTE = 'Demo mode: nothing was saved. Your own account lets you save changes.';
+const DEMO_NOTE = 'Demo mode: this is your private practice copy. Your own account works on real data.';
 module.exports = { clean, DEMO_NOTE, MASK };

@@ -1,0 +1,456 @@
+openapi: 3.0.3
+info:
+  title: HNN Biller — Accounts, Sub-admins and Currencies API
+  version: 1.0.0
+  description: 'The account directory with deactivation and clearances, sub-admins (areas, presets, invites, own passwords),
+    the public demo and evaluator accounts (private scratch copy per visitor), and the currency list and converter (display
+    only; everything is billed in GHS).
+
+
+    _6th Edition (Revised), 18 October 2026._'
+servers:
+- url: https://nextgenhnnbiller-production-bdf1.up.railway.app
+- url: http://localhost:4000
+paths:
+  /api/platform/accounts:
+    get:
+      summary: Every account of every kind
+      tags:
+      - Account directory
+      description: kind = patient | partner | facility | insurer | emr_provider | staff | subadmin. Each row has status, last
+        activity and clearances. Sub-admins need the accounts area.
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        description: Filter by kind
+        schema:
+          type: string
+      - name: q
+        in: query
+        required: false
+        description: Search
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: &id001
+                type: object
+                additionalProperties: true
+  /api/platform/accounts/{kind}/{id}:
+    patch:
+      summary: Deactivate, reactivate or change clearances
+      tags:
+      - Account directory
+      description: 'grants: productLab (use Product Lab) and goLive (switch sandbox to live) apply to facility, insurer, emr_provider
+        and staff accounts. Sub-admins cannot change grants, staff or sub-admin accounts.'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: kind
+        in: path
+        required: true
+        description: Account kind
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              disabled: true
+              grants:
+                productLab: true
+                goLive: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '403':
+          description: Not allowed for this account kind
+  /api/platform/admins:
+    get:
+      summary: Sub-admins, presets, areas and the demo switch
+      tags:
+      - Sub-admins
+      description: Chief only.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    post:
+      summary: Invite a sub-admin
+      tags:
+      - Sub-admins
+      description: 'Email and/or phone. Preset: partner_manager, support, messaging_manager, finance_officer, evaluator, or
+        custom with areas: clients, payers, messaging, product_lab, claims, finance, operating_mode, partners, accounts.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              name: Efua Asare
+              email: efua@hnn.example
+              preset: support
+              readOnly: false
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/admins/{id}:
+    patch:
+      summary: Change areas, preset, read-only or status
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              areas:
+              - clients
+              - accounts
+              readOnly: true
+              status: suspended
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    delete:
+      summary: Remove a sub-admin
+      tags:
+      - Sub-admins
+      description: Their sessions end at once.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/admins/{id}/invite:
+    post:
+      summary: Send a new invite link
+      tags:
+      - Sub-admins
+      description: The old link stops working.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              sendSms: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/admins/demo:
+    get:
+      summary: Is the public demo login on?
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    put:
+      summary: Switch the public demo login on or off
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              enabled: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /admin-api/demo:
+    get:
+      summary: The dummy credentials for the sign-in page
+      tags:
+      - Sub-admins
+      description: 'Public. Returns { enabled: false } when the demo is off.'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /admin-api/login:
+    post:
+      summary: Sub-admin sign-in
+      tags:
+      - Sub-admins
+      description: Returns a signed Bearer token. A demo or evaluator sign-in gets its own visitor id, which picks a private
+        scratch copy of the seeded data (kept 2 hours after last use, max 150). Changes there are visible to that visitor
+        only and never reach real data; messages, money and AI calls are simulated; secrets and contact details are masked.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              handle: efua@hnn.example
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+        '401':
+          description: Incorrect login or password
+        '429':
+          description: Too many tries
+  /admin-api/accept-invite:
+    post:
+      summary: Set a password from an invite
+      tags:
+      - Sub-admins
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              token: <invite token>
+              password: at-least-10-chars
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /admin-api/me:
+    get:
+      summary: The signed-in sub-admin and their areas
+      tags:
+      - Sub-admins
+      security:
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /admin-api/password:
+    post:
+      summary: Change own password
+      tags:
+      - Sub-admins
+      security:
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              current: '...'
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /currency/api/list:
+    get:
+      summary: Currencies and rates
+      tags:
+      - Currencies
+      description: 'Public, CORS open. main = GHS and USD; other = about 100, Nigeria and East Africa first (NGN, KES, UGX,
+        TZS, RWF, ETB, BIF, SSP, SOS, DJF, ERN) then by region. Display only: everything is billed, lent and repaid in GHS.'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /currency/api/convert:
+    get:
+      summary: Convert an amount
+      tags:
+      - Currencies
+      description: Through the USD pivot, rounded to the target currency’s decimals.
+      security: []
+      parameters:
+      - name: amount
+        in: query
+        required: false
+        description: Number
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        description: Currency code
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        description: Currency code
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /api/platform/currencies:
+    get:
+      summary: Rates, default and note (Master Control)
+      tags:
+      - Currencies
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+    put:
+      summary: Save rates
+      tags:
+      - Currencies
+      description: Rates are units per 1 USD. Until saved, the seed rates are shown as indicative.
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              rates:
+                GHS: 11.0
+                KES: 129.0
+                NGN: 1500.0
+              defaultCurrency: GHS
+              note: Source and date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+  /patient-api/v1/patient/update:
+    patch:
+      summary: Set the person’s default display currency
+      tags:
+      - Currencies
+      description: Body field currency (any code from /currency/api/list). The ER HEAT app asks GHS or USD at first sign-in.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id001
+            example:
+              currency: KES
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id001
+components:
+  securitySchemes:
+    BorrowerToken:
+      type: http
+      scheme: bearer
+      description: Patient-account token from POST /patient-api/v1/patient/login (30-day signed token).
+    PartnerToken:
+      type: http
+      scheme: bearer
+      description: Partner session token from POST /partner-api/login (12-hour signed token).
+    SubAdminToken:
+      type: http
+      scheme: bearer
+      description: Sub-admin session token from POST /admin-api/login. Opens only the areas the account was given; sandboxed
+        (demo and evaluator) accounts work on a private scratch copy.
+    PlatformKey:
+      type: apiKey
+      in: header
+      name: x-platform-key
+      description: Chief administrator key (env PLATFORM_ADMIN_KEY).

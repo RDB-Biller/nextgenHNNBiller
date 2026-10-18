@@ -458,6 +458,7 @@ async function llmActive(p) { return !!(p.llmEnabled && (await getLlmSwitch()).e
 
 async function askClaude(p, payer, packet, productId) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (require('../store').inScratch()) return { status: 'not_configured', error: 'Demo mode: Claude adjudication is not run in the demo.' };
   if (!apiKey) return { status: 'not_configured', error: 'ANTHROPIC_API_KEY is not set' };
   if (llmCallsToday(productId) >= Number(p.llmDailyCap)) return { status: 'capped', error: `daily cap of ${p.llmDailyCap} Claude calls reached` };
   const model = MODELS.includes(p.llmModel) ? p.llmModel : 'claude-fable-5-1';
