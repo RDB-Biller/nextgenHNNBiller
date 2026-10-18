@@ -1210,3 +1210,7 @@ Everything is billed, lent and repaid in **GHS**. Apps can show amounts in about
 - `GET /currency/api/convert?amount=&from=&to=`: one-off conversion.
 - Rates are units per 1 USD. Seed rates are **indicative** until Master Control saves real ones (Master Control > Currencies, `PUT /api/platform/currencies`).
 - Each patient account can store a default `currency` (`PATCH /patient-api/v1/patient/update`). ER HEAT asks GHS or USD on first sign-in.
+
+## No dead ends
+
+Every failure shows where to go next. `public/nextstep.js` (loaded on every page) raises a "What to do next" bar when a request fails after a person's action, and `NextStep.mount()` prints the same links in place on patient pages (savings, pay, claim, verify, report, InsureCredit). Unknown addresses and server errors return a friendly page for browsers, and JSON errors carry a `next` list and `help` address. Optional variables: `SUPPORT_EMAIL` (default ekforson@hnnworld.com), `TRIMESTERSAVE_URL` (adds "Start a savings plan" on the Savings page), `ERHEAT_APP_URL`.
