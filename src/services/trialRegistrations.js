@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const store = require('../store');
 const messaging = require('./messaging');
 const email = require('./email');
+const config = require('../config');
 
 const ORG_TYPES = ['hospital', 'pharmacy', 'other'];
 const STATUSES = ['new', 'contacted', 'approved', 'declined'];
@@ -54,15 +55,40 @@ async function submit(body = {}) {
 async function list() { return store.trialRegistrations.all(); }
 async function get(id) { return store.trialRegistrations.get(id); }
 
+/** Tell an approved applicant. SMS always (when there is a phone), email too when they gave one. Never contains credentials. */
+async function notifyApproved(reg) {
+  const base = String(config.publicBaseUrl || '').replace(/\/$/, '');
+  const first = String(reg.contactName || '').split(' ')[0] || 'there';
+  const sms = await messaging.send({ channel: 'sms', to: reg.phone, body: `Hello ${first}, your HNN Biller trial request for ${reg.orgName} is approved. Our team will contact you to finish set-up. Look around meanwhile: ${base}/app/platform.html`, tenant: null });
+  let mail = null;
+  if (reg.email) {
+    mail = await email.send({ to: reg.email, subject: `Your HNN Biller trial for ${reg.orgName} is approved`, text: `Hello ${first},\n\nYour HNN Biller trial request for ${reg.orgName} is approved. Our team will contact you to finish set-up.\n\nWhile you wait, look around the demo: ${base}/app/platform.html\n\nHNN Biller` });
+  }
+  const result = { at: new Date().toISOString(), sms: { ok: !!sms.ok, sandbox: !!sms.sandbox, error: sms.ok ? null : (sms.error || 'send_failed') }, email: mail ? { ok: !!mail.ok, sandbox: !!mail.sandbox, error: mail.ok ? null : (mail.error || 'send_failed') } : null };
+  if (!sms.ok) console.error(`[trial] approval SMS to ${reg.orgName} failed: ${sms.error}`);
+  return result;
+}
+
 async function setStatus(id, status, by) {
   if (!STATUSES.includes(status)) throw err(422, 'invalid_status');
   const reg = await store.trialRegistrations.get(id);
   if (!reg) throw err(404, 'registration_not_found');
+  const was = reg.status;
   reg.status = status;
   reg.statusUpdatedAt = new Date().toISOString();
   reg.statusUpdatedBy = by || 'HNN';
+  if (status === 'approved' && was !== 'approved') reg.notified = await notifyApproved(reg);
   await store.trialRegistrations.update(reg);
   return reg;
 }
 
-module.exports = { ORG_TYPES, STATUSES, submit, list, get, setStatus };
+async function renotify(id) {
+  const reg = await store.trialRegistrations.get(id);
+  if (!reg) throw err(404, 'registration_not_found');
+  if (reg.status !== 'approved') throw err(409, 'approve_first');
+  reg.notified = await notifyApproved(reg);
+  await store.trialRegistrations.update(reg);
+  return reg;
+}
+
+module.exports = { ORG_TYPES, STATUSES, submit, list, get, setStatus, renotify };
