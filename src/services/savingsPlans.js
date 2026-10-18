@@ -591,6 +591,8 @@ async function startVerification(phoneRaw, { purpose = 'signup', lang } = {}) {
       ? 'Text messages are not switched on for this service yet, so no code could be sent. Please try again later or contact support.'
       : 'We could not send a text to that number. Check the number (with country code) and try again, or contact support.');
   }
+  // Record every code text (never the code) so Master Control > SMS Dashboard > Message log shows whether the provider accepted it.
+  try { await store.smsLog.insert({ id: `sms_${crypto.randomBytes(5).toString('hex')}`, batchId: null, direction: 'out', to: phone, message: '(verification code)', status: r.sandbox ? 'sandbox' : 'sent', providerMessageId: r.providerMessageId || null, error: null, createdAt: new Date().toISOString(), actor: 'verification' }); } catch (_e) { /* logging must never block */ }
   const out = { sent: true, sandbox: !!r.sandbox, to: maskPhone(phone), expiresInMinutes: 10 };
   if (r.sandbox) out.codeSandbox = code; // never present once messaging is live
   return out;
