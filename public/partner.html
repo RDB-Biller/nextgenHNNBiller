@@ -54,11 +54,31 @@ function flash(id,kind,t){const e=$('#'+id);if(e)e.innerHTML=t?msg(kind,t):''}
 
 function loginView(){
   $('#app').innerHTML=`<div class="login"><div class="brand" style="display:flex;gap:8px;align-items:center;font:800 18px var(--head)">${LOGO} ER HEAT partners</div>
-  <h1>Sign in</h1><p class="lede">Your login is issued by HNN. Landlords, clinics, schools, transport operators and suppliers each get a console for their own sector.</p>
+  <h1>Sign in</h1><p class="lede">Landlords, hospital administrators, doctors, nurses, school heads, transport operators, suppliers and bankers each get a console for their own sector. HNN issues logins, or you can ask for access below.</p>
   <form id="lf"><div class="field"><label for="h">Email or phone number</label><input id="h" autocomplete="username" required/></div>
   <div class="field"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required/></div>
-  <div id="le"></div><button class="btn" style="width:100%">Sign in</button></form></div>`;
+  <div id="le"></div><button class="btn" style="width:100%">Sign in</button></form>
+  <p style="margin-top:18px">New here? <button class="link" id="su" type="button">Ask for access</button></p></div>`;
+  $('#su').onclick=signupView;
   $('#lf').onsubmit=async(e)=>{e.preventDefault();try{const o=await call('/login','POST',{handle:$('#h').value,password:$('#p').value});save(o.token);ME=o.account;render()}catch(x){flash('le','bad',x.message)}};
+}
+async function signupView(){
+  let o={requirePhone:false,roles:[],sectors:[]};try{o=await call('/signup-options')}catch(x){}
+  const needSector=(k)=>{const r=o.roles.find(x=>x.key===k);return r&&!r.sector};
+  $('#app').innerHTML=`<div class="login"><div class="brand" style="display:flex;gap:8px;align-items:center;font:800 18px var(--head)">${LOGO} ER HEAT partners</div>
+  <h1>Ask for access</h1><p class="lede">Tell us who you are. HNN checks every request before a console is opened, so you cannot sign in until it is approved.</p>
+  <form id="sf"><div class="field"><label for="sn">Your name</label><input id="sn" autocomplete="name" required/></div>
+  <div class="field"><label for="so2">Organisation</label><input id="so2" placeholder="Hospital, bank, school, company or property" required/></div>
+  <div class="field"><label for="sr">Your role</label><select id="sr" required><option value="">Choose</option>${o.roles.map(r=>`<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('')}</select></div>
+  <div class="field hide" id="ssw"><label for="ss">Sector</label><select id="ss">${o.sectors.map(s=>`<option value="${esc(s.key)}">${esc(s.label)}</option>`).join('')}</select></div>
+  <div class="field"><label for="se">Email address${o.requirePhone?' (optional)':''}</label><input id="se" type="email" autocomplete="email"/></div>
+  <div class="field"><label for="sp">Mobile number${o.requirePhone?'':' (optional if you give an email)'}</label><input id="sp" type="tel" autocomplete="tel" placeholder="024 123 4567"/></div>
+  <div class="field"><label for="sw">Password</label><input id="sw" type="password" autocomplete="new-password" minlength="8" required/><small class="muted">At least 8 characters.</small></div>
+  <div id="se2"></div><button class="btn" style="width:100%">Send my request</button></form>
+  <p style="margin-top:18px"><button class="link" id="bk" type="button">Back to sign in</button></p></div>`;
+  $('#bk').onclick=loginView; $('#sr').onchange=()=>{$('#ssw').classList.toggle('hide',!needSector($('#sr').value))};
+  $('#sf').onsubmit=async(e)=>{e.preventDefault();try{const r=await call('/signup','POST',{name:$('#sn').value,org:$('#so2').value,role:$('#sr').value,sector:$('#ss').value,email:$('#se').value,phone:$('#sp').value,password:$('#sw').value});
+    $('#app').innerHTML=`<div class="login"><h1>Request sent</h1><p class="lede">${esc(r.message)}</p><button class="btn" id="bk2">Back to sign in</button></div>`;$('#bk2').onclick=loginView}catch(x){flash('se2','bad',x.message)}}
 }
 function mustChangeView(){
   $('#app').innerHTML=`<div class="login"><h1>Choose your own password</h1><p class="lede">You signed in with a temporary password. Set a new one (at least 8 characters) to continue.</p>

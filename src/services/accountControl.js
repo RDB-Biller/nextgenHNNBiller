@@ -57,14 +57,17 @@ async function all(kind) {
 /** The directory: every account, its state and its control record, filterable, newest first. */
 async function directory({ kind, q, status, limit = 300 } = {}) {
   if (kind && !KINDS[kind]) throw err(422, 'Unknown account kind.');
-  let rows = await all(kind);
-  const counts = {}; for (const r of rows) { counts[r.kind] = counts[r.kind] || { total: 0, disabled: 0, pending: 0 }; counts[r.kind].total++; }
-  for (const r of rows) { const c = await get(r.kind, r.id); r.disabled = c.disabled; r.reason = c.reason; r.grants = c.grants; r.note = c.note; if (c.disabled) counts[r.kind].disabled++; if (r.status === 'pending') counts[r.kind].pending++; r.state = c.disabled ? 'disabled' : r.status; }
+  const everyone = await all();
+  const ctls = {}; for (const k of await store.settings.keys('acctctl:')) { const v = await store.settings.get(k); if (v) ctls[k.slice('acctctl:'.length)] = v; }
+  const counts = Object.fromEntries(Object.keys(KINDS).map((k) => [k, { total: 0, disabled: 0, pending: 0 }]));
+  for (const r of everyone) { const c = counts[r.kind]; c.total++; if (r.status === 'pending') c.pending++; if ((ctls[`${r.kind}:${r.id}`] || {}).disabled) c.disabled++; }
+  let rows = kind ? everyone.filter((r) => r.kind === kind) : everyone;
+  for (const r of rows) { const d = defaults(r.kind); const s = ctls[`${r.kind}:${r.id}`] || {}; r.disabled = !!s.disabled; r.reason = s.reason || ''; r.note = s.note || ''; r.grants = { ...d.grants, ...(s.grants || {}) }; r.state = r.disabled ? 'disabled' : r.status; }
   const needle = String(q || '').trim().toLowerCase();
   if (needle) rows = rows.filter((r) => [r.name, r.org, r.phone, r.email, r.id, r.role].some((v) => String(v || '').toLowerCase().includes(needle)));
   if (status) rows = rows.filter((r) => r.state === status);
   rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  return { kinds: Object.entries(KINDS).map(([key, k]) => ({ key, label: k.label, grants: k.grants, ...(counts[key] || { total: 0, disabled: 0, pending: 0 }) })), grants: GRANTS, total: rows.length, rows: rows.slice(0, Math.min(Number(limit) || 300, 1000)) };
+  return { kinds: Object.entries(KINDS).map(([key, k]) => ({ key, label: k.label, grants: k.grants, ...counts[key] })), grants: GRANTS, total: rows.length, rows: rows.slice(0, Math.min(Number(limit) || 300, 1000)) };
 }
 
 async function exists(kind, id) {

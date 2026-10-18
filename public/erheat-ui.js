@@ -21,18 +21,21 @@
     <div class="card" style="margin-bottom:14px"><h2>Partner logins</h2>
       <p class="muted" style="font-size:13px;margin-top:0">Landlords, clinics, schools, bus operators and suppliers sign in at <b>/app/partner.html</b> (<a href="/app/partner.html" target="_blank" rel="noopener">open</a>). Each login is tied to one sector, so the console only shows that sector. A partner can ask for universal access; only you approve it. You issue every credential and can reset or suspend any of them. A temporary password is shown once.</p>
       <div class="row"><div class="field"><label>Name</label><input id="pt_name"/></div><div class="field"><label>Organisation</label><input id="pt_org"/></div></div>
+      <div class="row"><div class="field"><label>Role</label><select id="pt_role" onchange="ptRole()"></select></div></div>
       <div class="row"><div class="field"><label>Login (email or phone)</label><input id="pt_handle"/></div><div class="field"><label>Sector</label><select id="pt_sector"></select></div></div>
       <div class="row"><div class="field"><label>Registered phone numbers (payee or verifier numbers, comma separated)</label><input id="pt_phones" placeholder="0302111222, 0244000111"/></div><div class="field"><label>They see</label><select id="pt_view"><option value="mine">Only requests that name their numbers</option><option value="all">Every request in their line(s)</option></select></div></div>
       <label style="font-size:13px"><input type="checkbox" id="pt_sms" style="width:auto"/> Send the login to their phone by SMS</label>
       <div class="row" style="margin-top:8px"><button class="primary" onclick="ptCreate()">Issue login</button></div>
       <div id="pt_new"></div></div>
     <div class="card"><h2>Partners</h2><div id="pt_list" class="muted">Loading</div></div>`, () => ptLoad());
-  let SECT = [];
+  let SECT = []; let ROLES = [];
+  window.ptRole = () => { const r = ROLES.find((x) => x.key === q('pt_role').value); if (r && r.sector) q('pt_sector').value = r.sector; };
   const ptLoad = guard(async () => {
-    const o = await P('/'); SECT = o.sectors;
+    const o = await P('/'); SECT = o.sectors; ROLES = o.roles || [];
+    q('pt_role').innerHTML = '<option value="">Choose a role (sets the sector)</option>' + ROLES.map((r) => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('');
     q('pt_sector').innerHTML = SECT.map((s) => `<option value="${esc(s.key)}">${esc(s.label)}: ${esc(s.who)}</option>`).join('');
     q('pt_list').innerHTML = o.partners.length ? `<table><tr><th>Who</th><th>Sector</th><th>Login</th><th>Numbers</th><th>Sees</th><th>Status</th><th></th></tr>${o.partners.map((p) => `<tr>
-      <td><b>${esc(p.name)}</b><br><span class="muted">${esc(p.org)}</span></td>
+      <td><b>${esc(p.name)}</b><br><span class="muted">${esc(p.org)}${p.roleLabel ? ', ' + esc(p.roleLabel) : ''}</span></td>
       <td>${esc(p.sectorLabel)}${p.universalRequested ? '<br><b style="color:#c93a17">asked for universal</b>' : ''}</td>
       <td>${esc(p.handle)}<br><span class="muted">${p.lastLoginAt ? 'last in ' + esc(p.lastLoginAt.slice(0, 10)) : 'never signed in'}${p.mustChange ? ', temp password' : ''}</span></td>
       <td>${p.phones.map(esc).join('<br>') || '<span class="muted">none</span>'}</td><td>${p.view === 'all' ? 'all in line' : 'own only'}</td><td>${esc(p.status)}</td>
@@ -42,7 +45,7 @@
   const shown = (t, pw, extra) => { q('pt_new').innerHTML = `<div class="card" style="border:2px solid #f04a23;margin-top:12px"><b>${esc(t)}</b><br>Temporary password (shown once): <code style="font-size:18px;user-select:all">${esc(pw)}</code> <button onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(pw)}');toast('Copied')">Copy</button><div class="muted" style="font-size:13px">${esc(extra || '')} They must choose their own password at first sign in.</div></div>`; };
   window.ptLoad = ptLoad;
   window.ptCreate = guard(async () => {
-    const o = await P('/', 'POST', { name: q('pt_name').value, org: q('pt_org').value, handle: q('pt_handle').value, universal: q('pt_sector').value === 'universal', sector: q('pt_sector').value, phones: q('pt_phones').value, view: q('pt_view').value, sendSms: q('pt_sms').checked });
+    const o = await P('/', 'POST', { role: q('pt_role').value, name: q('pt_name').value, org: q('pt_org').value, handle: q('pt_handle').value, universal: q('pt_sector').value === 'universal', sector: q('pt_sector').value, phones: q('pt_phones').value, view: q('pt_view').value, sendSms: q('pt_sms').checked });
     shown(`Login ready for ${o.account.name} (${o.account.handle})`, o.temporaryPassword, o.sms ? (o.sms.ok ? (o.sms.sandbox ? 'SMS logged in sandbox, nothing delivered.' : 'SMS sent.') : 'SMS could not be sent, give them the password yourself.') : 'Give it to them yourself, or tick the SMS box next time.');
     ['pt_name', 'pt_org', 'pt_handle', 'pt_phones'].forEach((i) => { q(i).value = ''; }); ptLoad();
   });
