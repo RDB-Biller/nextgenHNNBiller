@@ -88,12 +88,22 @@
       el.textContent = t('review.notice');
     } else if (el) el.remove();
   }
+  // Put the language picker beside the page title (the brand mark, else the first heading) so nobody has to scroll for it.
+  function autoHost() {
+    var t = document.querySelector('.brandmark') || document.querySelector('h1');
+    if (!t || !t.parentNode) return null;
+    var row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:14px;flex-wrap:wrap';
+    t.parentNode.insertBefore(row, t); row.appendChild(t);
+    var h = document.createElement('span'); h.setAttribute('data-lang-switch', ''); h.style.cssText = 'display:inline-block'; row.appendChild(h); return h;
+  }
   function switcher() {
     var host = document.querySelector('[data-lang-switch]'); var wrap = document.getElementById('hnn-lang-wrap');
+    if (!wrap && !host) host = autoHost();
     if (!wrap) {
       wrap = document.createElement('div'); wrap.id = 'hnn-lang-wrap'; wrap.setAttribute('translate', 'no');
-      if (!host) wrap.style.cssText = 'position:fixed;bottom:12px;inset-inline-end:12px;z-index:99999;background:#fff;border:1px solid #cfd6df;border-radius:8px;padding:4px 6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:13px system-ui,sans-serif';
-      var sel = document.createElement('select'); sel.id = 'hnn-lang'; sel.setAttribute('aria-label', 'Language'); sel.style.cssText = 'font:inherit;border:0;background:transparent;color:inherit;cursor:pointer';
+      if (host) wrap.style.cssText = 'display:inline-block;background:#fff;border:1px solid #cfd6df;border-radius:8px;padding:3px 8px;font:13px system-ui,sans-serif;vertical-align:middle';
+      else wrap.style.cssText = 'position:fixed;top:10px;inset-inline-end:12px;z-index:99999;background:#fff;border:1px solid #cfd6df;border-radius:8px;padding:4px 6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:13px system-ui,sans-serif';
+      var sel = document.createElement('select'); sel.id = 'hnn-lang'; sel.setAttribute('aria-label', 'Language'); sel.style.cssText = 'font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;width:auto;min-width:0;padding:2px 4px;margin:0;height:auto;box-shadow:none';
       sel.onchange = function () { set(sel.value); };
       wrap.appendChild(sel); (host || document.body).appendChild(wrap);
     }
