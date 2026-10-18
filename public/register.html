@@ -73,7 +73,8 @@ async function submitForm(ev){
     }
     $('root').innerHTML=`<p class="eyebrow">Thank you</p>
       <div class="bignum" style="font-size:22px;line-height:1.4">We've got your details — our team will reach out shortly to set up ${esc(orgName)}'s trial.</div>
-      <p class="muted" style="margin-top:10px">In the meantime, feel free to reply to the text you received, or just sit tight.</p>`;
+      <p class="muted" style="margin-top:10px">${new URLSearchParams(location.search).get('ref')==='campaign'?'In the meantime, feel free to reply to the text you received, or just sit tight.':'We will call or email you using the details you gave. You do not need to do anything else.'}</p>
+      <p style="margin-top:14px"><b>While you wait:</b> <a href="/app/platform.html">Try the demo</a> · <a href="/app/apis.html">See the API downloads</a></p>`;
   }catch(e){
     toast('Could not submit — check your connection and try again');
     btn.disabled=false; btn.textContent='Request my trial account';
