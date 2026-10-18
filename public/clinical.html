@@ -27,6 +27,7 @@
       <button class="accent" onclick="confirmCode()">Confirm</button>
       <button class="ghost" onclick="resendCode()">Resend</button></div>
     <p class="muted" id="confirmMsg" style="font-size:13px;margin-top:10px"></p>
+    <p style="font-size:14px;margin:8px 0 0">Wrong number? <a href="#" onclick="try{localStorage.removeItem('clinicalSession')}catch(e){};session=null;$('code').value='';$('confirmMsg').textContent='';showStep('step-link');return false">Change it</a></p>
   </div>
 
   <div class="card" id="step-active" style="display:none">

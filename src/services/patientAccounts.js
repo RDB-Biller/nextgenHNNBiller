@@ -238,6 +238,25 @@ async function addPhone(a, { phone, verifiedAt, receipt } = {}) {
   return session(a);
 }
 
+/**
+ * Wrong number at sign-up? While the number on an account is still unconfirmed it can be replaced. Either the person is signed in,
+ * or they give the account's current number (or email) and password. A number that has already been confirmed cannot be swapped this way.
+ */
+async function changePhone(a, { phone } = {}) {
+  const p = dial(phone); if (!validPhone(p)) throw err(422, 'Please enter a valid phone number');
+  if (a.phoneVerified) throw err(409, 'This number is already confirmed, so it cannot be replaced here.');
+  const other = await byPhone(p); if (other && other._id !== a._id) throw err(409, 'That phone number belongs to another account.');
+  if (a.phone && a.phone !== p) await store.settings.set(phoneKey(a.phone), null);
+  a.phone = p; a.phoneVerified = false; a.updatedAt = iso();
+  await store.settings.set(phoneKey(p), { id: a._id }); await save(a);
+  return session(a);
+}
+async function changePhoneByLogin({ identifier, phone: current, email: em, password, newPhone } = {}) {
+  const a = await byLogin({ identifier, phone: current, email: em });
+  if (!a || !checkPassword(password, a.passwordHash)) throw err(401, 'Incorrect phone number, email or password');
+  return changePhone(a, { phone: newPhone });
+}
+
 // ---- budgets and vitals ----
 const BUDGET_TYPES_MAX = 80;
 async function addBudget(a, { budget_type, budget_date, description, amount } = {}) {
@@ -426,6 +445,6 @@ async function deleteFile(a, id) {
 
 /** Add an in-app notification for the account that owns this phone (no-op when there is none). */
 async function notifyPhone(phoneRaw, payload) { const a = await byPhone(phoneRaw); if (!a) return false; await notify(a, payload); await save(a); return true; }
-module.exports = { authConfig, setAuthConfig, byEmail, startEmailVerification, verifyEmail, addPhone, notifyPhone, register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
+module.exports = { changePhone, changePhoneByLogin, authConfig, setAuthConfig, byEmail, startEmailVerification, verifyEmail, addPhone, notifyPhone, register, login, authenticate, publicUser, updateProfile, changePassword, forgotPassword, resetPassword, verifyPhone, addBudget, listBudgets, addVital, listVitals, byPhone, verifyToken,
   notify, listNotifications, readNotification, addAppointment, updateAppointment, deleteAppointment, listAppointments, getAppointment, runAppointmentReminders,
   addFile, listFiles, getFile, updateFile, deleteFile };

@@ -236,6 +236,12 @@ const lastCode = () => /\b(\d{6})\b/.exec(sms[sms.length - 1].message)[1];
   bad = await accounts.register({ first_name: 'Kojo', last_name: 'Ansah', email: 'kojo@mail.com', password: 'secret1' }).then(() => null, (e) => e); ok(bad && bad.status === 422 && /mobile phone/.test(bad.message), 'with the phone required, an email-only sign-up is refused');
   bad = await fetch(base + '/patient/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'esi.owusu@mail.com', password: 'newsecret1' }) }); ok(bad.status === 200, 'existing email accounts can still sign in');
   await accounts.setAuthConfig({ requirePhone: false });
+  // Wrong number at sign-up: replaceable while unconfirmed, by password, never once confirmed
+  await accounts.register({ first_name: 'Typo', last_name: 'Tester', phone: '0598345652', password: 'secret1' });
+  let cp = await fetch(base + '/patient/change_phone_by_login', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0598345652', password: 'wrongpass', newPhone: '0593845652' }) }); ok(cp.status === 401, 'changing an unconfirmed number needs the password');
+  cp = await fetch(base + '/patient/change_phone_by_login', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '0598345652', password: 'secret1', newPhone: '0593845652' }) }); let cpb = await cp.json(); ok(cp.status === 200 && cpb.result.phone === '+233593845652' && cpb.result.phoneVerified === false, 'the unconfirmed number is replaced');
+  ok(!(await accounts.byPhone('0598345652')) && !!(await accounts.byPhone('0593845652')), 'the old number no longer finds the account; the new one does');
+  const typo = await accounts.byPhone('0593845652'); typo.phoneVerified = true; cp = await accounts.changePhone(typo, { phone: '0244999999' }).then(() => null, (e) => e); ok(cp && cp.status === 409, 'a confirmed number cannot be swapped this way');
 
   server.close();
   console.log(`\nPATIENT ACCOUNTS CHECK: ${a} assertions ${process.exitCode ? 'WITH FAILURES' : 'passed'}`);
