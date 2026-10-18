@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const store = require('../store');
 const messaging = require('./messaging');
+const email = require('./email');
 
 const ORG_TYPES = ['hospital', 'pharmacy', 'other'];
 const STATUSES = ['new', 'contacted', 'approved', 'declined'];
@@ -43,6 +44,10 @@ async function submit(body = {}) {
     createdAt: new Date().toISOString(),
   };
   await store.trialRegistrations.insert(reg);
+  // Tell us there is a new lead (best effort: never blocks or fails the visitor's submission).
+  const to = process.env.SUPPORT_EMAIL || 'ekforson@hnnworld.com';
+  email.send({ to, subject: `New trial request: ${orgName}`, text: `${contactName} at ${orgName} (${orgType}) asked for a trial.\nPhone: ${phone}\nEmail: ${reg.email || '-'}\nRegion: ${reg.region || '-'}\nNotes: ${reg.notes || '-'}\nSource: ${reg.source}\n\nReview it in Master Control, Leads / trial requests.` })
+    .then((r) => { if (!r.ok) console.log(`[trial] admin email not sent (${r.error})`); }).catch(() => {});
   return reg;
 }
 
