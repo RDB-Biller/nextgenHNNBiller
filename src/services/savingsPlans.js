@@ -581,7 +581,15 @@ async function startVerification(phoneRaw, { purpose = 'signup', lang } = {}) {
   const code = messaging.genOtp();
   await store.settings.set(otpKey(phone), { phone, code, purpose, attempts: 0, expiresAt: new Date(Date.now() + OTP_TTL_MS).toISOString() });
   const r = await messaging.send({ channel: 'sms', to: phone, body: i18n.t('sms.otp', lang, { code }), tenant: null });
-  const out = { sent: !!r.ok, sandbox: !!r.sandbox, to: maskPhone(phone), expiresInMinutes: 10 };
+  if (!r.ok && !r.sandbox) {
+    // Never tell a person "we texted you" when nothing went out: say so, and say what to do.
+    console.error(`[verify] SMS code was NOT sent to ${maskPhone(phone)}: ${r.error || 'unknown'}`);
+    const notOn = /not_configured|credentials|sender_not_configured|unknown_provider/.test(r.error || '');
+    throw err(424, 'sms_not_sent', notOn
+      ? 'Text messages are not switched on for this service yet, so no code could be sent. Please try again later or contact support.'
+      : 'We could not send a text to that number. Check the number (with country code) and try again, or contact support.');
+  }
+  const out = { sent: true, sandbox: !!r.sandbox, to: maskPhone(phone), expiresInMinutes: 10 };
   if (r.sandbox) out.codeSandbox = code; // never present once messaging is live
   return out;
 }
