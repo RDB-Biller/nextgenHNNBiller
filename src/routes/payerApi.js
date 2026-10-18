@@ -16,6 +16,7 @@ router.use(async (req, res, next) => {
   try {
     const payer = await store.payers.byApiKey(req.header('x-payer-key'));
     if (!payer) return res.status(401).json({ error: 'invalid_payer_key' });
+    if (await require('../services/accountControl').isDisabled('insurer', payer.id)) return res.status(403).json({ error: 'account_disabled', message: 'This account has been deactivated. Please contact HNN.' });
     req.payer = payer;
     next();
   } catch (e) { next(e); }
