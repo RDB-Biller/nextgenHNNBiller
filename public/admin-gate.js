@@ -8,7 +8,7 @@
   // (Every call to /api/platform carries the sub-admin's session: the wrapper is installed by the page itself, before any script loads.)
   const tabs = document.querySelector('.tabs:not(.subtabs)'); const gate = $$('gate');
   const TAB_AREA = { clients: 'clients', leads: 'clients', messaging: 'messaging', campaigns: 'messaging', lang: 'messaging', opmode: 'operating_mode', payers: 'payers', emr: 'payers', pde: 'product_lab', lic: 'finance', policy: 'finance', settlement: 'finance', reports: 'finance', automation: 'claims', partners: 'partners', erheat: 'partners', accounts: 'accounts' };
-  const TEXT_AREA = { Partners: 'partners', ERHEAT: 'partners', Accounts: 'accounts', Outreach: 'messaging', Currencies: 'finance' };
+  const TEXT_AREA = { Partners: 'partners', ERHEAT: 'partners', Accounts: 'accounts', Outreach: 'messaging', Currencies: 'finance', 'Price books': 'pricebooks' };
   $$('keybox').style.display = 'none'; const nav = document.querySelector('.nav'); if (nav) nav.style.display = 'none';
   const hideAll = () => { if (tabs) tabs.style.display = 'none'; document.querySelectorAll('.panel').forEach((p) => { p.style.display = 'none'; }); $$('kpis').style.display = 'none'; };
   const api = async (path, method, body, auth) => {

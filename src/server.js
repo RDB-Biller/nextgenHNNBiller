@@ -150,6 +150,7 @@ app.use('/api/platform/erheat', authPlatform, erheatRoutes.admin);
 app.use('/admin-api', subAdminRoutes.api);
 app.use('/currency/api', currencyRoutes.api);
 app.use('/api/platform/currencies', authPlatform, currencyRoutes.admin);
+app.use('/api/platform/price-books', authPlatform, require('./routes/priceBooksAdmin'));
 app.use('/api/platform/admins', authPlatform, subAdminRoutes.admin);
 app.use('/api/platform/accounts', authPlatform, accountControlAdmin);
 app.use('/api/platform/partners', authPlatform, partnerRoutes.admin);
