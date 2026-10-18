@@ -72,7 +72,7 @@
   .err{ color:#9a2a14; }
   @media (prefers-reduced-motion:reduce){ .stamp{ animation:none; opacity:1; transform:rotate(-7deg); } .cta{ transition:none; } }
 </style>
-</head>
+<script src="/app/nextstep.js"></script></head>
 <body>
   <main class="receipt" id="root" aria-live="polite">
     <div class="state" id="loading"><p>Loading your bill…</p></div>
@@ -129,7 +129,7 @@
       showPaid(s);
     }catch{
       btn.disabled = false; btn.textContent = `Pay ${fmt(s.amount, s.currency)} with MTN MoMo`;
-      const n = document.querySelector('.note'); if(n){ n.classList.add('err'); n.textContent = 'Payment did not go through. Please try again.'; }
+      const n = document.querySelector('.note'); if(n){ n.classList.add('err'); n.textContent = 'Payment did not go through. Please try again.'; if(window.NextStep){ let x=document.getElementById('pay_next'); if(!x){ x=document.createElement('div'); x.id='pay_next'; n.after(x); } NextStep.mount(x,'Payment did not go through.','server'); } }
     }
   }
 
@@ -141,7 +141,7 @@
   }
 
   function showError(msg){
-    root.innerHTML = `<div class="state"><p class="err">${esc(msg)}</p></div>`;
+    root.innerHTML = '<div class="state" id="pay_err"></div>'; if (window.NextStep) NextStep.mount(document.getElementById('pay_err'), msg, 'missing'); else document.getElementById('pay_err').textContent = msg;
   }
   function esc(x){ return String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 

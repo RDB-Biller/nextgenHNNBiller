@@ -34,15 +34,29 @@
     document.querySelectorAll('.panel').forEach((p) => { p.style.display = ''; });
     if (firstTab) firstTab.click(); else gate.insertAdjacentHTML('beforeend', msg('Your login has no areas yet. Ask the chief administrator.', true));
   };
-  const demoCard = async () => {
-    let d = null; try { d = await api('/demo'); } catch (e) { /* no demo offered */ }
-    if (!d || !d.enabled) return;
-    gate.insertAdjacentHTML('beforeend', `<div class="card" style="max-width:420px;margin:0 0 24px;border:2px dashed #b8c4be"><h2>Just looking?</h2><p class="muted" style="margin-top:0">${esc(d.note)}</p>
+  let DEMO = null; const loadDemo = async () => { if (DEMO === null) { try { DEMO = await api('/demo'); } catch (e) { DEMO = { enabled: false }; } } return DEMO; };
+  const tryDemo = async (d) => { try { enter(await api('/login', 'POST', { handle: d.handle, password: d.password })); } catch (x) { toast(x.message); } };
+  const demoHtml = (d, dup) => `<div class="card" style="max-width:420px;margin:${dup ? '0 0 24px' : '8px 0 24px'};border:2px dashed #b8c4be"><h2>Just looking?</h2><p class="muted" style="margin-top:0">${esc(d.note)}</p>
       <p style="margin:6px 0"><b>Dummy credentials</b><br>Login: <code style="user-select:all">${esc(d.handle)}</code><br>Password: <code style="user-select:all">${esc(d.password)}</code></p>
-      <button class="primary" id="g_demo" type="button">Try the demo</button> <a href="/app/register.html" style="margin-left:10px">Ask for your own account</a></div>`);
-    $$('g_demo').onclick = async () => { try { enter(await api('/login', 'POST', { handle: d.handle, password: d.password })); } catch (x) { toast(x.message); } };
+      <button class="primary" data-demo type="button">Try the demo</button> <a href="/app/register.html" style="margin-left:10px">Ask for your own account</a></div>`;
+  const wireDemo = (d) => gate.querySelectorAll('[data-demo]').forEach((b) => { b.onclick = () => tryDemo(d); });
+  // Tabs next to the sign-in form, so nobody has to scroll to find the demo or sign-up. The cards lower down stay as a duplicate.
+  const tabBar = (active, demoOn) => `<div role="tablist" id="g_tabs" style="display:flex;gap:6px;max-width:420px;margin:16px 0 0;border-bottom:2px solid #d5ddd8">
+      <button type="button" role="tab" data-gt="in" aria-selected="${active === 'in'}" class="gtab">Sign in</button>
+      ${demoOn ? `<button type="button" role="tab" data-gt="demo" aria-selected="${active === 'demo'}" class="gtab">Try the demo</button>` : ''}
+      <a role="tab" href="/app/register.html" class="gtab" style="text-decoration:none">Sign up</a></div>
+    <style>.gtab{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;padding:10px 14px;font:inherit;font-weight:600;color:#4b5b53;cursor:pointer}.gtab[aria-selected="true"]{color:#0f5c47;border-bottom-color:#0f5c47}.gtab:hover{color:#0f5c47}.gtab:focus-visible{outline:2px solid #0f5c47;outline-offset:2px}</style>`;
+  const signin = async (active) => {
+    const d = await loadDemo(); const demoOn = !!(d && d.enabled);
+    const bar = tabBar(active || 'in', demoOn);
+    if (active === 'demo' && demoOn) { gate.innerHTML = bar + demoHtml(d); } else {
+      form('Master Control sign-in', 'Sign in with the email or mobile number you were invited with.', [{ id: 'h', label: 'Email or mobile number', ac: 'username' }, { id: 'p', label: 'Password', type: 'password', ac: 'current-password' }], 'Sign in', async (v) => enter(await api('/login', 'POST', { handle: v.h, password: v.p })));
+      gate.insertAdjacentHTML('afterbegin', bar);
+      if (demoOn) gate.insertAdjacentHTML('beforeend', demoHtml(d, true));
+    }
+    wireDemo(d || {});
+    gate.querySelectorAll('[data-gt]').forEach((b) => { b.onclick = () => signin(b.getAttribute('data-gt')); });
   };
-  const signin = () => { form('Master Control sign-in', 'Sign in with the email or mobile number you were invited with.', [{ id: 'h', label: 'Email or mobile number', ac: 'username' }, { id: 'p', label: 'Password', type: 'password', ac: 'current-password' }], 'Sign in', async (v) => enter(await api('/login', 'POST', { handle: v.h, password: v.p }))); demoCard(); };
   hideAll();
   const m = /invite=([\w-]+)/.exec(location.hash);
   if (m) form('Choose your password', 'Your invite is valid. Choose a password of at least 10 characters. You will use it with your email or mobile number to sign in.', [{ id: 'p', label: 'New password', type: 'password', ac: 'new-password' }], 'Save and continue', async (v) => { const o = await api('/accept-invite', 'POST', { token: m[1], password: v.p }); history.replaceState(null, '', location.pathname); enter(o); });

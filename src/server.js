@@ -62,6 +62,16 @@ const PUBLIC = path.join(__dirname, '..', 'public');
 
 app.get('/', (req, res) => res.redirect('/app/dashboard.html'));
 
+// Addresses the front-end pages need for their "what to do next" links (see public/nextstep.js). Public, no secrets.
+app.get('/app/links.json', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    support: process.env.SUPPORT_EMAIL || 'ekforson@hnnworld.com',
+    trimestersave: process.env.TRIMESTERSAVE_URL || '',
+    erheat: process.env.ERHEAT_APP_URL || 'https://erheat-app-production.up.railway.app',
+  });
+});
+
 // `sandbox` (settlement's) is kept for any existing caller that only checks that
 // one flag; `operatingMode` carries the live, independent state of both rails —
 // see services/operatingMode.js. Reflects Master Control's saved setting once
@@ -167,6 +177,8 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/solutions', solutionsApiRoutes);
 app.use('/api/v1', institutionsRoutes);
 
+// No dead ends: a page or address that does not exist answers with where to go next, never a bare error.
+app.use(require('./lib/nextPage').notFound);
 app.use(errorHandler);
 
 if (require.main === module) {
