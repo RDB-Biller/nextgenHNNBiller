@@ -11,6 +11,8 @@ const limiter = (limit, windowMs) => (req, res, next) => { const n = Date.now();
 const admin = express.Router();
 admin.use(express.json({ limit: '20kb' }));
 admin.get('/', wrap(async (_q, res) => res.json({ areas: Object.entries(admins.AREAS).map(([key, a]) => ({ key, label: a.label })), presets: Object.entries(admins.PRESETS).map(([key, p]) => ({ key, label: p.label, areas: p.areas })), admins: await admins.list() })));
+admin.get('/demo', wrap(async (_q, res) => res.json({ ...(await admins.demoConfig()), handle: admins.DEMO.handle, password: admins.DEMO.password })));
+admin.put('/demo', wrap(async (req, res) => res.json(await admins.setDemoEnabled(!!(req.body || {}).enabled))));
 admin.post('/', wrap(async (req, res) => res.status(201).json(await admins.invite(req.body || {}, (req.principal && req.principal.id) || 'chief'))));
 admin.patch('/:id', wrap(async (req, res) => res.json({ account: await admins.update(req.params.id, req.body || {}) })));
 admin.post('/:id/invite', wrap(async (req, res) => res.json(await admins.reinvite(req.params.id, !!(req.body || {}).sendSms))));
@@ -19,6 +21,7 @@ admin.delete('/:id', wrap(async (req, res) => res.json(await admins.remove(req.p
 // ---- the sub-admin themselves (public sign-in)
 const api = express.Router();
 api.use(express.json({ limit: '10kb' }));
+api.get('/demo', wrap(async (_q, res) => { const c = await admins.demoConfig(); res.json(c.enabled ? { enabled: true, handle: admins.DEMO.handle, password: admins.DEMO.password, note: 'Dummy credentials for a guided look. Nothing you do is saved, and keys and contact details are hidden.' } : { enabled: false }); }));
 api.post('/login', limiter(15, 60000), wrap(async (req, res) => res.json(await admins.login(req.body || {}))));
 api.post('/accept-invite', limiter(10, 60000), wrap(async (req, res) => res.json(await admins.acceptInvite(req.body || {}))));
 api.get('/me', wrap(async (req, res) => { const a = await admins.authenticate(req.get('authorization')); res.json({ account: admins.view(a) }); }));

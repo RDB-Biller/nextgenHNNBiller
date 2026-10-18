@@ -14,7 +14,7 @@ const config = require('../config');
  *
  * Storage (settings store):  admin:acct:<id>   admin:login:<handle> -> { id }   admin:invite:<token> -> { id, exp }
  */
-const TTL_MS = 12 * 3600 * 1000; const INVITE_MS = 7 * 86400 * 1000;
+const TTL_MS = 12 * 3600 * 1000; const DEMO_TTL_MS = 3 * 3600 * 1000; const INVITE_MS = 7 * 86400 * 1000;
 const err = (status, message) => { const e = new Error(message); e.status = status; return e; };
 const now = () => new Date().toISOString();
 const b64 = (b) => Buffer.from(b).toString('base64url');
@@ -35,6 +35,9 @@ const AREAS = {
   accounts: { label: 'Account directory (deactivate, approve sign-ups)', paths: ['accounts'] },
 };
 const ALWAYS = ['overview', 'me'];
+// What a demo or evaluator login may look at. Product Lab, finance, switching sandbox/live, partner and account management are never part of the tour.
+const DEMO_AREAS = ['clients', 'payers', 'messaging', 'claims'];
+const DEMO = { handle: 'demo@hnn-demo.example', password: 'HNN-demo-2026', name: 'HNN Demo' };
 const PRESETS = {
   partner_manager: { label: 'Partner manager', areas: ['partners', 'accounts'] },
   support: { label: 'Support', areas: ['clients', 'accounts'] },
@@ -42,6 +45,7 @@ const PRESETS = {
   finance_officer: { label: 'Finance officer', areas: ['finance', 'payers'] },
   claims_officer: { label: 'Claims officer', areas: ['claims', 'payers'] },
   product_lead: { label: 'Product lead', areas: ['product_lab'] },
+  evaluator: { label: 'Evaluator (demo experience)', areas: DEMO_AREAS, sandboxed: true },
   custom: { label: 'Custom', areas: [] },
 };
 const areaOfPath = (seg) => { if (ALWAYS.includes(seg)) return 'always'; for (const [k, a] of Object.entries(AREAS)) if (a.paths.includes(seg)) return k; return null; };
@@ -65,7 +69,7 @@ async function unsign(t) {
   try { const p = JSON.parse(Buffer.from(body, 'base64url').toString()); return p.exp > Date.now() ? p : null; } catch (_e) { return null; }
 }
 
-const view = (a) => ({ id: a._id, name: a.name, handle: a.handle, email: a.email || '', phone: a.phone || '', preset: a.preset, presetLabel: (PRESETS[a.preset] || {}).label || 'Custom', areas: a.areas, areaLabels: a.areas.map((k) => (AREAS[k] || {}).label || k), readOnly: !!a.readOnly, status: a.status, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt || null });
+const view = (a) => ({ id: a._id, name: a.name, handle: a.handle, email: a.email || '', phone: a.phone || '', preset: a.preset, presetLabel: (PRESETS[a.preset] || {}).label || 'Custom', areas: a.areas, areaLabels: a.areas.map((k) => (AREAS[k] || {}).label || k), readOnly: !!a.readOnly, sandboxed: !!a.sandboxed, demo: !!a.demo, status: a.status, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt || null });
 function cleanAreas(list) { const out = []; for (const k of Array.isArray(list) ? list : []) { if (!AREAS[k]) throw err(422, `Unknown area: ${k}`); if (!out.includes(k)) out.push(k); } return out; }
 
 // ---------------------------------------------------------------- chief
@@ -77,7 +81,7 @@ async function invite(b = {}, by = 'chief') {
   for (const h of [email, phone].filter(Boolean)) if (await store.settings.get(loginKey(h))) throw err(409, 'That email or phone number already has an admin login.');
   const preset = PRESETS[b.preset] ? b.preset : 'custom'; const areas = cleanAreas(b.areas && b.areas.length ? b.areas : PRESETS[preset].areas);
   if (!areas.length) throw err(422, 'Choose at least one area.');
-  const a = { _id: `adm_${crypto.randomBytes(8).toString('hex')}`, name, handle, email, phone, preset, areas, readOnly: !!b.readOnly, status: 'invited', passwordHash: null, pv: 1, createdAt: now(), createdBy: by };
+  const a = { _id: `adm_${crypto.randomBytes(8).toString('hex')}`, name, handle, email, phone, preset, areas, readOnly: !!b.readOnly, sandboxed: !!(PRESETS[preset].sandboxed || b.sandboxed), status: 'invited', passwordHash: null, pv: 1, createdAt: now(), createdBy: by };
   for (const h of [email, phone].filter(Boolean)) await store.settings.set(loginKey(h), { id: a._id });
   await save(a); return issueInvite(a, !!b.sendSms);
 }
@@ -95,6 +99,7 @@ async function update(id, b = {}) {
   if (b.preset !== undefined) { if (!PRESETS[b.preset]) throw err(422, 'Unknown preset.'); a.preset = b.preset; if (b.areas === undefined && b.preset !== 'custom') a.areas = PRESETS[b.preset].areas.slice(); }
   if (b.areas !== undefined) { a.areas = cleanAreas(b.areas); if (!a.areas.length) throw err(422, 'Choose at least one area.'); }
   if (b.readOnly !== undefined) a.readOnly = !!b.readOnly;
+  if (b.sandboxed !== undefined && !a.demo) a.sandboxed = !!b.sandboxed;
   if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status) || a.status === 'invited') throw err(422, a.status === 'invited' ? 'They have not accepted the invite yet.' : 'Status must be active or suspended.'); if (b.status !== a.status) a.pv += 1; a.status = b.status; }
   await save(a); return view(a);
 }
@@ -113,15 +118,17 @@ const fails = new Map();
 async function login({ handle, password } = {}) {
   const hk = String(handle || '').trim().toLowerCase(); const f = (fails.get(hk) || []).filter((t) => Date.now() - t < 15 * 60000);
   if (f.length >= 6) throw err(429, 'Too many tries. Wait 15 minutes, or ask the chief administrator for a new invite.');
+  if (String(handle || '').trim().toLowerCase() === DEMO.handle) { if (!(await demoConfig()).enabled) throw err(403, 'The demo login is switched off.'); await ensureDemo(); }
   const a = await byHandle(handle);
   if (!a || !a.passwordHash || !check(password, a.passwordHash)) { f.push(Date.now()); fails.set(hk, f); throw err(401, 'Incorrect login or password.'); }
   if (a.status !== 'active' || (await require('./accountControl').isDisabled('subadmin', a._id))) throw err(403, 'This login is not active. Contact the chief administrator.');
   fails.delete(hk); a.lastLoginAt = now(); await save(a);
-  return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + TTL_MS }), account: view(a) };
+  return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + (a.demo ? DEMO_TTL_MS : TTL_MS) }), account: view(a) };
 }
 async function authenticate(header) {
   const m = /^Bearer\s+(.+)$/i.exec(header || ''); const p = m && await unsign(m[1]); const a = p && await byId(p.sub);
   if (!a || a.pv !== p.pv || a.status !== 'active' || (await require('./accountControl').isDisabled('subadmin', a._id))) throw err(401, 'Please sign in again.');
+  if (a.demo && !(await demoConfig()).enabled) throw err(401, 'The demo login is switched off.');
   return a;
 }
 async function changePassword(a, { current, password } = {}) {
@@ -130,12 +137,25 @@ async function changePassword(a, { current, password } = {}) {
   a.passwordHash = hash(password); a.pv += 1; await save(a);
   return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + TTL_MS }), account: view(a) };
 }
+// ---------------------------------------------------------------- the public demo login
+// Anyone may use these dummy credentials. The account is sandboxed (see demoGuard.js): it saves nothing and sees no secrets or contact details.
+async function demoConfig() { const c = await store.settings.get('admin:demo:cfg'); return { enabled: c ? c.enabled !== false : true }; }
+async function setDemoEnabled(on) { await store.settings.set('admin:demo:cfg', { enabled: !!on, at: now() }); return demoConfig(); }
+async function ensureDemo() {
+  const have = await store.settings.get(loginKey(DEMO.handle)); const cur = have ? await byId(have.id) : null;
+  if (cur && cur.status === 'active') return cur;
+  const a = cur || { _id: 'adm_demo', name: DEMO.name, handle: DEMO.handle, email: DEMO.handle, phone: '', preset: 'evaluator', areas: DEMO_AREAS.slice(), readOnly: false, sandboxed: true, demo: true, pv: 1, createdAt: now(), createdBy: 'system' };
+  a.areas = DEMO_AREAS.slice(); a.sandboxed = true; a.demo = true; a.status = 'active'; a.passwordHash = hash(DEMO.password);
+  await store.settings.set(loginKey(DEMO.handle), { id: a._id }); await save(a); return a;
+}
+
 /** Can this admin make this call? Used by the platform auth middleware. */
 function allows(a, segment, method) {
   const area = areaOfPath(segment); if (!area) return { ok: false, why: 'This part of Master Control is for the chief administrator only.' };
+  if (a.sandboxed && area !== 'always' && !DEMO_AREAS.includes(area)) return { ok: false, why: 'This part is not included in the demo. Ask HNN for your own account.' };
   if (area === 'always') return { ok: true };
   if (!a.areas.includes(area)) return { ok: false, why: 'Your login has not been given this area.' };
   if (a.readOnly && !['GET', 'HEAD', 'OPTIONS'].includes(method)) return { ok: false, why: 'Your login is read-only.' };
   return { ok: true };
 }
-module.exports = { AREAS, PRESETS, invite, list, update, reinvite, remove, acceptInvite, login, authenticate, changePassword, allows, view };
+module.exports = { DEMO, DEMO_AREAS, demoConfig, setDemoEnabled, ensureDemo, AREAS, PRESETS, invite, list, update, reinvite, remove, acceptInvite, login, authenticate, changePassword, allows, view };

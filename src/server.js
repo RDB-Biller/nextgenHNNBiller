@@ -119,7 +119,7 @@ app.use('/register', express.static(PUBLIC, { index: 'register.html' }));
 const adminPage = (mode) => (req, res, next) => {
   try {
     const html = require('fs').readFileSync(require('path').join(PUBLIC, 'platformchief.html'), 'utf8')
-      .replace('<head>', `<head><script>window.ADMIN_MODE=${JSON.stringify(mode)};${mode === 'sub' ? "try{window.SUB_TOKEN=sessionStorage.getItem('hnn.sub')||''}catch(e){}" : ''}</script>`);
+      .replace('<head>', `<head><script>window.ADMIN_MODE=${JSON.stringify(mode)};${mode === 'sub' ? "try{window.SUB_TOKEN=sessionStorage.getItem('hnn.sub')||''}catch(e){}(function(){var f=window.fetch.bind(window);window.fetch=function(u,o){if(!window.SUB_TOKEN&&typeof u==='string'&&u.indexOf('/api/platform')===0)return new Promise(function(){});if(window.SUB_TOKEN&&typeof u==='string'&&u.indexOf('/api/platform')===0){var h=new Headers((o&&o.headers)||{});h.delete('x-platform-key');h.set('Authorization','Bearer '+window.SUB_TOKEN);o=Object.assign({},o||{},{headers:h});}return f(u,o);};})();" : ''}</script>`);
     res.set('Content-Type', 'text/html; charset=utf-8'); res.set('Cache-Control', 'no-store'); res.send(html);
   } catch (e) { next(e); }
 };
