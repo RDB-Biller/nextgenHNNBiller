@@ -1108,6 +1108,13 @@ replied or opted in; daily caps per channel, sending hours (UTC), pacing; dry-ru
 `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM` (see `.env.example`). Test: `npm run smoke:outreach`.
 
 
+### Special groups, value propositions and "send now" (NABIP)
+
+- **Association segment:** organisation type `association` has its own email (honest about the public source, one clear ask: be pointed to whoever leads partnerships) and follow-ups. `src/services/outreachValue.js` holds each segment's **value proposition in two sizes**, a summary and details (`GET /api/platform/outreach/value-proposition/{segment}`: `association`, `bank`).
+- **NABIP group:** `POST /api/platform/outreach/packs/nabip` (Master Control > Outreach > Special group: NABIP) creates the organisation (list `nabip`), Michael Andel (`mandel@nabip.org`) with its public source, marks him **verified**, and fills sender settings that are still blank. Safe to repeat.
+- **Send now:** `POST /api/platform/outreach/contacts/{id}/send-now` `{ subject?, body? }` sends one email immediately, without the sequence, the sending-hours window or the global ON switch. Suppression, the country hold, the daily cap, the postal-address and sender checks and the one-click unsubscribe footer still apply (an edited body keeps its footer).
+- **Send from your own address:** settings `fromEmail` and `replyTo`. The address must be on the same domain as `EMAIL_FROM` (verify that domain with Resend or SendGrid first), otherwise the send is refused. Test: `npm run smoke:nabip`.
+
 ### Team mailboxes, phone line types and the referral programme
 
 - **Team / role mailboxes** (`sales@`, `info@`, `enquiries@`, `communications@`, or product ones like

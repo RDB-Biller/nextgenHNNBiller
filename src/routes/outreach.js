@@ -55,6 +55,10 @@ admin.post('/referrals/:code/reward', wrap(async (req, res) => res.json({ reward
 admin.post('/packs/ghana-healthcare', wrap(async (_q, res) => res.json(await community.seedGhanaHealth())));
 admin.post('/packs/group-offices', wrap(async (_q, res) => res.json(await community.seedGroupOffices())));
 admin.get('/held-offices', wrap(async (_q, res) => res.json(await community.heldWithOpenOffices())));
+admin.get('/value-proposition/:segment', wrap(async (req, res) => res.json(outreach.valueProposition(req.params.segment))));
+admin.post('/packs/nabip', wrap(async (req, res) => res.json(await outreach.setupNabip({ ...(req.body || {}), by: who(req) }))));
+admin.post('/contacts/:id/verify', wrap(async (req, res) => res.json(await outreach.verifyContact(req.params.id, { note: (req.body || {}).note, by: who(req) }))));
+admin.post('/contacts/:id/send-now', wrap(async (req, res) => res.json(await outreach.sendNow(req.params.id, { ...(req.body || {}), by: who(req) }))));
 admin.get('/gaps', wrap(async (req, res) => res.json(await community.gapBoard(req.query))));
 admin.get('/contributions', wrap(async (req, res) => res.json({ rows: await community.listContributions({ status: req.query.status === 'all' ? '' : (req.query.status || 'pending') }) })));
 admin.post('/contributions/:id/review', wrap(async (req, res) => res.json(await community.reviewContribution(req.params.id, { ...(req.body || {}), by: who(req) }))));

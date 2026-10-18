@@ -37,9 +37,11 @@ const err = (status, message) => Object.assign(new Error(message), { status });
 const now = () => new Date().toISOString();
 const rid = (p) => `${p}_${crypto.randomBytes(5).toString('hex')}`;
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 32);
+const valueProps = require('./outreachValue');
+valueProps.ASSOCIATION_SUBJECT = valueProps.VALUE.association.subject;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'pharmacy', 'other'];
+const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'pharmacy', 'association', 'other'];
 const PERSONAS = ['ceo', 'cto', 'cmo', 'product', 'sales', 'claims', 'ops', 'general', 'comms', 'partnerships', 'other'];
 const PHONE_TYPES = ['mobile', 'landline', 'tollfree', 'unknown'];
 
@@ -111,7 +113,7 @@ const EMAIL_RE = /^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/;
 // ----------------------------------------------------------------- settings
 const CFG = 'out:cfg';
 const DEFAULTS = {
-  enabled: false, senderName: '', senderRole: '', senderOrg: 'HNN Biller / TrimesterSave', postalAddress: '', replyTo: '',
+  enabled: false, senderName: '', senderRole: '', senderOrg: 'HNN Biller / TrimesterSave', postalAddress: '', replyTo: '', fromEmail: '',
   sandboxUrl: 'https://hnnbiller.xchangeinsure.com', patientAppUrl: 'https://tmsapp.trimestersave.com', publicBaseUrl: '',
   caps: { email: 50, sms: 30, whatsapp: 30 }, hours: { from: 8, to: 16 }, paceMs: 400,
   approvedCountries: [],
@@ -128,8 +130,9 @@ async function getConfig() {
 }
 async function setConfig(p = {}, by) {
   const c = await getConfig();
-  for (const k of ['senderName', 'senderRole', 'senderOrg', 'postalAddress', 'replyTo', 'sandboxUrl', 'patientAppUrl', 'publicBaseUrl']) if (p[k] !== undefined) c[k] = String(p[k] || '').trim().slice(0, 300);
+  for (const k of ['senderName', 'senderRole', 'senderOrg', 'postalAddress', 'replyTo', 'fromEmail', 'sandboxUrl', 'patientAppUrl', 'publicBaseUrl']) if (p[k] !== undefined) c[k] = String(p[k] || '').trim().slice(0, 300);
   for (const k of ['sandboxUrl', 'patientAppUrl', 'publicBaseUrl']) if (c[k] && !/^https?:\/\//i.test(c[k])) throw err(422, `${k} must start with http:// or https://`);
+  for (const k of ['replyTo', 'fromEmail']) if (c[k] && !EMAIL_RE.test(c[k])) throw err(422, `${k} must be an email address`);
   if (p.enabled !== undefined) c.enabled = !!p.enabled;
   if (p.approvedCountries !== undefined) {
     if (!Array.isArray(p.approvedCountries)) throw err(422, 'approvedCountries must be a list of country codes');
@@ -159,7 +162,8 @@ async function publicConfig() {
   if (!c.senderName) ready.push('sender name');
   if (!c.postalAddress) ready.push('postal address');
   if (!c.publicBaseUrl) ready.push('public base URL (for unsubscribe/tracking links)');
-  return { ...c, reviewCountries: countries.list.filter((k) => k.level === 'review').map((k) => k.code), readyToSend: ready.length === 0, missing: ready, emailConfigured: email.configured() };
+  const sender = c.fromEmail ? email.senderFor(c.fromEmail) : { from: process.env.EMAIL_FROM || '' };
+  return { ...c, senderCheck: sender.error ? { ok: false, error: sender.error, detail: sender.detail } : { ok: true, from: sender.from || '' }, reviewCountries: countries.list.filter((k) => k.level === 'review').map((k) => k.code), readyToSend: ready.length === 0, missing: ready, emailConfigured: email.configured() };
 }
 
 // ----------------------------------------------------------- organisations
@@ -532,6 +536,7 @@ const segmentOf = (org, contact) => {
     case 'adjudication': return 'adjudication';
     case 'hospital': return 'hospital';
     case 'pharmacy': return 'pharmacy';
+    case 'association': return 'association';
     default: return 'bank';
   }
 };
@@ -564,6 +569,10 @@ const T = {
     subject: 'Price quotes, claims and patient credit for {org}: free sandbox',
     pitch: 'a pharmacy workbench that quotes medicines against payer price lists, supports claims and prior approval, and lets patients pay with savings or an InsureCredit micro-loan, with SMS/WhatsApp receipts.',
   },
+  association: {
+    subject: valueProps.ASSOCIATION_SUBJECT,
+    pitch: 'billing and settlement software for hospitals, insurers and employers (we never hold the money), plus patient savings plans and small loans paid straight to the provider. We would value your members\u2019 view on what our claims and settlement tools are missing.',
+  },
   hospital: {
     subject: 'Bill faster, get claims paid, offer patients credit: sandbox for {org}',
     pitch: 'a billing and claims workbench with an InsureCredit micro-loan offer on any bill, savings plans for planned care (for example BirthPrep) and SMS/WhatsApp receipts. It connects to your EHR or runs on its own.',
@@ -572,6 +581,7 @@ const T = {
 const CTA = (cfg) => `Try it in 2 minutes (no commitment): {sandbox_link}\n1) Click "New bill" top-right, fill it in, then open the InsureCredit tab to see an offer.\n2) Register on the patient app at ${cfg.patientAppUrl} and set up a savings plan.\nTell us what you would want added: {feedback_link}`;
 function renderTemplate(channel, segment, persona, cfg) {
   const t = T[segment] || T.bank;
+  if (channel === 'email' && segment === 'association') return { subject: t.subject, body: '{__association__}' };
   if (channel === 'email') {
     const intro = { ceo: 'a short note for the CEO office', cto: 'a short note for the technology team', cmo: 'a short note for marketing and customer growth', product: 'a short note for product', sales: 'a short note for sales', claims: 'a short note for claims', ops: 'a short note for operations', general: 'a short note for your team', comms: 'a short note for corporate communications', partnerships: 'a short note for partnerships', other: 'a short note' }[persona] || 'a short note';
     return { subject: t.subject, body: `Dear {first_name},\n\nThis is ${intro} at {org}. We have built ${t.pitch}\n\n${CTA(cfg)}\n\nIf a 15-minute demo is easier, just reply with a time that suits you.\n\n{sender_signature}` };
@@ -631,13 +641,16 @@ async function compose(c, org, step, cfg) {
   const sig = (isRole && step.channel === 'email') ? `If you are not the right team, please pass this to whoever leads technology, product, claims or partnerships. Thank you.\n\n${sig0}` : sig0;
   const vars = { first_name: first, org: org.name, sandbox_link: urls.sandbox, feedback_link: urls.feedback, sender_signature: sig, sender_first: (cfg.senderName || '').split(/\s+/)[0], sender_org: cfg.senderOrg };
   let subject = tpl.subject ? fill(tpl.subject, vars) : undefined; let body = fill(tpl.body, vars);
-  if (step.variant === 'followup') { subject = subject && 'Re: ' + subject; body = `Dear ${first},\n\nA quick follow-up in case my note got buried. The sandbox takes two minutes and I would value your honest view on what is missing.\n\n${CTA(cfg).replace('{sandbox_link}', urls.sandbox).replace('{feedback_link}', urls.feedback)}\n\n${sig}`; }
+  if (segment === 'association' && step.channel === 'email' && !step.variant) { const a = valueProps.associationEmail({ first, org: org.name.replace(/\s*\(.*\)\s*$/, ''), sandbox: urls.sandbox, feedback: urls.feedback, sig }); subject = a.subject; body = a.body; }
+  if (segment === 'association' && step.variant === 'followup') { subject = 'Re: ' + (valueProps.VALUE.association.subject.replace('{org}', org.name.replace(/\s*\(.*\)\s*$/, ''))); body = `Dear ${first},\n\nA short follow-up in case my note was missed. We are not asking for an endorsement: only to be pointed to whoever handles partnerships or member programmes, and, if there is interest, 20 minutes to hear what members find hard in billing and reconciliation.\n\nThe sandbox (two minutes, free): ${urls.sandbox}\n\n${sig}`; }
+  else if (step.variant === 'followup') { subject = subject && 'Re: ' + subject; body = `Dear ${first},\n\nA quick follow-up in case my note got buried. The sandbox takes two minutes and I would value your honest view on what is missing.\n\n${CTA(cfg).replace('{sandbox_link}', urls.sandbox).replace('{feedback_link}', urls.feedback)}\n\n${sig}`; }
   if (step.variant === 'referral') {
     const rr = c.referredBy ? await store.settings.get(REF + c.referredBy) : null; const who = rr ? rr.name : 'a colleague';
     subject = `${who} suggested we get in touch`;
     body = `Dear ${first},\n\n${who}${rr && rr.org ? ' (' + rr.org + ')' : ''} thought you would want to see this, so I am writing once. We have built ${(T[segment] || T.bank).pitch}\n\n${CTA(cfg).replace('{sandbox_link}', urls.sandbox).replace('{feedback_link}', urls.feedback)}\n\n${sig}`;
   }
-  if (step.variant === 'last') { subject = subject && 'Closing the loop: ' + subject; body = `Dear ${first},\n\nI will stop here so I do not crowd your inbox. If embedded savings, micro-credit or claims adjudication is on your roadmap, the sandbox stays open: ${urls.sandbox}\nAnd if you would rather not hear from us, use the link below.\n\n${sig}`; }
+  if (segment === 'association' && step.variant === 'last') { subject = 'Closing the loop: ' + valueProps.VALUE.association.subject.replace('{org}', org.name.replace(/\s*\(.*\)\s*$/, '')); body = `Dear ${first},\n\nI will stop here so I do not crowd your inbox. If a conversation about billing, claims settlement or a member sandbox ever makes sense, the sandbox stays open: ${urls.sandbox}\nIf you would rather not hear from us, use the link below.\n\n${sig}`; }
+  else if (step.variant === 'last') { subject = subject && 'Closing the loop: ' + subject; body = `Dear ${first},\n\nI will stop here so I do not crowd your inbox. If embedded savings, micro-credit or claims adjudication is on your roadmap, the sandbox stays open: ${urls.sandbox}\nAnd if you would rather not hear from us, use the link below.\n\n${sig}`; }
   if (step.channel === 'email' && !step.variant && (org.lists || []).includes(AR.all)) {
     const what = (org.lists || []).includes(AR.ins) ? "insurers" : 'banks';
     body = body.replace(/^(Dear [^\n]*,\n\n)/, `$1We came across ${org.name} in The Africa Report's 2024 ranking of Africa's ${what}, which is why I am writing to you.\n\n`);
@@ -693,7 +706,7 @@ async function stepOne(c, org, seq, cfg, { dry } = {}) {
   }
   if ((await sentToday(step.channel)) >= cfg.caps[step.channel]) return { ...out, result: 'deferred', reason: 'daily_cap' };
   let r;
-  if (step.channel === 'email') r = await email.send({ to: c.email, subject: msg.subject, text: msg.body });
+  if (step.channel === 'email') r = await email.send({ to: c.email, subject: msg.subject, text: msg.body, from: cfg.fromEmail || undefined, replyTo: cfg.replyTo || undefined });
   else r = await messaging.send({ channel: step.channel, to: c.phone, body: msg.body, tenant: null });
   if (!r.ok) { note(c, { type: 'send_failed', channel: step.channel, error: r.error }); await saveContact(c); return { ...out, result: 'failed', error: r.error }; }
   await bumpSent(step.channel);
@@ -877,7 +890,69 @@ async function addPartnerByAdmin(b) {
   try { const r = await joinAsPartner(b); return referralStats(r.code); } finally { if (!wasOn) { cfg.referral.enabled = false; await store.settings.set(CFG, cfg); } }
 }
 
+
+// ------------------------------------------------- verified contacts, send now, special groups
+/** Record that the operator checked this person and address themselves (so it is shown as verified and can be sent to at once). */
+async function verifyContact(id, { note: why, by } = {}) {
+  const c = await getContact(id); c.verified = { at: now(), by: by || null, note: String(why || '').slice(0, 300) }; note(c, { type: 'verified', by: by || null }); await saveContact(c); return conPublic(c);
+}
+/**
+ * Send one email to one contact right now: no sequence, no sending-hours window and no need for the global ON switch,
+ * because the operator pressed the button. Everything that protects the recipient still applies: suppression and opt-outs,
+ * the country review hold, the daily cap, the sender identity and postal address in the footer, and the one-click unsubscribe.
+ * `subject` and `body` let the operator send an edited version of the preview; omit them to send the standard email.
+ */
+async function sendNow(contactId, { sequenceId, variant, subject, body, by } = {}) {
+  const c = await getContact(contactId); const org = (await allOrgs()).find((o) => o.id === c.orgId); if (!org) throw err(404, 'org_not_found');
+  const cfg = await getConfig();
+  if (!c.email) throw err(422, 'This contact has no email address.');
+  if (c.optedOut || (await anySuppressed(c))) throw err(409, 'This person opted out or asked to be erased. They cannot be contacted.');
+  if (reachOf(placeOf(org, c), cfg).held) throw err(409, 'Email to this country is held until it has had a legal review (Master Control > Outreach > Country lists).');
+  const pc = await publicConfig(); if (!pc.readyToSend) throw err(422, 'Fill in the sender settings first: ' + pc.missing.join(', ') + '.');
+  if (cfg.fromEmail) { const sf = email.senderFor(cfg.fromEmail); if (sf.error) throw err(422, sf.detail || sf.error); }
+  if ((await sentToday('email')) >= cfg.caps.email) throw err(429, 'The daily email cap has been reached.');
+  const step = { channel: 'email', ...(variant ? { variant } : {}) };
+  const msg = await compose(c, org, step, cfg);
+  const finalSubject = subject ? String(subject).slice(0, 200) : msg.subject;
+  let finalBody = msg.body;
+  if (body) {
+    // An edited body keeps the compliance footer (who we are, the public source, the one-click opt-out) however it was edited.
+    const footer = msg.body.slice(msg.body.lastIndexOf('\n\n--\n'));
+    finalBody = String(body).slice(0, 8000).replace(/\n\n--\nYou are receiving this business message[\s\S]*$/, '') + footer;
+  }
+  const r = await email.send({ to: c.email, subject: finalSubject, text: finalBody, from: cfg.fromEmail || undefined, replyTo: cfg.replyTo || undefined });
+  if (!r.ok) { note(c, { type: 'send_failed', channel: 'email', error: r.error, manual: true }); await saveContact(c); throw err(r.error === 'email_provider_not_configured' ? 503 : 502, r.error === 'email_provider_not_configured' ? 'The email provider is not set up yet: set EMAIL_PROVIDER, EMAIL_API_KEY and EMAIL_FROM on the server.' : `The email provider refused it: ${r.error}${r.detail ? ' (' + r.detail + ')' : ''}`); }
+  await bumpSent('email');
+  c.seq = null; if (!['replied', 'sandbox', 'meeting', 'declined'].includes(c.status)) c.status = 'contacted';
+  note(c, { type: 'step', channel: 'email', result: r.sandbox ? 'sandbox' : 'sent', manual: true, by: by || null, subject: finalSubject }); await saveContact(c); await bumpOrg(c.orgId, 'contacting');
+  return { ok: true, sandbox: !!r.sandbox, to: c.email, from: cfg.fromEmail || process.env.EMAIL_FROM || '', subject: finalSubject, note: r.sandbox ? 'Messaging is in sandbox mode, so nothing was delivered. Switch messaging to live in Master Control > Messaging to send for real.' : 'Sent.' };
+}
+/** Value proposition for a segment: summary and details. */
+function valueProposition(segment) { const v = valueProps.get(segment); if (!v) throw err(404, 'no value proposition for that segment'); return v; }
+/**
+ * The NABIP group: the organisation (type association, list "nabip"), Michael Andel as a verified contact with its public source,
+ * and the sender set to the operator's address when it is still blank. Safe to run again.
+ */
+async function setupNabip({ fromEmail, senderName, senderRole, postalAddress, publicBaseUrl, by } = {}) {
+  const N = valueProps.NABIP; let org = (await allOrgs()).find((o) => /(^|\s)nabip\b/i.test(o.name));
+  if (!org) org = await addOrg({ ...N.org, type: 'association' });
+  else if (!(org.lists || []).includes('nabip')) org = await updateOrg(org.id, { addList: 'nabip' });
+  let contact = (await allContacts()).find((c) => c.email === N.contact.email);
+  if (!contact) contact = await addContact({ orgId: org.id, ...N.contact }, { by });
+  contact = await verifyContact(contact.id, { note: 'Address published in a public NABIP LinkedIn post; checked by the operator.', by });
+  const cfg = await getConfig(); const patch = {};
+  if (fromEmail && !cfg.fromEmail) patch.fromEmail = fromEmail;
+  if (fromEmail && !cfg.replyTo) patch.replyTo = fromEmail;
+  if (senderName && !cfg.senderName) patch.senderName = senderName;
+  if (senderRole && !cfg.senderRole) patch.senderRole = senderRole;
+  if (postalAddress && !cfg.postalAddress) patch.postalAddress = postalAddress;
+  if (publicBaseUrl && !cfg.publicBaseUrl) patch.publicBaseUrl = publicBaseUrl;
+  if (Object.keys(patch).length) await setConfig(patch, by);
+  return { org: { id: org.id, name: org.name, lists: org.lists }, contact: { id: contact.id, name: contact.name, email: contact.email, verified: contact.verified }, config: await publicConfig(), valueProposition: valueProps.get('association') };
+}
+
 module.exports = {
+  verifyContact, sendNow, valueProposition, setupNabip,
   TYPES, PERSONAS, PHONE_TYPES, classifyPhone, roleOf, ORG_STATUS, getConfig, setConfig, publicConfig,
   seedOrgs, seedCountries, seedAfricaReport, seedCoreBanking, addOffice, removeOffice, officesReach, listPacks, importList, classifyName, countryTable, reachOf, listOrgs, addOrg, updateOrg, addContact, importContacts, listContacts, setContactStatus, patchContact, eraseContact, optOut, handleInboundText,
   ensurePartner, creditReferrer, stampContact, _x: { allOrgs, saveOrgs, getContact, saveContact, normName, rid, now, err, FREE_MAIL, EMAIL_RE, canonPhone, validPhone, derivedTags, reachOf, geoOf, cleanOffice },
