@@ -53,15 +53,25 @@ router.get('/edition', (req, res) => {
     licence: editions.licenceState(req.tenant) });
 });
 
-// Chargeable catalog (demo items + full NHIS Medicines List). Search by code or name.
-router.get('/catalog', (req, res) => {
-  const q = req.query.q || req.query.search;
-  const limit = Math.min(parseInt(req.query.limit || '25', 10), 100);
-  const category = req.query.category || null;
-  if (q) return res.json({ count: catalog.count(), data: catalog.search(q, { limit, category }) });
-  // No query: return the count + a small sample (the full list is large).
-  res.json({ count: catalog.count(), data: catalog.DEFAULT_CATALOG.slice(0, limit) });
+// Chargeable catalog: search the clinic's price book (default: the official NHIS Medicines List). Pass ?book=<id> to search another.
+const priceBooks = require('../services/priceBooks');
+router.get('/catalog', async (req, res, next) => {
+  try {
+    const q = req.query.q || req.query.search;
+    const limit = Math.min(parseInt(req.query.limit || '25', 10), 100);
+    const category = req.query.category || null;
+    const id = req.query.book || (await priceBooks.resolveDefaultId(req.tenant.id));
+    const book = await priceBooks.get(req.tenant.id, id);
+    if (!book) return res.status(404).json({ error: 'price_book_not_found', message: 'That price book is not available. Pick another one.', next: [{ label: 'Choose a price book', href: '/app/biller.html' }] });
+    const data = priceBooks.search(book, q, { limit, category }).map((i) => ({ ...i, currency: book.currency }));
+    res.json({ count: book.id === priceBooks.DEFAULT_ID ? catalog.count() : { total: book.items.length }, book: { id: book.id, name: book.name, currency: book.currency }, data });
+  } catch (e) { next(e); }
 });
+router.get('/catalog/books', async (req, res, next) => { try { res.json(await priceBooks.summary(req.tenant.id)); } catch (e) { next(e); } });
+router.put('/catalog/default', async (req, res, next) => { try { res.json(await priceBooks.setTenantDefault(req.tenant.id, req.body || {})); } catch (e) { next(e); } });
+router.post('/catalog/books', async (req, res, next) => { try { res.status(201).json(await priceBooks.upload(req.tenant.id, req.body || {})); } catch (e) { next(e); } });
+router.delete('/catalog/books/:id', async (req, res, next) => { try { res.json(await priceBooks.remove(req.tenant.id, req.params.id)); } catch (e) { next(e); } });
+router.get('/catalog/template.csv', (_req, res) => { res.type('text/csv').set('Content-Disposition', 'attachment; filename="price-book-template.csv"').send(priceBooks.sampleCsv()); });
 
 // This facility's expedited settlement terms, as set by each payer (read-only).
 router.get('/network-terms', async (req, res, next) => {

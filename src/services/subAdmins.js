@@ -30,13 +30,14 @@ const AREAS = {
   product_lab: { label: 'Product Lab and solutions', paths: ['products', 'solutions'] },
   claims: { label: 'Claims, pricing, reconciliation and savings', paths: ['submissions', 'claims-automation', 'claim-expiry', 'ai-adjudication', 'pharmacy-quotes', 'pharmacy-pricing', 'reconciliation', 'savings'] },
   finance: { label: 'Revenue, settlement and licences', paths: ['revenue', 'settlement-batches', 'licenses', 'licensing', 'currencies'] },
+  pricebooks: { label: 'Price books (NHIS, NHS, private insurers, your own)', paths: ['price-books'] },
   operating_mode: { label: 'Switch sandbox and live', paths: ['operating-mode'] },
   partners: { label: 'ER HEAT partners, loans and sign-up rules', paths: ['partners', 'erheat', 'patient-auth'] },
   accounts: { label: 'Account directory (deactivate, approve sign-ups)', paths: ['accounts'] },
 };
 const ALWAYS = ['overview', 'me'];
 // What a demo or evaluator login may look at. Product Lab, finance, switching sandbox/live, partner and account management are never part of the tour.
-const DEMO_AREAS = ['clients', 'payers', 'messaging', 'claims'];
+const DEMO_AREAS = ['clients', 'payers', 'messaging', 'claims', 'pricebooks'];
 const DEMO = { handle: 'demo@hnn-demo.example', password: 'HNN-demo-2026', name: 'HNN Demo' };
 const PRESETS = {
   partner_manager: { label: 'Partner manager', areas: ['partners', 'accounts'] },

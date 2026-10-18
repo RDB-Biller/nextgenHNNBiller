@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="app.css"/><script src="/app/nextstep.js"></script></head><body>
 <div class="wrap">
   <div class="top">
-    <div><div class="brandmark">HNN Biller<span class="dot">.</span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
+    <div><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div class="brandmark">HNN Biller<span class="dot">.</span></div><span data-lang-switch id="langSlot" style="display:inline-block"></span></div><p class="muted" style="margin:4px 0 0">Settle by patient, or route to a payer (insurer or employer)</p></div>
     <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="dashboard.html" target="_blank" rel="noopener">Dashboard</a><a href="payers.html" target="_blank" rel="noopener">Payer console</a><a href="claimit.html" target="_blank" rel="noopener">ClaimIt</a><a href="admin.html" target="_blank" rel="noopener">Revenue</a><a id="nav-mc" href="platform.html" target="_blank" rel="noopener" style="display:none">Master control</a></nav>
   </div>
   <div class="grid cols-2">
@@ -18,15 +18,30 @@
         <div class="row"><div class="field"><label>Member / Policy ID</label><input id="member" placeholder="ACA-00123"/></div>
         <div class="field"><label>Sponsor employer (if any)</label><input id="sponsor" placeholder="optional"/></div></div>
       </div>
-      <div class="card"><h2>Items <span class="muted" style="font-weight:400;font-size:12px">NHIS Medicines List + your items</span></h2>
+      <div class="card"><h2>Price book <span class="muted" style="font-weight:400;font-size:12px" id="bookNote"></span></h2>
+        <div class="row" style="align-items:center;gap:8px"><select id="bookSel" onchange="pickBook(this.value)" style="flex:1;min-width:200px"><option>Loading…</option></select></div>
+        <div style="margin-top:8px;display:grid;gap:4px;font-size:13px">
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bookDef" style="width:auto" onchange="saveBookDefault()"/> Make this my default price book</label>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bookFollow" style="width:auto" checked onchange="saveBookDefault()"/> Show amounts in the book's currency when I switch book</label>
+        </div>
+        <p id="bookWarn" class="muted" style="font-size:12px;margin:8px 0 0"></p>
+        <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--brand);font-weight:600">Upload your own price book (CSV)</summary>
+          <p class="muted" style="font-size:12px">Columns: <code>name</code>, <code>price</code> (required); <code>code</code>, <code>unit</code>, <code>category</code>, <code>level</code> (optional). <a href="#" onclick="bookTemplate();return false">Download a template</a>.</p>
+          <div class="row"><input id="ubName" placeholder="Name, e.g. Our 2026 tariff"/><select id="ubCur" style="max-width:150px"></select></div>
+          <div class="row" style="margin-top:6px"><input id="ubFile" type="file" accept=".csv,.txt,text/csv"/></div>
+          <div class="row" style="margin-top:6px"><button onclick="uploadBook()">Upload and use</button></div>
+          <p id="ubMsg" class="muted" style="font-size:12px;margin:6px 0 0"></p>
+        </details>
+      </div>
+      <div class="card"><h2>Items <span class="muted" style="font-weight:400;font-size:12px" id="itemsSub">NHIS Medicines List + your items</span></h2>
         <div class="row" style="position:relative">
           <input id="itemSearch" placeholder="Search NHIS medicine by name or code (e.g. paracetamol, AMOXICCA1)…" autocomplete="off" oninput="searchCatalog()" onfocus="searchCatalog()"/>
           <input id="qtyIn" placeholder="Qty" type="number" value="1" style="max-width:80px"/>
-          <input id="override" placeholder="Override ¢" style="max-width:120px"/>
+          <input id="override" placeholder="Override (GHS)" style="max-width:120px"/>
         </div>
         <div id="searchResults" style="display:none;position:relative;z-index:5;background:#fff;border:1px solid var(--line);border-radius:8px;margin-top:-4px;max-height:240px;overflow:auto"></div>
         <div class="row" style="margin-top:10px"><input id="cname" placeholder="Custom item name"/>
-        <input id="ccost" placeholder="Cost" style="max-width:120px"/><input id="cqty" placeholder="Qty" type="number" value="1" style="max-width:70px"/><button onclick="addCustom()">Add custom</button></div>
+        <input id="ccost" placeholder="Cost (GHS)" style="max-width:120px"/><input id="cqty" placeholder="Qty" type="number" value="1" style="max-width:70px"/><button onclick="addCustom()">Add custom</button></div>
       </div>
       <div class="card"><h2>Who pays</h2>
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:500">
@@ -172,11 +187,15 @@ const num=(n)=>Number(n).toFixed(2);
 // Display currency: everything is billed and settled in GHS; this only changes how amounts are SHOWN (approximate rates set in Master Control).
 let CUR={list:[],rates:{},asOf:'',indicative:true,view:'GHS'};
 try{CUR.view=localStorage.getItem('hnn.viewcur')||'GHS';}catch(e){}
-function money(n){const v=Number(n);const code=CUR.view;const r=CUR.rates;
-  if(code==='GHS'||!r.GHS||!r[code]||!isFinite(v))return 'GHS '+num(v);
-  const meta=CUR.list.find(c=>c.code===code)||{};const d=meta.decimals==null?2:meta.decimals;
-  return code+' '+(v/r.GHS*r[code]).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
-function setViewCur(code){CUR.view=code;try{localStorage.setItem('hnn.viewcur',code);}catch(e){}drawCurNote();try{preview();}catch(e){}}
+// units of `code` per 1 USD -> convert any amount between two currencies (display only; bills stay in GHS)
+function conv(v,from,to){const r=CUR.rates;if(from===to)return Number(v);if(!r[from]||!r[to])return null;return Number(v)/r[from]*r[to];}
+function fmtCode(v,code){if(v==null||!isFinite(v))return '—';const meta=CUR.list.find(c=>c.code===code)||{};const d=meta.decimals==null?2:meta.decimals;return code+' '+Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
+function money(n){const v=Number(n);if(!isFinite(v))return 'GHS '+num(n);const c=CUR.view==='GHS'?null:conv(v,'GHS',CUR.view);return c==null?'GHS '+num(v):fmtCode(c,CUR.view);}
+// an amount typed by the user is in the display currency; bills are kept in GHS
+function toGHS(v){const x=Number(v);if(CUR.view==='GHS')return x;const g=conv(x,CUR.view,'GHS');return g==null?x:g;}
+const r2=(x)=>Math.round(x*100)/100;
+function curLabels(){const o=$('override'),c=$('ccost');if(o)o.placeholder='Override ('+CUR.view+')';if(c)c.placeholder='Cost ('+CUR.view+')';}
+function setViewCur(code){CUR.view=code;try{localStorage.setItem('hnn.viewcur',code);}catch(e){}const sel=$('viewCur');if(sel&&sel.value!==code)sel.value=code;drawCurNote();curLabels();try{preview();}catch(e){}}
 function drawCurNote(){const el=$('curNote');if(!el)return;el.textContent=CUR.view==='GHS'?'Bills are made and settled in GHS.':'Shown in '+CUR.view+' for your convenience ('+(CUR.indicative?'indicative':'as of '+CUR.asOf)+' rate). The bill itself is in GHS.';}
 async function loadCurrencies(){
   try{const r=await fetch('/currency/api/list');const j=(await r.json()).result;
@@ -185,9 +204,52 @@ async function loadCurrencies(){
     if(!CUR.list.some(c=>c.code===CUR.view))CUR.view='GHS';
     const sel=$('viewCur');if(sel){const opt=(c)=>`<option value="${esc(c.code)}">${esc(c.code)}${c.name?' · '+esc(c.name):''}</option>`;
       sel.innerHTML='<optgroup label="Main">'+j.main.map(opt).join('')+'</optgroup><optgroup label="Other">'+j.other.map(opt).join('')+'</optgroup>';sel.value=CUR.view;}
-    drawCurNote();try{preview();}catch(e){}
+    drawCurNote();curLabels();fillUbCur();try{preview();}catch(e){}
   }catch(e){const sel=$('viewCur');if(sel)sel.disabled=true;}
 }
+
+
+// ---- price books -------------------------------------------------------------------------------------------------
+let BOOK={id:null,currency:'GHS',books:[],defaultId:null};
+function listShow(price,cc){ // a book's list price, shown in the display currency (with the book's own figure when different)
+  if(cc===CUR.view||!cc)return fmtCode(price,cc||CUR.view);
+  const c=conv(price,cc,CUR.view);return c==null?fmtCode(price,cc):fmtCode(c,CUR.view)+' <span class="muted" style="font-size:11px">('+fmtCode(price,cc)+')</span>';}
+function fillUbCur(){const s=$('ubCur');if(!s||!CUR.list.length||s.options.length>1)return;s.innerHTML=CUR.list.map(c=>`<option value="${esc(c.code)}">${esc(c.code)}</option>`).join('');s.value=(BOOK.currency||'GHS');}
+function drawBooks(){
+  const sel=$('bookSel');if(!sel)return;
+  const grp=(t,l)=>l.length?`<optgroup label="${t}">${l.map(b=>`<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.currency)}${b.isDefault?' (default)':''}</option>`).join('')}</optgroup>`:'';
+  const B=BOOK.books;sel.innerHTML=grp('Official',B.filter(b=>b.official))+grp('Your own and uploaded',B.filter(b=>b.scope==='clinic'||b.scope==='platform'))+grp('Illustrative samples',B.filter(b=>b.builtin&&!b.official));
+  sel.value=BOOK.id;const b=B.find(x=>x.id===BOOK.id)||{};BOOK.currency=b.currency||'GHS';
+  $('bookDef').checked=BOOK.id===BOOK.defaultId;
+  const nm=(b.name||'price book').replace(/ \(.*$/,'');$('itemsSub').textContent=nm+' + your items';$('itemSearch').placeholder='Search '+nm+' by name or code…';
+  $('bookNote').textContent=b.itemCount?b.itemCount.toLocaleString()+' items · '+b.currency:'';
+  $('bookWarn').textContent=b.builtin&&!b.official?'Sample prices for demonstration, not an official tariff. Upload your own CSV for real prices.':b.official?'Official tariff.':'';
+  const u=$('ubCur');if(u&&u.options.length>1)u.value=BOOK.currency;
+}
+async function loadBooks(){
+  try{const r=await fetch('/api/v1/bills/catalog/books',{headers:hdr()});if(!r.ok)return;const j=await r.json();
+    BOOK.books=j.books;BOOK.defaultId=j.defaultId;if(!BOOK.id||!j.books.some(b=>b.id===BOOK.id))BOOK.id=j.defaultId;
+    $('bookFollow').checked=j.followCurrency;drawBooks();
+    const b=j.books.find(x=>x.id===BOOK.id);let stored=null;try{stored=localStorage.getItem('hnn.viewcur');}catch(e){}
+    if(b&&!stored&&$('bookFollow').checked&&CUR.list.some(c=>c.code===b.currency))setViewCur(b.currency);
+  }catch(e){}
+}
+function pickBook(id){BOOK.id=id;drawBooks();$('searchResults').style.display='none';
+  if($('bookFollow').checked&&CUR.list.some(c=>c.code===BOOK.currency))setViewCur(BOOK.currency);
+  if($('bookDef').checked)saveBookDefault();toast('Using '+(BOOK.books.find(b=>b.id===id)||{}).name);}
+async function saveBookDefault(){
+  try{const body={followCurrency:$('bookFollow').checked};if($('bookDef').checked)body.bookId=BOOK.id;
+    const r=await fetch('/api/v1/bills/catalog/default',{method:'PUT',headers:hdr(),body:JSON.stringify(body)});const j=await r.json();
+    if(!r.ok)throw new Error(j.message||j.error);BOOK.books=j.books;BOOK.defaultId=j.defaultId;drawBooks();toast($('bookDef').checked?'Saved as your default price book':'Saved');
+  }catch(e){toast(e.message||'Could not save');}}
+async function bookTemplate(){try{const r=await fetch('/api/v1/bills/catalog/template.csv',{headers:hdr()});const t=await r.text();const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download='price-book-template.csv';a.click();}catch(e){toast('Could not download the template');}}
+async function uploadBook(){
+  const f=$('ubFile').files[0],name=$('ubName').value.trim();if(!f)return toast('Choose a CSV file first');if(!name)return toast('Give the price book a name');
+  try{const csv=await f.text();const r=await fetch('/api/v1/bills/catalog/books',{method:'POST',headers:hdr(),body:JSON.stringify({name,currency:$('ubCur').value,csv})});const j=await r.json();
+    if(!r.ok)throw new Error(j.message||j.error);
+    $('ubMsg').textContent='Imported '+j.imported+' items'+(j.skippedCount?' ('+j.skippedCount+' rows skipped, e.g. row '+j.skipped[0].row+': '+j.skipped[0].reason+')':'')+'.';
+    BOOK.id=j.book.id;await loadBooks();BOOK.id=j.book.id;drawBooks();if($('bookFollow').checked)setViewCur(j.book.currency);$('ubFile').value='';
+  }catch(e){$('ubMsg').textContent=e.message||'Upload failed.';}}
 
 let searchTimer=null;
 function searchCatalog(){
@@ -196,12 +258,12 @@ function searchCatalog(){
   if(q.length<2){ $('searchResults').style.display='none'; return; }
   searchTimer=setTimeout(async()=>{
     try{
-      const r=await fetch('/api/v1/bills/catalog?q='+encodeURIComponent(q)+'&limit=25',{headers:hdr()});
+      const r=await fetch('/api/v1/bills/catalog?q='+encodeURIComponent(q)+'&limit=25'+(BOOK.id?'&book='+encodeURIComponent(BOOK.id):''),{headers:hdr()});
       if(!r.ok)return;
-      const {data}=await r.json();
+      const {data,book}=await r.json();if(book&&!BOOK.id)BOOK.id=book.id;
       if(!data.length){ $('searchResults').innerHTML='<div style="padding:10px;color:var(--muted)">No match. Use "Add custom" below.</div>'; $('searchResults').style.display='block'; return; }
       $('searchResults').innerHTML=data.map(m=>{
-        const price=m.price==null?'—':''+money(m.price);
+        const price=m.price==null?'—':listShow(m.price,m.currency||BOOK.currency);
         const lvl=m.level?`<span class="muted" style="font-size:11px"> · Level ${esc(m.level)}</span>`:'';
         return `<div class="line" style="cursor:pointer;padding:8px 10px" onclick='addFromCatalog(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
           <span>${esc(m.name)}<span class="muted" style="font-size:11px"> · ${esc(m.code)}${m.unit?' · '+esc(m.unit):''}</span>${lvl}</span>
@@ -214,13 +276,15 @@ function searchCatalog(){
 function addFromCatalog(m){
   const q=parseInt($('qtyIn').value,10)||1;
   const o=$('override').value;
-  items.push({code:m.code,name:m.name,cost:o?parseFloat(o):(m.price!=null?m.price:0),qty:q>0?q:1,
+  const cc=m.currency||BOOK.currency||'GHS';const listGhs=m.price!=null?(cc==='GHS'?m.price:conv(m.price,cc,'GHS')):0;
+  if(listGhs==null&&!o){return toast('No exchange rate is set for '+cc+' yet, so this price cannot be turned into cedis. Ask Master Control to set it, or enter an override.');}
+  items.push({code:m.code,name:m.name,cost:o?r2(toGHS(parseFloat(o))):r2(listGhs),qty:q>0?q:1,
     nhisTariffCode:m.source==='NHIS-ML-2025'?m.code:undefined});
   $('itemSearch').value='';$('override').value='';$('qtyIn').value='1';
   $('searchResults').style.display='none';billId=null;preview();
 }
 document.addEventListener('click',(e)=>{ if($('searchResults')&&!e.target.closest('#itemSearch')&&!e.target.closest('#searchResults'))$('searchResults').style.display='none'; });
-function addCustom(){const n=$('cname').value.trim(),c=parseFloat($('ccost').value);const q=$('cqty')?parseInt($('cqty').value,10):1;if(!n||isNaN(c))return toast('Name and cost required');items.push({name:n,cost:c,qty:q>0?q:1});$('cname').value='';$('ccost').value='';if($('cqty'))$('cqty').value='';billId=null;preview();}
+function addCustom(){const n=$('cname').value.trim(),c=parseFloat($('ccost').value);const q=$('cqty')?parseInt($('cqty').value,10):1;if(!n||isNaN(c))return toast('Name and cost required');items.push({name:n,cost:r2(toGHS(c)),qty:q>0?q:1});$('cname').value='';$('ccost').value='';if($('cqty'))$('cqty').value='';billId=null;preview();}
 function rm(i){items.splice(i,1);billId=null;preview();}
 function adj(){const patientPays=$('patientPays')&&$('patientPays').checked;const cr=$('copay').value;
   // Explicit: patient copay only if the box is ticked; otherwise 0 (payers cover the net).
@@ -622,7 +686,7 @@ function readSplit(){
   });
   return payers.length?{payers}:null;
 }
-$('apikey').addEventListener('change',loadPayers);
+$('apikey').addEventListener('change',loadPayers);$('apikey').addEventListener('change',loadBooks);
 loadPayers();
 finUI();
 preview();
@@ -678,7 +742,7 @@ async function showMasterControlLinkIfSandbox(){
   }catch(e){/* health check failing shouldn't block the billing terminal */}
 }
 showMasterControlLinkIfSandbox();
-loadCurrencies();
+loadCurrencies().then(loadBooks);
 </script>
 <script src="/app/i18n.js" data-audience="staff" data-auto="true"></script>
 <script src="/o/widget.js" defer></script>
