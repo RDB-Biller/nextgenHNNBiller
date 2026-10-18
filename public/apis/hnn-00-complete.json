@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "HNN Biller — Complete API",
-    "version": "1.4.0",
-    "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`"
+    "version": "1.5.0",
+    "description": "Every endpoint across all feature groups.\n\n### Editions\nEvery client runs on one of two editions in the **same deployment**:\n\n| Edition | Includes |\n|---|---|\n| `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |\n| `commercial` | Everything above **plus** revenue rules & other charges, financing, NHIS ClaimIt tracker, agnostic payer tabs, audit ledger |\n\nSwitching is a per-client flag flip — no redeploy, no data migration, and **nothing is deleted on downgrade**.\nCommercial-only endpoints return **402 `upgrade_required`** when the caller's client is non-commercial.\nCheck your own entitlement any time with `GET /api/v1/bills/edition`.\n\n**Base URL:** `https://nextgenhnnbiller-production-bdf1.up.railway.app`\n\n_6th Edition (Revised), 18 October 2026: adds ERHEAT Shield, partner accounts, the account directory, sub-admins and currencies._"
   },
   "servers": [
     {
@@ -43,7 +43,22 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-platform-key",
-        "description": "SaaS owner master key"
+        "description": "Chief administrator key (env PLATFORM_ADMIN_KEY)."
+      },
+      "BorrowerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Patient-account token from POST /patient-api/v1/patient/login (30-day signed token)."
+      },
+      "PartnerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Partner session token from POST /partner-api/login (12-hour signed token)."
+      },
+      "SubAdminToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Sub-admin session token from POST /admin-api/login. Opens only the areas the account was given; sandboxed (demo and evaluator) accounts work on a private scratch copy."
       }
     }
   },
@@ -5016,6 +5031,2507 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/erheat/api/lines": {
+      "get": {
+        "summary": "Lines, limits and the borrower’s Trust Passport",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Which of the six lines (rent, health, education, energy, agriculture, transport) are open, with fields, limits, wording and the person’s passport.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/health/facilities": {
+      "get": {
+        "summary": "Facilities that use the Biller (Health directory)",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Public. Used so a patient can pick their facility; the facility is texted to confirm.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/health/pending": {
+      "get": {
+        "summary": "Open Biller bills for the signed-in phone",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Each item has billId, facility, billTotal, patientPayable and a note. A Health request made from a bill is confirmed by the bill itself.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/profile": {
+      "get": {
+        "summary": "Saved details per line",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Optional prefill: meter number, landlord, school, supplier, route. Nothing is required.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save details per line",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Send null for a line to remove it. Each request still asks whether to use the details on file or different ones.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "lines": {
+                  "energy": {
+                    "evidence": {
+                      "reference": "12345678"
+                    },
+                    "payee": {
+                      "name": "Shell Madina",
+                      "phone": "+233200000000"
+                    }
+                  },
+                  "rent": null
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/history": {
+      "get": {
+        "summary": "Awarded requests and totals",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Approved onwards, with totals borrowed and repaid.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/passport": {
+      "get": {
+        "summary": "Trust Passport",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Level (new, trusted, preferred), ceiling (500, 1000, 2000; never above the hard cap), verified, repaid, defaults, open requests.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/apps": {
+      "get": {
+        "summary": "The borrower’s requests",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/apps/{id}": {
+      "get": {
+        "summary": "One request with its next step",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/erheat/api/apply": {
+      "post": {
+        "summary": "Ask for a loan",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Creates the request and texts the verifier. With billId the Biller bill is the confirmation (amount cannot exceed the patient share; one request per bill); with facilityId the facility is texted. Everything is in GHS.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "line": "rent",
+                "amount": 900,
+                "purpose": "November rent",
+                "payee": {
+                  "name": "Kojo Boateng",
+                  "phone": "0200000000"
+                },
+                "verifier": {
+                  "name": "Kojo Boateng",
+                  "phone": "0200000000"
+                },
+                "evidence": {
+                  "monthlyRent": "450",
+                  "dueDate": "2026-11-01"
+                },
+                "lang": "en"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request in its borrower view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Phone not verified"
+          },
+          "404": {
+            "description": "ERHEAT Shield is not open yet"
+          },
+          "409": {
+            "description": "Line not open, or an open request exists on the line"
+          },
+          "422": {
+            "description": "Amount above the limit or invalid details"
+          },
+          "429": {
+            "description": "Monthly request limit reached"
+          }
+        }
+      }
+    },
+    "/erheat/api/apps/{id}/consent": {
+      "post": {
+        "summary": "Consent and submit to the lender",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "description": "Only when the request is verified. Stores the consent text version and, if a lender URL is set, pushes the signed packet.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "agree": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not ready to submit"
+          },
+          "422": {
+            "description": "Consent not given"
+          }
+        }
+      }
+    },
+    "/erheat/api/apps/{id}/cancel": {
+      "post": {
+        "summary": "Cancel an open request",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/api/apps/{id}/resend/{vid}": {
+      "post": {
+        "summary": "Text the verifier again",
+        "tags": [
+          "ERHEAT borrower"
+        ],
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "vid",
+            "in": "path",
+            "required": true,
+            "description": "Verifier id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/v/{token}": {
+      "get": {
+        "summary": "Verifier page (HTML)",
+        "tags": [
+          "ERHEAT verifier and voucher"
+        ],
+        "description": "No account. The one-time link in the SMS is the credential.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Link token from the SMS",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Confirm or decline",
+        "tags": [
+          "ERHEAT verifier and voucher"
+        ],
+        "description": "Form or JSON: decision confirm | decline, confirmedAmount?, accountName?, note?",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Link token",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "decision": "confirm",
+                "confirmedAmount": 900,
+                "accountName": "K Boateng"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat/redeem": {
+      "post": {
+        "summary": "Redeem a voucher",
+        "tags": [
+          "ERHEAT verifier and voucher"
+        ],
+        "description": "The vendor enters the voucher code and the customer’s one-time number. Rate limited.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "code": "AB12CD34",
+                "otp": "123456",
+                "phone": "+233200000000"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Wrong, used or expired voucher"
+          }
+        }
+      }
+    },
+    "/erheat-hooks/{secret}/decision": {
+      "post": {
+        "summary": "Lender decision",
+        "tags": [
+          "ERHEAT lender hooks"
+        ],
+        "description": "approvedAmount defaults to the verified amount; it must be above zero and at most that amount (never above GHS 2,000). Voucher lines get a voucher on approval.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "description": "Hook secret from Master Control > ERHEAT",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "applicationNo": "ERH-482913",
+                "decision": "approved",
+                "approvedAmount": 900,
+                "reference": "CU-7781"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Wrong secret"
+          },
+          "409": {
+            "description": "Request is not in a state that accepts this"
+          },
+          "422": {
+            "description": "Invalid decision or amount"
+          }
+        }
+      }
+    },
+    "/erheat-hooks/{secret}/paid": {
+      "post": {
+        "summary": "The payee has been paid",
+        "tags": [
+          "ERHEAT lender hooks"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "description": "Hook secret from Master Control > ERHEAT",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "applicationNo": "ERH-482913",
+                "reference": "MOMO-55102",
+                "paidAt": "2026-10-18T10:05:00Z"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat-hooks/{secret}/repayment": {
+      "post": {
+        "summary": "Repayment, closure or default",
+        "tags": [
+          "ERHEAT lender hooks"
+        ],
+        "description": "Idempotent on reference. outstanding of 0 closes the request. { applicationNo, event: \"default\" } reports a default.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "description": "Hook secret from Master Control > ERHEAT",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "applicationNo": "ERH-482913",
+                "amount": 300,
+                "reference": "CU-R-1",
+                "outstanding": 600
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erheat-hooks/{secret}/applications/{appNo}": {
+      "get": {
+        "summary": "Verified-Need Packet",
+        "tags": [
+          "ERHEAT lender hooks"
+        ],
+        "description": "Borrower, payee, evidence, confirmations, flags, consent, passport and payment instruction.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "secret",
+            "in": "path",
+            "required": true,
+            "description": "Hook secret from Master Control > ERHEAT",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "appNo",
+            "in": "path",
+            "required": true,
+            "description": "Application number, e.g. ERH-482913",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "application_not_found"
+          }
+        }
+      }
+    },
+    "/api/platform/erheat/config": {
+      "get": {
+        "summary": "ERHEAT settings, lines and hook URLs",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Change settings",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "description": "enabled, requireVerifiedPhone, hardCap, ladder {new, trusted, preferred}, verifierTtlHours, appTtlDays, maxApps30d, lender {name, pushUrl}, lines {<line>: {enabled, min, cap}}",
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "enabled": true,
+                "lines": {
+                  "rent": {
+                    "enabled": true,
+                    "min": 50,
+                    "cap": 1000
+                  }
+                },
+                "lender": {
+                  "name": "ConfirmU",
+                  "pushUrl": "https://lender.example/erheat"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/erheat/secret/rotate": {
+      "post": {
+        "summary": "Rotate the hook secret",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "description": "Old URLs stop working at once.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/erheat/apps": {
+      "get": {
+        "summary": "Every request",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "line",
+            "in": "query",
+            "required": false,
+            "description": "Filter",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Default 100",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/erheat/apps/{id}": {
+      "get": {
+        "summary": "One request in full",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/erheat/apps/{id}/simulate": {
+      "post": {
+        "summary": "Act as the lender (sandbox only)",
+        "tags": [
+          "ERHEAT Master Control"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Request id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "action": "approve",
+                "amount": 900
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only in sandbox mode"
+          }
+        }
+      }
+    },
+    "/partner-api/signup-options": {
+      "get": {
+        "summary": "Roles and sectors for the sign-up form",
+        "tags": [
+          "Partner accounts"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/signup": {
+      "post": {
+        "summary": "Ask for a partner account",
+        "tags": [
+          "Partner accounts"
+        ],
+        "description": "Creates a PENDING account. Nobody signs in until Master Control approves.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "name": "Esi Owusu",
+                "org": "Ridge Clinic",
+                "role": "hospital_admin",
+                "email": "esi@ridge.example",
+                "password": "at-least-8-chars"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/login": {
+      "post": {
+        "summary": "Sign in",
+        "tags": [
+          "Partner accounts"
+        ],
+        "description": "Email or phone as handle, and password. 12-hour session.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "handle": "esi@ridge.example",
+                "password": "..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/me": {
+      "get": {
+        "summary": "The signed-in partner",
+        "tags": [
+          "Partner accounts"
+        ],
+        "security": [
+          {
+            "PartnerToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/password": {
+      "post": {
+        "summary": "Change password",
+        "tags": [
+          "Partner accounts"
+        ],
+        "description": "Ends every session.",
+        "security": [
+          {
+            "PartnerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "current": "...",
+                "password": "..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/requests": {
+      "get": {
+        "summary": "Requests for the account’s sector",
+        "tags": [
+          "Partner accounts"
+        ],
+        "description": "Finance accounts see every line.",
+        "security": [
+          {
+            "PartnerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/redeem": {
+      "post": {
+        "summary": "Redeem a voucher",
+        "tags": [
+          "Partner accounts"
+        ],
+        "description": "Energy, agriculture and transport sectors.",
+        "security": [
+          {
+            "PartnerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "code": "AB12CD34",
+                "otp": "123456"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner-api/request-universal": {
+      "post": {
+        "summary": "Ask for the universal account",
+        "tags": [
+          "Partner accounts"
+        ],
+        "security": [
+          {
+            "PartnerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners": {
+      "get": {
+        "summary": "Accounts, roles and sectors",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Issue a partner login",
+        "tags": [
+          "Partner administration"
+        ],
+        "description": "Returns a temporary password (the person must change it) and can text it: sendSms. Give role or sector.",
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "name": "Esi Owusu",
+                "org": "Ridge Clinic",
+                "role": "hospital_admin",
+                "handle": "esi@ridge.example",
+                "sendSms": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners/{id}": {
+      "patch": {
+        "summary": "Edit an account",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "sector": "health",
+                "status": "active"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners/{id}/approve": {
+      "post": {
+        "summary": "Approve a sign-up (optionally with a different role or sector)",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners/{id}/reject": {
+      "post": {
+        "summary": "Reject a sign-up",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners/{id}/reset-password": {
+      "post": {
+        "summary": "Issue a new temporary password",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/partners/{id}/universal": {
+      "post": {
+        "summary": "Grant or remove the universal account",
+        "tags": [
+          "Partner administration"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/accounts": {
+      "get": {
+        "summary": "Every account of every kind",
+        "tags": [
+          "Account directory"
+        ],
+        "description": "kind = patient | partner | facility | insurer | emr_provider | staff | subadmin. Each row has status, last activity and clearances. Sub-admins need the accounts area.",
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Filter by kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/accounts/{kind}/{id}": {
+      "patch": {
+        "summary": "Deactivate, reactivate or change clearances",
+        "tags": [
+          "Account directory"
+        ],
+        "description": "grants: productLab (use Product Lab) and goLive (switch sandbox to live) apply to facility, insurer, emr_provider and staff accounts. Sub-admins cannot change grants, staff or sub-admin accounts.",
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "description": "Account kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Account id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "disabled": true,
+                "grants": {
+                  "productLab": true,
+                  "goLive": false
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed for this account kind"
+          }
+        }
+      }
+    },
+    "/api/platform/admins": {
+      "get": {
+        "summary": "Sub-admins, presets, areas and the demo switch",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "Chief only.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Invite a sub-admin",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "Email and/or phone. Preset: partner_manager, support, messaging_manager, finance_officer, evaluator, or custom with areas: clients, payers, messaging, product_lab, claims, finance, operating_mode, partners, accounts.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "name": "Efua Asare",
+                "email": "efua@hnn.example",
+                "preset": "support",
+                "readOnly": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/admins/{id}": {
+      "patch": {
+        "summary": "Change areas, preset, read-only or status",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sub-admin id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "areas": [
+                  "clients",
+                  "accounts"
+                ],
+                "readOnly": true,
+                "status": "suspended"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove a sub-admin",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "Their sessions end at once.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sub-admin id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/admins/{id}/invite": {
+      "post": {
+        "summary": "Send a new invite link",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "The old link stops working.",
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sub-admin id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "sendSms": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/admins/demo": {
+      "get": {
+        "summary": "Is the public demo login on?",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Switch the public demo login on or off",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "enabled": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/demo": {
+      "get": {
+        "summary": "The dummy credentials for the sign-in page",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "Public. Returns { enabled: false } when the demo is off.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/login": {
+      "post": {
+        "summary": "Sub-admin sign-in",
+        "tags": [
+          "Sub-admins"
+        ],
+        "description": "Returns a signed Bearer token. A demo or evaluator sign-in gets its own visitor id, which picks a private scratch copy of the seeded data (kept 2 hours after last use, max 150). Changes there are visible to that visitor only and never reach real data; messages, money and AI calls are simulated; secrets and contact details are masked.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "handle": "efua@hnn.example",
+                "password": "..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Incorrect login or password"
+          },
+          "429": {
+            "description": "Too many tries"
+          }
+        }
+      }
+    },
+    "/admin-api/accept-invite": {
+      "post": {
+        "summary": "Set a password from an invite",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "token": "<invite token>",
+                "password": "at-least-10-chars"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/me": {
+      "get": {
+        "summary": "The signed-in sub-admin and their areas",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-api/password": {
+      "post": {
+        "summary": "Change own password",
+        "tags": [
+          "Sub-admins"
+        ],
+        "security": [
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "current": "...",
+                "password": "..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/currency/api/list": {
+      "get": {
+        "summary": "Currencies and rates",
+        "tags": [
+          "Currencies"
+        ],
+        "description": "Public, CORS open. main = GHS and USD; other = about 100, Nigeria and East Africa first (NGN, KES, UGX, TZS, RWF, ETB, BIF, SSP, SOS, DJF, ERN) then by region. Display only: everything is billed, lent and repaid in GHS.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/currency/api/convert": {
+      "get": {
+        "summary": "Convert an amount",
+        "tags": [
+          "Currencies"
+        ],
+        "description": "Through the USD pivot, rounded to the target currency’s decimals.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "amount",
+            "in": "query",
+            "required": false,
+            "description": "Number",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Currency code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Currency code",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/currencies": {
+      "get": {
+        "summary": "Rates, default and note (Master Control)",
+        "tags": [
+          "Currencies"
+        ],
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save rates",
+        "tags": [
+          "Currencies"
+        ],
+        "description": "Rates are units per 1 USD. Until saved, the seed rates are shown as indicative.",
+        "security": [
+          {
+            "PlatformKey": []
+          },
+          {
+            "SubAdminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "rates": {
+                  "GHS": 11.0,
+                  "KES": 129.0,
+                  "NGN": 1500.0
+                },
+                "defaultCurrency": "GHS",
+                "note": "Source and date"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patient-api/v1/patient/update": {
+      "patch": {
+        "summary": "Set the person’s default display currency",
+        "tags": [
+          "Currencies"
+        ],
+        "description": "Body field currency (any code from /currency/api/list). The ER HEAT app asks GHS or USD at first sign-in.",
+        "security": [
+          {
+            "BorrowerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "currency": "KES"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
           }
         }
       }

@@ -449,7 +449,7 @@ Body for PUT: `{ "name": "Nationwide Health", "sourceAccount": "1300109001", "co
 
 ## Composite APIs
 
-Seven standalone OpenAPI 3.0 specifications, one per feature group, plus a combined
+Nine standalone OpenAPI 3.0 specifications (Edition 6, revised 18 October 2026: `scripts/build-api-edition6.py` regenerates modules 08 and 09 and folds them into the complete spec and `openapi.yaml`), one per feature group, plus a combined
 spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 
 | Spec | Covers | Auth | Edition |
@@ -460,6 +460,8 @@ spec — downloadable in-app at `/app/apis.html` or from `public/apis/`.
 | `hnn-04-financing-reports` | Loans, grants, hospital credit, medical reports | `x-api-key` | commercial |
 | `hnn-05-ledger-reconciliation` | Append-only ledger | `x-api-key` | commercial |
 | `hnn-06-it-lead-configuration` | Revenue rules, other charges, payer tabs, licence redemption | `x-console-key` | all |
+| `hnn-08-erheat-shield` | ERHEAT Shield: borrower API, health sync, profile, history, verifier and voucher pages, lender hooks, partner accounts | patient token, partner token, `x-platform-key` | all |
+| `hnn-09-accounts-admins-currency` | Account directory and clearances, sub-admins, demo login, currencies | `x-platform-key`, sub-admin token | all |
 | `hnn-07-master-control` | Clients, payers, EMR partners, IT leads, licences, **edition transitions** (clients and payers), **payer commission**, **operating mode** (sandbox/live), SMS/WhatsApp verification channels, **Product Lab** (VBC/campaign/loyalty products, metric library, preview/accrue, and the four clinical-observation sources: EMR feed, manual hospital entry, patient web portal, patient SMS/WhatsApp) | `x-platform-key`; the one EMR-partner observation endpoint uses its own `x-api-key` instead | all |
 
 Every documented endpoint is verified against the app's mounted routes.

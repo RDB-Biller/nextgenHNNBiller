@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: Composite Billing & Settlement Platform
-  version: 0.8.0
-  description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are settled
-    by patient self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from its Stanbic account
-    to the clinic over the SBG rail.
+  version: 0.9.0
+  description: 'The platform never custodies funds — it orchestrates, routes, and reconciles. Bills are settled by patient
+    self-pay (to the clinic) or by a payer (insurer OR employer) moving money A2A from its Stanbic account to the clinic over
+    the SBG rail.
 
     '
 servers:
@@ -29,14 +29,13 @@ paths:
               $ref: '#/components/schemas/CreateBill'
       responses:
         '201':
-          description: Created. A patient verification link is generated and sent automatically — response includes
-            patientVerification:{status,link,channelsSent,channelErrors?}, not persisted onto the bill itself. If
-            the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels), the
-            same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp
-            reports a specific failure code for any enabled channel that didn't go out. While the server is in sandbox
-            mode, nothing is ever sent for real and the response additionally includes otpCodeSandbox so the flow
-            can be demoed without a phone — see the Master Control API's Messaging endpoints for how a real Twilio/Africa's
-            Talking/Hubtel provider is configured and activated.
+          description: Created. A patient verification link is generated and sent automatically — response includes patientVerification:{status,link,channelsSent,channelErrors?},
+            not persisted onto the bill itself. If the client has SMS and/or WhatsApp enabled (see /api/platform/clients/{id}/verification-channels),
+            the same message also goes out on those channels with a one-time reply code; channelErrors.sms/whatsapp reports
+            a specific failure code for any enabled channel that didn't go out. While the server is in sandbox mode, nothing
+            is ever sent for real and the response additionally includes otpCodeSandbox so the flow can be demoed without
+            a phone — see the Master Control API's Messaging endpoints for how a real Twilio/Africa's Talking/Hubtel provider
+            is configured and activated.
           content:
             application/json:
               schema:
@@ -102,10 +101,9 @@ paths:
           type: string
       responses:
         '200':
-          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox while
-            the server is in sandbox mode — reissuing also generates a fresh reply code, invalidating any earlier
-            one. channelErrors.sms/whatsapp reports a specific failure code for any enabled channel that didn''t
-            go out this time'
+          description: '{ status, link, remindersSent, channelsSent, channelErrors? }, plus otpCodeSandbox while the server
+            is in sandbox mode — reissuing also generates a fresh reply code, invalidating any earlier one. channelErrors.sms/whatsapp
+            reports a specific failure code for any enabled channel that didn''t go out this time'
         '409':
           description: verification_not_pending
   /api/v1/payments/intents:
@@ -145,8 +143,8 @@ paths:
           description: OK
   /api/v1/dashboard:
     get:
-      summary: Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[] (oldest
-        first), the patient bill-verification follow-up queue
+      summary: Clinic dashboard data — includes totals.pendingVerification (count) and pendingVerifications[] (oldest first),
+        the patient bill-verification follow-up queue
       security:
       - TenantKey: []
       responses:
@@ -245,8 +243,8 @@ paths:
         '200':
           description: Settled or authorised
         '409':
-          description: patient_verification_pending — this payer has requirePatientVerification on and the patient
-            has not yet confirmed the bill (see /verify/api)
+          description: patient_verification_pending — this payer has requirePatientVerification on and the patient has not
+            yet confirmed the bill (see /verify/api)
   /api/payer/claims/{id}/reject:
     post:
       summary: Decline the claim
@@ -287,8 +285,8 @@ paths:
           description: verification_not_pending
   /api/payer/claims/{id}/verification/override:
     post:
-      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital, or
-        a prior approval on file)
+      summary: Mark verified without the patient's own confirmation (reviewed directly, called the hospital, or a prior approval
+        on file)
       security:
       - PayerKey: []
       parameters:
@@ -676,8 +674,8 @@ paths:
           description: OK
     post:
       summary: Track an NHIS claim (routed via billId, or external claim data)
-      description: 'Two modes. Routed - pass billId for a bill raised here. External - the claim was submitted/settled
-        in your EMR or the ClaimIt portal; send the claim data only. Idempotent on nhisClaimNumber.
+      description: 'Two modes. Routed - pass billId for a bill raised here. External - the claim was submitted/settled in
+        your EMR or the ClaimIt portal; send the claim data only. Idempotent on nhisClaimNumber.
 
         '
       security:
@@ -716,8 +714,8 @@ paths:
                   - member
                   default: provider
                   description: 'Who receives the insurer''s refund. provider - lands with the clinic, so a member-charged
-                    margin is netted from the cashback and the balance is owed on. member - the insurer pays the
-                    member directly, so the margin is invoiced instead.
+                    margin is netted from the cashback and the balance is owed on. member - the insurer pays the member directly,
+                    so the margin is invoiced instead.
 
                     '
                 externalRef:
@@ -892,11 +890,11 @@ paths:
     post:
       summary: Inbound SMS/WhatsApp reply to a patient verification message (shared-secret signed)
       description: 'Provider-agnostic — accepts { from, text, channel } plus common aliases (From/Body/sender/msisdn/message),
-        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK
-        confirms only when exactly one verification is pending for that phone; otherwise (or always) the patient
-        can send the numeric reply code from their message instead, matched only within that phone''s own pending
-        verifications. Secured the same way as /api/v1/webhooks/collection — a shared secret header, not a provider-specific
-        request signature (header x-webhook-secret, not modeled as a securityScheme here — same as /api/v1/webhooks/collection).
+        with channel inferred from Twilio''s whatsapp: From-prefix convention when omitted. A bare YES/CONFIRM/OK confirms
+        only when exactly one verification is pending for that phone; otherwise (or always) the patient can send the numeric
+        reply code from their message instead, matched only within that phone''s own pending verifications. Secured the same
+        way as /api/v1/webhooks/collection — a shared secret header, not a provider-specific request signature (header x-webhook-secret,
+        not modeled as a securityScheme here — same as /api/v1/webhooks/collection).
 
         '
       requestBody:
@@ -916,8 +914,8 @@ paths:
                   - whatsapp
       responses:
         '200':
-          description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code,
-            locked, no_match, unrecognized.'
+          description: '{ ok: true, outcome, verificationId }. outcome is one of confirmed, ambiguous, wrong_code, locked,
+            no_match, unrecognized.'
         '401':
           description: bad_signature
         '422':
@@ -932,8 +930,7 @@ paths:
           description: data[] of solution views
   /api/v1/solutions/{id}/run:
     post:
-      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId in input is
-        ignored.
+      summary: Run a solution for the calling hospital. The tenant is always the caller; any tenantId in input is ignored.
       security:
       - TenantKey: []
       parameters:
@@ -995,8 +992,7 @@ paths:
           description: rate_limited
   /solutions/api/{id}:
     get:
-      summary: Public view of one live patient-facing solution (404 unless status is live and the patient surface
-        is enabled)
+      summary: Public view of one live patient-facing solution (404 unless status is live and the patient surface is enabled)
       parameters:
       - name: id
         in: path
@@ -1010,8 +1006,8 @@ paths:
           description: solution_not_found
   /solutions/api/{id}/run:
     post:
-      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them; ids and
-        variance are never returned.
+      summary: Run a patient-facing solution. Pharmacy names are hidden unless the solution allows them; ids and variance
+        are never returned.
       parameters:
       - name: id
         in: path
@@ -1033,8 +1029,8 @@ paths:
           description: rate_limited
   /api/v1/bills/{id}/insurecredit:
     post:
-      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS 2000) for
-        their share of this bill. An approved loan covering the share settles the bill (settlementMethod insurecredit).
+      summary: InsureCredit as a means of settlement - text the patient a micro-loan offer (up to GHS 2000) for their share
+        of this bill. An approved loan covering the share settles the bill (settlementMethod insurecredit).
       parameters:
       - name: id
         in: path
@@ -1071,9 +1067,8 @@ paths:
           description: Status
   /api/platform/solutions/modules:
     get:
-      summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing,
-        multi_funder, pharmacy_compare, reconciliation, insurecredit, ai_adjudication, birthprep) with config schemas,
-        plus funders
+      summary: Module registry (auth_threshold, auto_adjudication, claim_expiry, settlement_cycle, daily_billing, multi_funder,
+        pharmacy_compare, reconciliation, insurecredit, ai_adjudication, birthprep) with config schemas, plus funders
       security:
       - PlatformKey: []
       responses:
@@ -1095,8 +1090,8 @@ paths:
           description: Module result
   /credit/api/{token}:
     get:
-      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only. The token
-        in the SMS link is the credential.
+      summary: Applicant offer (design, amount, USSD instructions, micro medical report). First name only. The token in the
+        SMS link is the credential.
       parameters:
       - name: token
         in: path
@@ -1132,8 +1127,8 @@ paths:
           description: offer_expired
   /credit/api/{token}/apply:
     post:
-      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying ref, amount,
-        source and the report link.
+      summary: Submit the application to ConfirmU. Needs scoring consent. Returns redirectUrl carrying ref, amount, source
+        and the report link.
       parameters:
       - name: token
         in: path
@@ -1151,8 +1146,8 @@ paths:
           description: rate_limited
   /credit/api/{token}/share:
     post:
-      summary: Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's
-        consent. Max 3 recipients per application.
+      summary: Send the micro medical report as a justification note to a funder (e.g. HR), with the applicant's consent.
+        Max 3 recipients per application.
       parameters:
       - name: token
         in: path
@@ -1219,8 +1214,8 @@ paths:
           description: note_withdrawn or note_expired
   /ussd/{secret}:
     post:
-      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode, text).
-        Replies CON or END as text/plain. The secret in the path is the credential; a wrong secret is a bare 404.
+      summary: Africa's Talking USSD callback (form-encoded sessionId, serviceCode, phoneNumber, networkCode, text). Replies
+        CON or END as text/plain. The secret in the path is the credential; a wrong secret is a bare 404.
       parameters:
       - name: secret
         in: path
@@ -1234,8 +1229,8 @@ paths:
           description: Bad secret
   /insurecredit-hooks/{secret}/decision:
     post:
-      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount? }.
-        The patient is texted the outcome.
+      summary: ConfirmU decision callback. Body { applicationNo, decision approved|declined, approvedAmount? }. The patient
+        is texted the outcome.
       parameters:
       - name: secret
         in: path
@@ -1253,8 +1248,8 @@ paths:
           description: decision_must_be_approved_or_declined or approved_amount_invalid
   /insurecredit-hooks/{secret}/applications/{no}:
     get:
-      summary: Verification packet for an application number - need checks against the micro medical report (report
-        present, micro, signed off, amount within patient share, bill status, bill verification, consent on file)
+      summary: Verification packet for an application number - need checks against the micro medical report (report present,
+        micro, signed off, amount within patient share, bill status, bill verification, consent on file)
       parameters:
       - name: secret
         in: path
@@ -1358,8 +1353,7 @@ paths:
                   description: Comma, semicolon or newline separated
       responses:
         '200':
-          description: '{ batchId, mode, requested, accepted, failed, skippedOptOut, invalid[], duplicatesRemoved,
-            error }'
+          description: '{ batchId, mode, requested, accepted, failed, skippedOptOut, invalid[], duplicatesRemoved, error }'
         '422':
           description: message_required | message_too_long | no_valid_numbers | too_many_recipients_max_1000
   /api/platform/sms/logs:
@@ -1467,8 +1461,8 @@ paths:
           description: OK
   /sms-hooks/{secret}/delivery:
     post:
-      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret in the path;
-        wrong secret returns a bare 404.
+      summary: Africa's Talking delivery-report callback (form-urlencoded). Authenticated by the secret in the path; wrong
+        secret returns a bare 404.
       parameters:
       - name: secret
         in: path
@@ -1498,8 +1492,8 @@ paths:
           description: unknown secret
   /sms-hooks/{secret}/inbox:
     post:
-      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical, campaign
-        and verification reply handlers
+      summary: Africa's Talking inbound-message callback (form-urlencoded); also offered to the clinical, campaign and verification
+        reply handlers
       parameters:
       - name: secret
         in: path
@@ -1562,8 +1556,8 @@ paths:
           description: '{ ok, optedOut }'
   /api/platform/pharmacy-pricing/unified:
     get:
-      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available, or side
-        by side. variance% = (billed - quoted) / quoted x 100.
+      summary: Compare an item across pharmacies from billed prices, quoted prices, the best available, or side by side. variance%
+        = (billed - quoted) / quoted x 100.
       security:
       - PlatformKey: []
       parameters:
@@ -1632,8 +1626,8 @@ paths:
           description: text/csv
   /api/platform/pharmacy-quotes/import:
     post:
-      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX is read
-        in the browser). Quotes are append-only; validFrom/validUntil bound their use.
+      summary: Import a price list. Send CSV as raw text in csv, or a spreadsheet as a table of rows (XLSX is read in the
+        browser). Quotes are append-only; validFrom/validUntil bound their use.
       security:
       - PlatformKey: []
       requestBody:
@@ -1682,8 +1676,8 @@ paths:
           description: OK
   /credit/api/lookup:
     post:
-      summary: Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both must match.
-        Returns { token }.
+      summary: Recover an offer when the SMS link was cut short. Body { applicationNo, phone } - both must match. Returns
+        { token }.
       responses:
         '200':
           description: token
@@ -1717,8 +1711,8 @@ paths:
           description: Redirect
   /api/platform/ai-adjudication/overview:
     get:
-      summary: 'AI adjudication: every product with its benchmark (accuracy, false-approve rate, gate), scorer model,
-        drift state and the scoring queue; whether ANTHROPIC_API_KEY is set'
+      summary: 'AI adjudication: every product with its benchmark (accuracy, false-approve rate, gate), scorer model, drift
+        state and the scoring queue; whether ANTHROPIC_API_KEY is set'
       security:
       - PlatformKey: []
       responses:
@@ -1734,8 +1728,8 @@ paths:
           description: OK
   /api/platform/ai-adjudication/{productId}/benchmark:
     get:
-      summary: 'Benchmark for one product: accuracy on human-reviewed definite recommendations, false approve/decline
-        rates, per-component accuracy (Claude, scorer), projected automation, gate pass/fail with reasons'
+      summary: 'Benchmark for one product: accuracy on human-reviewed definite recommendations, false approve/decline rates,
+        per-component accuracy (Claude, scorer), projected automation, gate pass/fail with reasons'
       security:
       - PlatformKey: []
       parameters:
@@ -1756,8 +1750,8 @@ paths:
           description: ai_adjudication_product_not_found
   /api/platform/ai-adjudication/{productId}/train:
     post:
-      summary: Retrain the scorer from human decisions. Backfills unscored history; accepts an imported labelled
-        file. New weights are kept only if the held-out result is not worse.
+      summary: Retrain the scorer from human decisions. Backfills unscored history; accepts an imported labelled file. New
+        weights are kept only if the held-out result is not worse.
       security:
       - PlatformKey: []
       parameters:
@@ -1810,8 +1804,8 @@ paths:
           description: not_enough_labelled_claims
   /api/platform/ai-adjudication/{productId}/mode:
     post:
-      summary: 'Set the mode: shadow | assist | auto. auto is refused (422 benchmark_gate_not_met) unless the benchmark
-        gate passes right now.'
+      summary: 'Set the mode: shadow | assist | auto. auto is refused (422 benchmark_gate_not_met) unless the benchmark gate
+        passes right now.'
       security:
       - PlatformKey: []
       parameters:
@@ -1859,8 +1853,8 @@ paths:
           description: '{ evaluated, pendingUnscored }'
   /api/payer/ai-adjudication:
     get:
-      summary: 'The payer''s AI adjudication benchmark: how often the AI agreed with their reviewers and whether
-        it may act on its own'
+      summary: 'The payer''s AI adjudication benchmark: how often the AI agreed with their reviewers and whether it may act
+        on its own'
       security:
       - PayerKey: []
       responses:
@@ -1868,8 +1862,8 @@ paths:
           description: '{ configured, product, benchmark, model }'
   /api/payer/claims/{id}/ai-review:
     post:
-      summary: 'Ask for (another) AI review of a claim now. Body { useLlm?: boolean }. The claim view then carries
-        `ai` (recommendation, confidence, reasons, flags, reviewer note).'
+      summary: 'Ask for (another) AI review of a claim now. Body { useLlm?: boolean }. The claim view then carries `ai` (recommendation,
+        confidence, reasons, flags, reviewer note).'
       security:
       - PayerKey: []
       parameters:
@@ -1893,8 +1887,8 @@ paths:
         '200':
           description: '{ enabled, updatedAt, updatedBy, seededFromEnv, keyConfigured }'
     post:
-      summary: Switch Claude on or off platform-wide. A product also needs its own llmEnabled. Checks and the trained
-        scorer never depend on it.
+      summary: Switch Claude on or off platform-wide. A product also needs its own llmEnabled. Checks and the trained scorer
+        never depend on it.
       security:
       - PlatformKey: []
       requestBody:
@@ -1939,8 +1933,8 @@ paths:
           description: OK
   /api/v1/savings/history:
     get:
-      summary: 'What the biller already knows about the patient from previous bills: previous caesareans, hypertension,
-        diabetes, preterm birth (with evidence)'
+      summary: 'What the biller already knows about the patient from previous bills: previous caesareans, hypertension, diabetes,
+        preterm birth (with evidence)'
       security:
       - TenantKey: []
       parameters:
@@ -1957,8 +1951,7 @@ paths:
           description: OK
   /api/v1/savings/suggest/{billId}:
     get:
-      summary: Should the terminal suggest a plan for this bill? (pregnancy diagnosis or planned/elective procedure;
-        configurable)
+      summary: Should the terminal suggest a plan for this bill? (pregnancy diagnosis or planned/elective procedure; configurable)
       security:
       - TenantKey: []
       parameters:
@@ -1972,8 +1965,8 @@ paths:
           description: '{ suggest, goal, reason, facts, history }'
   /api/v1/savings/preview:
     post:
-      summary: 'Dry-run the plan maths: scenarios, target, deadline, milestones, advisories. Body as for enrolment
-        (facts/answers, goal, horizon, other)'
+      summary: 'Dry-run the plan maths: scenarios, target, deadline, milestones, advisories. Body as for enrolment (facts/answers,
+        goal, horizon, other)'
       security:
       - TenantKey: []
       responses:
@@ -1981,9 +1974,8 @@ paths:
           description: Simulated plan
   /api/v1/savings/plans:
     post:
-      summary: 'Enrol a patient: { patient:{name,phone,memberId}, goal: delivery|procedure|other, horizon: 9|6|3|other,
-        other:{months|years|open}, facts, answers, billId, productId }. Merges the history, texts the patient a
-        short link.'
+      summary: 'Enrol a patient: { patient:{name,phone,memberId}, goal: delivery|procedure|other, horizon: 9|6|3|other, other:{months|years|open},
+        facts, answers, billId, productId }. Merges the history, texts the patient a short link.'
       security:
       - TenantKey: []
       responses:
@@ -2008,8 +2000,8 @@ paths:
           description: Plan
   /api/v1/savings/plans/{id}/replan:
     post:
-      summary: 'Clinical change -> re-plan: { facts, answers, goal, horizon, other, note }. Keeps contributions,
-        adds an advisory, texts the patient if the target changed.'
+      summary: 'Clinical change -> re-plan: { facts, answers, goal, horizon, other, note }. Keeps contributions, adds an advisory,
+        texts the patient if the target changed.'
       security:
       - TenantKey: []
       parameters:
@@ -2043,8 +2035,8 @@ paths:
           description: Plan
   /api/v1/savings/plans/{id}/insurecredit:
     post:
-      summary: Bridge the shortfall with an InsureCredit offer against a real bill { billId } (loan part capped
-        at the InsureCredit cap)
+      summary: Bridge the shortfall with an InsureCredit offer against a real bill { billId } (loan part capped at the InsureCredit
+        cap)
       security:
       - TenantKey: []
       parameters:
@@ -2054,8 +2046,7 @@ paths:
           description: InsureCredit offer
   /savings/api/{token}:
     get:
-      summary: 'Patient plan page data (first name only): progress, milestones, scenarios, advisories, bridge, intake
-        questions'
+      summary: 'Patient plan page data (first name only): progress, milestones, scenarios, advisories, bridge, intake questions'
       parameters:
       - name: token
         in: path
@@ -2069,8 +2060,8 @@ paths:
           description: plan_not_found
   /savings/api/{token}/answers:
     post:
-      summary: 'Patient (or chatbot) answers intake questions -> the plan is re-planned. Body { answers:{ questionId:
-        value } }'
+      summary: 'Patient (or chatbot) answers intake questions -> the plan is re-planned. Body { answers:{ questionId: value
+        } }'
       parameters:
       - name: token
         in: path
@@ -2102,8 +2093,8 @@ paths:
           description: Redirect
   /savings-hooks/{secret}/contribution:
     post:
-      summary: Savings partner posts a deposit { planNo, amount, reference, via? }. Secret in the path; bare 404
-        if wrong; idempotent on reference.
+      summary: Savings partner posts a deposit { planNo, amount, reference, via? }. Secret in the path; bare 404 if wrong;
+        idempotent on reference.
       parameters:
       - name: secret
         in: path
@@ -2158,15 +2149,14 @@ paths:
           description: '{ plans, remindersSent }'
   /savings/api/facilities:
     get:
-      summary: 'Public: hospitals with a live BirthPrep programme, plus the intake questions, goals and horizons
-        (CORS open)'
+      summary: 'Public: hospitals with a live BirthPrep programme, plus the intake questions, goals and horizons (CORS open)'
       responses:
         '200':
           description: OK
   /savings/api/verify/start:
     post:
-      summary: 'Public: text a one-time code to a phone through the biller''s SMS provider (Africa''s Talking).
-        { phone }. In messaging sandbox the code is echoed (codeSandbox).'
+      summary: 'Public: text a one-time code to a phone through the biller''s SMS provider (Africa''s Talking). { phone }.
+        In messaging sandbox the code is echoed (codeSandbox).'
       responses:
         '200':
           description: '{ sent, to }'
@@ -2176,8 +2166,8 @@ paths:
           description: rate_limited
   /savings/api/verify/check:
     post:
-      summary: 'Public: verify a code on its own and get a signed receipt { verified, phone, verifiedAt, receipt,
-        provider } (HMAC with PHONE_VERIFY_SIGNING_KEY) for a partner backend such as TMS Afriyie'
+      summary: 'Public: verify a code on its own and get a signed receipt { verified, phone, verifiedAt, receipt, provider
+        } (HMAC with PHONE_VERIFY_SIGNING_KEY) for a partner backend such as TMS Afriyie'
       responses:
         '200':
           description: Receipt
@@ -2187,8 +2177,8 @@ paths:
           description: too_many_attempts
   /savings/api/signup:
     post:
-      summary: 'Public self-enrolment from the Afriyie app: { name, phone, code, facilityId, goal, horizon, other,
-        answers, facts }. Creates the plan at the chosen hospital and texts the link.'
+      summary: 'Public self-enrolment from the Afriyie app: { name, phone, code, facilityId, goal, horizon, other, answers,
+        facts }. Creates the plan at the chosen hospital and texts the link.'
       responses:
         '201':
           description: '{ planNo, token, link, plan }'
@@ -2198,8 +2188,7 @@ paths:
           description: facility_required / plan validation
   /savings/api/my-plans:
     post:
-      summary: 'Public: every plan linked to a verified phone { phone, code } -> { plans:[{ planNo, token, ... }]
-        }'
+      summary: 'Public: every plan linked to a verified phone { phone, code } -> { plans:[{ planNo, token, ... }] }'
       responses:
         '200':
           description: OK
@@ -2215,6 +2204,1386 @@ paths:
       responses:
         '200':
           description: OK
+  /erheat/api/lines:
+    get:
+      summary: Lines, limits and the borrower’s Trust Passport
+      tags:
+      - ERHEAT borrower
+      description: Which of the six lines (rent, health, education, energy, agriculture, transport) are open, with fields,
+        limits, wording and the person’s passport.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: &id003
+                type: object
+                additionalProperties: true
+  /erheat/api/health/facilities:
+    get:
+      summary: Facilities that use the Biller (Health directory)
+      tags:
+      - ERHEAT borrower
+      description: Public. Used so a patient can pick their facility; the facility is texted to confirm.
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/health/pending:
+    get:
+      summary: Open Biller bills for the signed-in phone
+      tags:
+      - ERHEAT borrower
+      description: Each item has billId, facility, billTotal, patientPayable and a note. A Health request made from a bill
+        is confirmed by the bill itself.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/profile:
+    get:
+      summary: Saved details per line
+      tags:
+      - ERHEAT borrower
+      description: 'Optional prefill: meter number, landlord, school, supplier, route. Nothing is required.'
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    put:
+      summary: Save details per line
+      tags:
+      - ERHEAT borrower
+      description: Send null for a line to remove it. Each request still asks whether to use the details on file or different
+        ones.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              lines:
+                energy:
+                  evidence:
+                    reference: '12345678'
+                  payee:
+                    name: Shell Madina
+                    phone: '+233200000000'
+                rent: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/history:
+    get:
+      summary: Awarded requests and totals
+      tags:
+      - ERHEAT borrower
+      description: Approved onwards, with totals borrowed and repaid.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/passport:
+    get:
+      summary: Trust Passport
+      tags:
+      - ERHEAT borrower
+      description: Level (new, trusted, preferred), ceiling (500, 1000, 2000; never above the hard cap), verified, repaid,
+        defaults, open requests.
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/apps:
+    get:
+      summary: The borrower’s requests
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/apps/{id}:
+    get:
+      summary: One request with its next step
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '404':
+          description: Not found
+  /erheat/api/apply:
+    post:
+      summary: Ask for a loan
+      tags:
+      - ERHEAT borrower
+      description: Creates the request and texts the verifier. With billId the Biller bill is the confirmation (amount cannot
+        exceed the patient share; one request per bill); with facilityId the facility is texted. Everything is in GHS.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              line: rent
+              amount: 900
+              purpose: November rent
+              payee:
+                name: Kojo Boateng
+                phone: '0200000000'
+              verifier:
+                name: Kojo Boateng
+                phone: '0200000000'
+              evidence:
+                monthlyRent: '450'
+                dueDate: '2026-11-01'
+              lang: en
+      responses:
+        '200':
+          description: The request in its borrower view
+          content:
+            application/json:
+              schema: *id003
+        '403':
+          description: Phone not verified
+        '404':
+          description: ERHEAT Shield is not open yet
+        '409':
+          description: Line not open, or an open request exists on the line
+        '422':
+          description: Amount above the limit or invalid details
+        '429':
+          description: Monthly request limit reached
+  /erheat/api/apps/{id}/consent:
+    post:
+      summary: Consent and submit to the lender
+      tags:
+      - ERHEAT borrower
+      description: Only when the request is verified. Stores the consent text version and, if a lender URL is set, pushes
+        the signed packet.
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              agree: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '409':
+          description: Not ready to submit
+        '422':
+          description: Consent not given
+  /erheat/api/apps/{id}/cancel:
+    post:
+      summary: Cancel an open request
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/api/apps/{id}/resend/{vid}:
+    post:
+      summary: Text the verifier again
+      tags:
+      - ERHEAT borrower
+      security:
+      - BorrowerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      - name: vid
+        in: path
+        required: true
+        description: Verifier id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/v/{token}:
+    get:
+      summary: Verifier page (HTML)
+      tags:
+      - ERHEAT verifier and voucher
+      description: No account. The one-time link in the SMS is the credential.
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        description: Link token from the SMS
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    post:
+      summary: Confirm or decline
+      tags:
+      - ERHEAT verifier and voucher
+      description: 'Form or JSON: decision confirm | decline, confirmedAmount?, accountName?, note?'
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        description: Link token
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              decision: confirm
+              confirmedAmount: 900
+              accountName: K Boateng
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat/redeem:
+    post:
+      summary: Redeem a voucher
+      tags:
+      - ERHEAT verifier and voucher
+      description: The vendor enters the voucher code and the customer’s one-time number. Rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              code: AB12CD34
+              otp: '123456'
+              phone: '+233200000000'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '422':
+          description: Wrong, used or expired voucher
+  /erheat-hooks/{secret}/decision:
+    post:
+      summary: Lender decision
+      tags:
+      - ERHEAT lender hooks
+      description: approvedAmount defaults to the verified amount; it must be above zero and at most that amount (never above
+        GHS 2,000). Voucher lines get a voucher on approval.
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              applicationNo: ERH-482913
+              decision: approved
+              approvedAmount: 900
+              reference: CU-7781
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '404':
+          description: Wrong secret
+        '409':
+          description: Request is not in a state that accepts this
+        '422':
+          description: Invalid decision or amount
+  /erheat-hooks/{secret}/paid:
+    post:
+      summary: The payee has been paid
+      tags:
+      - ERHEAT lender hooks
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              applicationNo: ERH-482913
+              reference: MOMO-55102
+              paidAt: '2026-10-18T10:05:00Z'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat-hooks/{secret}/repayment:
+    post:
+      summary: Repayment, closure or default
+      tags:
+      - ERHEAT lender hooks
+      description: 'Idempotent on reference. outstanding of 0 closes the request. { applicationNo, event: "default" } reports
+        a default.'
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              applicationNo: ERH-482913
+              amount: 300
+              reference: CU-R-1
+              outstanding: 600
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /erheat-hooks/{secret}/applications/{appNo}:
+    get:
+      summary: Verified-Need Packet
+      tags:
+      - ERHEAT lender hooks
+      description: Borrower, payee, evidence, confirmations, flags, consent, passport and payment instruction.
+      security: []
+      parameters:
+      - name: secret
+        in: path
+        required: true
+        description: Hook secret from Master Control > ERHEAT
+        schema:
+          type: string
+      - name: appNo
+        in: path
+        required: true
+        description: Application number, e.g. ERH-482913
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '404':
+          description: application_not_found
+  /api/platform/erheat/config:
+    get:
+      summary: ERHEAT settings, lines and hook URLs
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    put:
+      summary: Change settings
+      tags:
+      - ERHEAT Master Control
+      description: 'enabled, requireVerifiedPhone, hardCap, ladder {new, trusted, preferred}, verifierTtlHours, appTtlDays,
+        maxApps30d, lender {name, pushUrl}, lines {<line>: {enabled, min, cap}}'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              enabled: true
+              lines:
+                rent:
+                  enabled: true
+                  min: 50
+                  cap: 1000
+              lender:
+                name: ConfirmU
+                pushUrl: https://lender.example/erheat
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/erheat/secret/rotate:
+    post:
+      summary: Rotate the hook secret
+      tags:
+      - ERHEAT Master Control
+      description: Old URLs stop working at once.
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/erheat/apps:
+    get:
+      summary: Every request
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      - name: line
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: Default 100
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/erheat/apps/{id}:
+    get:
+      summary: One request in full
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/erheat/apps/{id}/simulate:
+    post:
+      summary: Act as the lender (sandbox only)
+      tags:
+      - ERHEAT Master Control
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              action: approve
+              amount: 900
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '403':
+          description: Only in sandbox mode
+  /partner-api/signup-options:
+    get:
+      summary: Roles and sectors for the sign-up form
+      tags:
+      - Partner accounts
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/signup:
+    post:
+      summary: Ask for a partner account
+      tags:
+      - Partner accounts
+      description: Creates a PENDING account. Nobody signs in until Master Control approves.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              name: Esi Owusu
+              org: Ridge Clinic
+              role: hospital_admin
+              email: esi@ridge.example
+              password: at-least-8-chars
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/login:
+    post:
+      summary: Sign in
+      tags:
+      - Partner accounts
+      description: Email or phone as handle, and password. 12-hour session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              handle: esi@ridge.example
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/me:
+    get:
+      summary: The signed-in partner
+      tags:
+      - Partner accounts
+      security:
+      - PartnerToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/password:
+    post:
+      summary: Change password
+      tags:
+      - Partner accounts
+      description: Ends every session.
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              current: '...'
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/requests:
+    get:
+      summary: Requests for the account’s sector
+      tags:
+      - Partner accounts
+      description: Finance accounts see every line.
+      security:
+      - PartnerToken: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        description: Filter
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/redeem:
+    post:
+      summary: Redeem a voucher
+      tags:
+      - Partner accounts
+      description: Energy, agriculture and transport sectors.
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              code: AB12CD34
+              otp: '123456'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /partner-api/request-universal:
+    post:
+      summary: Ask for the universal account
+      tags:
+      - Partner accounts
+      security:
+      - PartnerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners:
+    get:
+      summary: Accounts, roles and sectors
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    post:
+      summary: Issue a partner login
+      tags:
+      - Partner administration
+      description: 'Returns a temporary password (the person must change it) and can text it: sendSms. Give role or sector.'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              name: Esi Owusu
+              org: Ridge Clinic
+              role: hospital_admin
+              handle: esi@ridge.example
+              sendSms: false
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners/{id}:
+    patch:
+      summary: Edit an account
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              sector: health
+              status: active
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners/{id}/approve:
+    post:
+      summary: Approve a sign-up (optionally with a different role or sector)
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners/{id}/reject:
+    post:
+      summary: Reject a sign-up
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners/{id}/reset-password:
+    post:
+      summary: Issue a new temporary password
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/partners/{id}/universal:
+    post:
+      summary: Grant or remove the universal account
+      tags:
+      - Partner administration
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/accounts:
+    get:
+      summary: Every account of every kind
+      tags:
+      - Account directory
+      description: kind = patient | partner | facility | insurer | emr_provider | staff | subadmin. Each row has status, last
+        activity and clearances. Sub-admins need the accounts area.
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        description: Filter by kind
+        schema:
+          type: string
+      - name: q
+        in: query
+        required: false
+        description: Search
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/accounts/{kind}/{id}:
+    patch:
+      summary: Deactivate, reactivate or change clearances
+      tags:
+      - Account directory
+      description: 'grants: productLab (use Product Lab) and goLive (switch sandbox to live) apply to facility, insurer, emr_provider
+        and staff accounts. Sub-admins cannot change grants, staff or sub-admin accounts.'
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      parameters:
+      - name: kind
+        in: path
+        required: true
+        description: Account kind
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Account id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              disabled: true
+              grants:
+                productLab: true
+                goLive: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '403':
+          description: Not allowed for this account kind
+  /api/platform/admins:
+    get:
+      summary: Sub-admins, presets, areas and the demo switch
+      tags:
+      - Sub-admins
+      description: Chief only.
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    post:
+      summary: Invite a sub-admin
+      tags:
+      - Sub-admins
+      description: 'Email and/or phone. Preset: partner_manager, support, messaging_manager, finance_officer, evaluator, or
+        custom with areas: clients, payers, messaging, product_lab, claims, finance, operating_mode, partners, accounts.'
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              name: Efua Asare
+              email: efua@hnn.example
+              preset: support
+              readOnly: false
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/admins/{id}:
+    patch:
+      summary: Change areas, preset, read-only or status
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              areas:
+              - clients
+              - accounts
+              readOnly: true
+              status: suspended
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    delete:
+      summary: Remove a sub-admin
+      tags:
+      - Sub-admins
+      description: Their sessions end at once.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/admins/{id}/invite:
+    post:
+      summary: Send a new invite link
+      tags:
+      - Sub-admins
+      description: The old link stops working.
+      security:
+      - PlatformKey: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-admin id
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              sendSms: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/admins/demo:
+    get:
+      summary: Is the public demo login on?
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    put:
+      summary: Switch the public demo login on or off
+      tags:
+      - Sub-admins
+      security:
+      - PlatformKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              enabled: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /admin-api/demo:
+    get:
+      summary: The dummy credentials for the sign-in page
+      tags:
+      - Sub-admins
+      description: 'Public. Returns { enabled: false } when the demo is off.'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /admin-api/login:
+    post:
+      summary: Sub-admin sign-in
+      tags:
+      - Sub-admins
+      description: Returns a signed Bearer token. A demo or evaluator sign-in gets its own visitor id, which picks a private
+        scratch copy of the seeded data (kept 2 hours after last use, max 150). Changes there are visible to that visitor
+        only and never reach real data; messages, money and AI calls are simulated; secrets and contact details are masked.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              handle: efua@hnn.example
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+        '401':
+          description: Incorrect login or password
+        '429':
+          description: Too many tries
+  /admin-api/accept-invite:
+    post:
+      summary: Set a password from an invite
+      tags:
+      - Sub-admins
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              token: <invite token>
+              password: at-least-10-chars
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /admin-api/me:
+    get:
+      summary: The signed-in sub-admin and their areas
+      tags:
+      - Sub-admins
+      security:
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /admin-api/password:
+    post:
+      summary: Change own password
+      tags:
+      - Sub-admins
+      security:
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              current: '...'
+              password: '...'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /currency/api/list:
+    get:
+      summary: Currencies and rates
+      tags:
+      - Currencies
+      description: 'Public, CORS open. main = GHS and USD; other = about 100, Nigeria and East Africa first (NGN, KES, UGX,
+        TZS, RWF, ETB, BIF, SSP, SOS, DJF, ERN) then by region. Display only: everything is billed, lent and repaid in GHS.'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /currency/api/convert:
+    get:
+      summary: Convert an amount
+      tags:
+      - Currencies
+      description: Through the USD pivot, rounded to the target currency’s decimals.
+      security: []
+      parameters:
+      - name: amount
+        in: query
+        required: false
+        description: Number
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        description: Currency code
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        description: Currency code
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /api/platform/currencies:
+    get:
+      summary: Rates, default and note (Master Control)
+      tags:
+      - Currencies
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+    put:
+      summary: Save rates
+      tags:
+      - Currencies
+      description: Rates are units per 1 USD. Until saved, the seed rates are shown as indicative.
+      security:
+      - PlatformKey: []
+      - SubAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              rates:
+                GHS: 11.0
+                KES: 129.0
+                NGN: 1500.0
+              defaultCurrency: GHS
+              note: Source and date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
+  /patient-api/v1/patient/update:
+    patch:
+      summary: Set the person’s default display currency
+      tags:
+      - Currencies
+      description: Body field currency (any code from /currency/api/list). The ER HEAT app asks GHS or USD at first sign-in.
+      security:
+      - BorrowerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+            example:
+              currency: KES
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id003
 components:
   securitySchemes:
     TenantKey:
@@ -2233,6 +3602,20 @@ components:
       type: apiKey
       in: header
       name: x-platform-key
+      description: Chief administrator key (env PLATFORM_ADMIN_KEY).
+    BorrowerToken:
+      type: http
+      scheme: bearer
+      description: Patient-account token from POST /patient-api/v1/patient/login (30-day signed token).
+    PartnerToken:
+      type: http
+      scheme: bearer
+      description: Partner session token from POST /partner-api/login (12-hour signed token).
+    SubAdminToken:
+      type: http
+      scheme: bearer
+      description: Sub-admin session token from POST /admin-api/login. Opens only the areas the account was given; sandboxed
+        (demo and evaluator) accounts work on a private scratch copy.
   schemas:
     CreateBill:
       type: object
@@ -2344,14 +3727,13 @@ components:
                 enum:
                 - sms
                 - whatsapp
-              description: Which channels this verification also went out on, in addition to the link (empty unless
-                the client enabled them — see /api/platform/clients/{id}/verification-channels).
+              description: Which channels this verification also went out on, in addition to the link (empty unless the client
+                enabled them — see /api/platform/clients/{id}/verification-channels).
             channelErrors:
               type: object
-              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp carry
-                a specific failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported,
-                provider_whatsapp_not_verified, messaging_provider_not_configured) so a missing channel is explained
-                rather than just absent from channelsSent.
+              description: Present only when at least one enabled channel failed to send. sms and/or whatsapp carry a specific
+                failure code (e.g. provider_credentials_incomplete, provider_whatsapp_not_supported, provider_whatsapp_not_verified,
+                messaging_provider_not_configured) so a missing channel is explained rather than just absent from channelsSent.
               properties:
                 sms:
                   type: string
@@ -2359,6 +3741,6 @@ components:
                   type: string
             otpCodeSandbox:
               type: string
-              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply code, echoed
-                back here purely so the flow can be demoed without a real phone or a configured provider. Never
-                present, and never returned by any patient-facing endpoint, once MESSAGING_SANDBOX is turned off.
+              description: Present only while the server's MESSAGING_SANDBOX is on — the one-time reply code, echoed back
+                here purely so the flow can be demoed without a real phone or a configured provider. Never present, and never
+                returned by any patient-facing endpoint, once MESSAGING_SANDBOX is turned off.
