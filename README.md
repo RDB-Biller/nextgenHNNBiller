@@ -1191,3 +1191,12 @@ Emergency micro-loans in six lines (Energy, Rent, Health, Education, Agriculture
 - **What the demo can and cannot do** (`services/demoGuard.js`, enforced in `middleware/access.js` for every *sandboxed* account): it opens Clients, Payers, Messaging and Claims only (never Product Lab, finance and settlement, partners and loans, accounts, or the sandbox/live switch). Every change is answered with "Demo mode: nothing was saved" and never reaches the system. Keys, tokens, passwords and hook URLs are replaced with dots, and phone numbers and email addresses are masked in everything it is sent. Sessions last 3 hours.
 - **VIP and evaluator accounts:** invite someone with the **Evaluator** role (Admins tab): the same safe tour under their own name and password, set from the invite link, with no application or waiting. Any sub-admin can also be made sandboxed. To give someone real access instead, pick a normal role.
 - Tests: `node scripts/smoke-subadmins.js` (43 checks).
+
+## Currencies (display only)
+
+Everything is billed, lent and repaid in **GHS**. Apps can show amounts in about 100 currencies as an approximate guide beside the GHS figure.
+
+- `GET /currency/api/list` (public, CORS `*`): main currencies (GHS, USD), the "Other" list (Nigeria and East Africa first, then by region), and current rates.
+- `GET /currency/api/convert?amount=&from=&to=`: one-off conversion.
+- Rates are units per 1 USD. Seed rates are **indicative** until Master Control saves real ones (Master Control > Currencies, `PUT /api/platform/currencies`).
+- Each patient account can store a default `currency` (`PATCH /patient-api/v1/patient/update`). ER HEAT asks GHS or USD on first sign-in.
