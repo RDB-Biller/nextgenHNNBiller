@@ -9,7 +9,7 @@
     return o;
   };
   const q = (id) => document.getElementById(id);
-  const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'other'];
+  const TYPES = ['bank', 'insurer', 'reinsurer', 'core_banking', 'ehr', 'adjudication', 'hospital', 'association', 'other'];
   const PERSONAS = ['ceo', 'cto', 'cmo', 'product', 'sales', 'claims', 'ops', 'general', 'comms', 'partnerships', 'other'];
   const opt = (a, sel) => a.map((x) => `<option value="${x}"${x === sel ? ' selected' : ''}>${x.replace('_', ' ')}</option>`).join('');
   let ORGS = [];
@@ -24,10 +24,22 @@
   <div class="card" style="margin-bottom:14px"><h2>Outreach: get decision makers into the sandbox</h2>
     <p class="muted" style="margin-top:0;font-size:13px">Business contacts only, each with a public source. Every message carries who we are and a one-click opt-out; STOP replies and unsubscribes are permanent across all channels. <b>LinkedIn is never automated</b> (it creates tasks you send by hand) and <b>WhatsApp only goes to people who replied or opted in</b>. Nothing sends until the switch below is on, your identity and address are set, and the provider is live.</p>
     <div id="ou_kpis" class="muted" style="font-size:13px"></div></div>
+  <div class="card" style="margin-bottom:14px" id="nb_card"><h2>Special group: NABIP</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">The National Association of Benefits and Insurance Professionals: more than 100,000 licensed agents, brokers and benefits professionals. One verified contact, mandel@nabip.org, with its public source. Setting up is safe to repeat.</p>
+    <div class="row"><div class="field"><label>Send from (your address, on the domain set in EMAIL_FROM)</label><input id="nb_from" value="ekforson@hnnworld.com"/></div>
+      <div class="field"><label>Your name (signature)</label><input id="nb_name" placeholder="Your name"/></div>
+      </div>
+    <div class="row"><div class="field"><label>Your role (signature)</label><input id="nb_role" placeholder="e.g. Founder"/></div><div class="field"><label>Postal address (printed in every email, required)</label><input id="nb_addr"/></div>
+      <div class="field" style="display:flex;align-items:flex-end"><button class="primary" onclick="nbSetup()">Set up NABIP group</button></div></div>
+    <div id="nb_status" class="muted" style="font-size:13px;margin:6px 0"></div>
+    <div class="row" style="margin-top:6px"><button onclick="nbVp('summary')">Value proposition: summary</button><button onclick="nbVp('details')">Value proposition: details</button><button onclick="nbPreview()">Preview the email</button></div>
+    <div id="nb_vp" style="margin-top:10px;font-size:14px"></div>
+    <div id="nb_mail" style="display:none;margin-top:10px"><div class="field"><label>Subject</label><input id="nb_subj"/></div><div class="field"><label>Email (the footer with your address and the one-click opt-out is added for you)</label><textarea id="nb_body" rows="14" style="width:100%"></textarea></div>
+      <button class="primary" onclick="nbSend()">Send now to mandel@nabip.org</button> <span class="muted" id="nb_msg"></span></div></div>
   <div class="card" style="margin-bottom:14px"><h2>Settings</h2>
     <div class="row">
       <div class="field"><label>Sender name</label><input id="ou_name"/></div><div class="field"><label>Sender role</label><input id="ou_role"/></div>
-      <div class="field"><label>Organisation</label><input id="ou_org"/></div><div class="field"><label>Reply-to email</label><input id="ou_reply"/></div></div>
+      <div class="field"><label>Organisation</label><input id="ou_org"/></div><div class="field"><label>Reply-to email</label><input id="ou_reply"/></div><div class="field"><label>Send from (same domain as EMAIL_FROM)</label><input id="ou_from"/></div></div>
     <div class="row"><div class="field"><label>Postal address (shown in every email)</label><input id="ou_addr"/></div>
       <div class="field"><label>Public base URL of this Biller (for links)</label><input id="ou_base" placeholder="https://hnnbiller.xchangeinsure.com"/></div>
       <div class="field"><label>Sandbox link target</label><input id="ou_sbx"/></div></div>
@@ -92,17 +104,44 @@
   const msg = (t) => { try { toast(t); } catch (e) { alert(t); } };
   const guard = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { msg(e.message); } };
 
+  let nbCfg = null; let nbCid = null;
+  const ul = (items) => '<ul style="margin:4px 0 8px 18px">' + items.map((i) => '<li>' + esc(i) + '</li>').join('') + '</ul>';
+  async function nbFind() {
+    const r = await api('/contacts?pageSize=5&q=' + encodeURIComponent('mandel@nabip.org'));
+    const c = (r.rows || []).find((x) => x.email === 'mandel@nabip.org'); nbCid = c ? c.id : null;
+    q('nb_status').innerHTML = c ? `✓ <b>${esc(c.name)}</b>, ${esc(c.role)} · ${esc(c.email)} · ${c.verified ? 'verified' : 'not yet verified'} · status ${esc(c.status)}` : 'Not set up yet. Press "Set up NABIP group".';
+    return c;
+  }
+  window.nbSetup = guard(async () => { const r = await api('/packs/nabip', 'POST', { fromEmail: q('nb_from').value.trim(), senderName: q('nb_name').value.trim(), senderRole: q('nb_role').value.trim(), postalAddress: q('nb_addr').value.trim(), publicBaseUrl: location.origin }); msg('NABIP group ready'); await ouLoad(); const pc = r.config; q('nb_status').innerHTML += pc.readyToSend ? '' : `<br><b>Before you send, fill in Settings:</b> ${esc(pc.missing.join(', '))}.`; });
+  window.nbVp = guard(async (kind) => {
+    const v = await api('/value-proposition/association'); const t = v.summary;
+    q('nb_vp').innerHTML = kind === 'summary'
+      ? `<h3 style="margin:0 0 4px">${esc(v.title)}: summary</h3><p><b>${esc(t.headline)}</b></p>${ul(t.points)}`
+      : `<h3 style="margin:0 0 4px">${esc(v.title)}: details</h3><p class="muted">${esc(v.audience)}</p>${v.details.map((d) => `<h4 style="margin:10px 0 2px">${esc(d.heading)}</h4>${ul(d.items)}`).join('')}`;
+  });
+  window.nbPreview = guard(async () => {
+    const c = await nbFind(); if (!c) { msg('Set up the NABIP group first'); return; }
+    const p = await api(`/contacts/${c.id}/preview?sequence=email-only&step=0`);
+    q('nb_subj').value = p.subject; q('nb_body').value = p.body.slice(0, p.body.lastIndexOf('\n\n--\n')); q('nb_mail').style.display = 'block';
+  });
+  window.nbSend = guard(async () => {
+    const c = await nbFind(); if (!c) { msg('Set up the NABIP group first'); return; }
+    if (!confirm('Send this email to mandel@nabip.org now, from ' + (nbCfg && nbCfg.fromEmail ? nbCfg.fromEmail : 'your configured address') + '?')) return;
+    try { const r = await api(`/contacts/${c.id}/send-now`, 'POST', { subject: q('nb_subj').value, body: q('nb_body').value }); q('nb_msg').textContent = r.note + ' ' + r.to; msg(r.sandbox ? 'Sandbox: not delivered' : 'Sent'); }
+    catch (e) { q('nb_msg').textContent = e.message; msg(e.message); }
+    nbFind(); ouContacts();
+  });
   window.ouLoad = guard(async () => {
     const [ov, cfg, seqs] = await Promise.all([api('/overview'), api('/config'), api('/sequences')]);
     q('ou_kpis').innerHTML = `<b>${ov.orgs}</b> organisations · <b>${ov.contacts}</b> contacts (${ov.withEmail} email incl. ${ov.roleMailboxes} team mailboxes; ${ov.mobileNumbers} mobile, ${ov.nonMobileNumbers} landline/other numbers) · <b>${ov.sandboxVisitors}</b> opened the sandbox · <b>${ov.feedback}</b> feedback · <b>${ov.openTasks}</b> manual tasks · sent today: email ${ov.sentToday.email}, SMS ${ov.sentToday.sms}, WhatsApp ${ov.sentToday.whatsapp} · suppressed: ${ov.suppressed}<br>Contacts: ${Object.entries(ov.contactsByStatus).map(([k, v]) => k + ' ' + v).join(' · ') || 'none yet'}`;
-    q('ou_name').value = cfg.senderName; q('ou_role').value = cfg.senderRole; q('ou_org').value = cfg.senderOrg; q('ou_reply').value = cfg.replyTo; q('ou_addr').value = cfg.postalAddress; q('ou_base').value = cfg.publicBaseUrl || location.origin; q('ou_sbx').value = cfg.sandboxUrl;
+    q('ou_name').value = cfg.senderName; q('ou_role').value = cfg.senderRole; q('ou_org').value = cfg.senderOrg; q('ou_reply').value = cfg.replyTo; q('ou_from').value = cfg.fromEmail || ''; nbCfg = cfg; if (cfg.fromEmail) q('nb_from').value = cfg.fromEmail; if (cfg.senderName) q('nb_name').value = cfg.senderName; if (cfg.senderRole) q('nb_role').value = cfg.senderRole; if (cfg.postalAddress) q('nb_addr').value = cfg.postalAddress; q('ou_addr').value = cfg.postalAddress; q('ou_base').value = cfg.publicBaseUrl || location.origin; q('ou_sbx').value = cfg.sandboxUrl;
     q('ou_ce').value = cfg.caps.email; q('ou_cs').value = cfg.caps.sms; q('ou_cw').value = cfg.caps.whatsapp; q('ou_hf').value = cfg.hours.from; q('ou_ht').value = cfg.hours.to; q('ou_on').checked = cfg.enabled;
     q('ou_cfgmsg').textContent = cfg.readyToSend ? 'Ready to send' + (cfg.emailConfigured ? '' : ' (email provider not configured: email will not go out)') : 'Missing: ' + cfg.missing.join(', ');
     q('ou_es').innerHTML = seqs.sequences.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-    await cpLoadMeta(); await ouOrgs(); await ouContacts(); await ouTasks(); await ouFb(); await rfLoad();
+    nbFind().catch(() => {}); await cpLoadMeta(); await ouOrgs(); await ouContacts(); await ouTasks(); await ouFb(); await rfLoad();
   });
   window.ouSaveCfg = guard(async () => {
-    await api('/config', 'PUT', { senderName: q('ou_name').value, senderRole: q('ou_role').value, senderOrg: q('ou_org').value, replyTo: q('ou_reply').value, postalAddress: q('ou_addr').value, publicBaseUrl: q('ou_base').value, sandboxUrl: q('ou_sbx').value, enabled: q('ou_on').checked, caps: { email: q('ou_ce').value, sms: q('ou_cs').value, whatsapp: q('ou_cw').value }, hours: { from: q('ou_hf').value, to: q('ou_ht').value } });
+    await api('/config', 'PUT', { senderName: q('ou_name').value, senderRole: q('ou_role').value, senderOrg: q('ou_org').value, replyTo: q('ou_reply').value, fromEmail: q('ou_from').value, postalAddress: q('ou_addr').value, publicBaseUrl: q('ou_base').value, sandboxUrl: q('ou_sbx').value, enabled: q('ou_on').checked, caps: { email: q('ou_ce').value, sms: q('ou_cs').value, whatsapp: q('ou_cw').value }, hours: { from: q('ou_hf').value, to: q('ou_ht').value } });
     msg('Saved'); ouLoad();
   });
   window.ouSeed = guard(async () => { const r = await api('/seed', 'POST'); msg(`Added ${r.added} organisations (${r.total} total)`); ouLoad(); });
@@ -125,9 +164,10 @@
   window.ouImport = guard(async () => { const raw = q('ou_imp').value.trim(); const rows = raw.startsWith('[') ? JSON.parse(raw) : csv(raw); const r = await api('/contacts/import', 'POST', { rows }); q('ou_impmsg').textContent = `Added ${r.added}; rejected ${r.rejected.length}` + (r.rejected.length ? ': ' + r.rejected.slice(0, 5).map((x) => `row ${x.row} ${x.error}`).join('; ') : ''); ouContacts(); });
   window.ouContacts = guard(async () => {
     const r = await api('/contacts?pageSize=100&status=' + encodeURIComponent(q('ou_cs2').value) + '&q=' + encodeURIComponent(q('ou_cq').value));
-    q('ou_contacts').innerHTML = r.rows.length ? `<table><tr><th>Name</th><th>Org</th><th>Persona</th><th>Channels</th><th>Status</th><th></th></tr>${r.rows.map((c) => `<tr><td>${esc(c.name)}<div class="muted" style="font-size:12px">${esc(c.role || c.purpose || '')}</div></td><td>${esc(c.orgName)}</td><td>${c.persona}</td><td>${c.email ? '✉ ' + (c.kind === 'role' ? '<span class="muted">team</span> ' : '') : ''}${(c.phones || []).map((p) => (p.type === 'mobile' ? '📱' : '☎') + ' <span class="muted">' + p.type + '</span> ').join('')}${c.linkedin ? 'in ' : ''}${c.waOptIn ? 'WA✓' : ''}</td><td>${c.status}${c.seq ? ' · step ' + (c.seq.step + 1) : ''}</td><td><button onclick="ouPreview('${c.id}')">Preview</button> <button onclick="ouStatus('${c.id}','replied')">Replied</button> <button onclick="ouStatus('${c.id}','meeting')">Meeting</button> <button onclick="ouErase('${c.id}')">Erase</button></td></tr>`).join('')}</table>` : '<span class="muted">No contacts yet. Add business contacts you found on public pages, with the source.</span>';
+    q('ou_contacts').innerHTML = r.rows.length ? `<table><tr><th>Name</th><th>Org</th><th>Persona</th><th>Channels</th><th>Status</th><th></th></tr>${r.rows.map((c) => `<tr><td>${esc(c.name)}${c.verified ? ' <span title="verified by you" style="color:#1a7f4b">✓</span>' : ''}<div class="muted" style="font-size:12px">${esc(c.role || c.purpose || '')}</div></td><td>${esc(c.orgName)}</td><td>${c.persona}</td><td>${c.email ? '✉ ' + (c.kind === 'role' ? '<span class="muted">team</span> ' : '') : ''}${(c.phones || []).map((p) => (p.type === 'mobile' ? '📱' : '☎') + ' <span class="muted">' + p.type + '</span> ').join('')}${c.linkedin ? 'in ' : ''}${c.waOptIn ? 'WA✓' : ''}</td><td>${c.status}${c.seq ? ' · step ' + (c.seq.step + 1) : ''}</td><td><button onclick="ouPreview('${c.id}')">Preview</button> ${c.email ? `<button onclick="ouSendNow('${c.id}')">Send now</button> ` : ''}<button onclick="ouStatus('${c.id}','replied')">Replied</button> <button onclick="ouStatus('${c.id}','meeting')">Meeting</button> <button onclick="ouErase('${c.id}')">Erase</button></td></tr>`).join('')}</table>` : '<span class="muted">No contacts yet. Add business contacts you found on public pages, with the source.</span>';
   });
   window.ouPreview = guard(async (id) => { const p = await api(`/contacts/${id}/preview?sequence=${q('ou_es').value}&step=0`); q('ou_run').textContent = `Channel: ${p.channel}${p.translated ? ' (translated to ' + p.lang + ')' : ''}\n${p.subject ? 'Subject: ' + p.subject + '\n' : ''}\n${p.body}`; });
+  window.ouSendNow = guard(async (id) => { if (!confirm('Send the standard email to this contact now?')) return; const r = await api(`/contacts/${id}/send-now`, 'POST', {}); msg(r.sandbox ? 'Sandbox: not delivered' : 'Sent to ' + r.to); ouContacts(); });
   window.ouStatus = guard(async (id, s) => { await api(`/contacts/${id}/status`, 'POST', { status: s }); ouContacts(); });
   window.ouErase = guard(async (id) => { if (!confirm('Erase this person? Their address stays only as a hashed suppression entry.')) return; await api('/contacts/' + id, 'DELETE'); ouContacts(); });
   window.ouEnroll = guard(async () => { const r = await api('/enroll', 'POST', { orgType: q('ou_et').value || undefined, persona: q('ou_ep').value || undefined, list: q('ou_el').value || undefined, officeCc: (q('ou_eoff') || {}).value || undefined, campaign: q('ou_ecn').value || undefined, sequenceId: q('ou_es').value }); msg(`Enrolled ${r.enrolled}`); ouContacts(); });

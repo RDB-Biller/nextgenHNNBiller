@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "smoke": "node scripts/smoke.js",
+    "smoke:nabip": "node scripts/smoke-nabip.js",
     "smoke:verification": "node scripts/smoke-verification.js",
     "smoke:messaging-live": "node scripts/smoke-messaging-live.js",
     "smoke:insurecredit": "node scripts/smoke-insurecredit.js",

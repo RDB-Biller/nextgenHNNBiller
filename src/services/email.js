@@ -61,8 +61,8 @@ function configured() {
   return !!(['resend', 'sendgrid'].includes(c.provider) && c.apiKey && c.from);
 }
 
-async function viaResend(c, { to, subject, text }) {
-  const json = JSON.stringify({ from: c.from, to: [to], subject, text });
+async function viaResend(c, { to, subject, text, replyTo }) {
+  const json = JSON.stringify({ from: c.from, to: [to], subject, text, ...(replyTo ? { reply_to: replyTo } : {}) });
   const res = await _request('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${c.apiKey}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(json) },
@@ -74,9 +74,9 @@ async function viaResend(c, { to, subject, text }) {
   return { ok: false, error: parsed.message || `resend_http_${res.status}` };
 }
 
-async function viaSendgrid(c, { to, subject, text }) {
+async function viaSendgrid(c, { to, subject, text, replyTo }) {
   const json = JSON.stringify({
-    personalizations: [{ to: [{ email: to }] }], from: { email: c.from }, subject,
+    personalizations: [{ to: [{ email: to }] }], from: { email: addressOf(c.from) }, ...(replyTo ? { reply_to: { email: replyTo } } : {}), subject,
     content: [{ type: 'text/plain', value: text }],
   });
   const res = await _request('https://api.sendgrid.com/v3/mail/send', {
@@ -91,8 +91,19 @@ async function viaSendgrid(c, { to, subject, text }) {
   return { ok: false, error: parsed?.errors?.[0]?.message || `sendgrid_http_${res.status}` };
 }
 
-/** { to, subject, text } -> { ok, sandbox?, providerMessageId?, error? } -- never throws. */
-async function send({ to, subject, text } = {}) {
+/** The bare address in "Name <a@b.com>" or "a@b.com". */
+const addressOf = (v) => { const m = /<([^>]+)>/.exec(String(v || '')); return (m ? m[1] : String(v || '')).trim(); };
+const domainOf = (v) => addressOf(v).split('@')[1] ? addressOf(v).split('@')[1].toLowerCase() : '';
+/** A sender address may be chosen per message only on the domain the provider account is set up for (EMAIL_FROM), so it cannot be spoofed. */
+function senderFor(wanted) {
+  const c = env(); if (!wanted) return { from: c.from };
+  const a = addressOf(wanted); if (!EMAIL_RE.test(a)) return { error: 'invalid_sender_address' };
+  if (!c.from || domainOf(a) !== domainOf(c.from)) return { error: 'sender_domain_not_allowed', detail: `Set EMAIL_FROM to an address on ${domainOf(a)} (and verify that domain with your email provider) before sending from ${a}.` };
+  return { from: wanted };
+}
+
+/** { to, subject, text, from?, replyTo? } -> { ok, sandbox?, providerMessageId?, error? } -- never throws. */
+async function send({ to, subject, text, from, replyTo } = {}) {
   if (!isEmail(to)) return { ok: false, error: 'invalid_recipient_email' };
   if (!subject || !text) return { ok: false, error: 'empty_message' };
   if (await operatingMode.isMessagingSandbox()) {
@@ -105,11 +116,14 @@ async function send({ to, subject, text } = {}) {
     console.log(`[email:unconfigured] -> ${to}: ${subject}`);
     return { ok: false, sandbox: false, error: 'email_provider_not_configured' };
   }
-  const c = env();
+  const c = env(); const sf = senderFor(from);
+  if (sf.error) return { ok: false, sandbox: false, error: sf.error, detail: sf.detail };
+  c.from = sf.from;
+  const rt = replyTo && isEmail(replyTo) ? replyTo.trim() : '';
   try {
-    const r = c.provider === 'resend' ? await viaResend(c, { to: to.trim(), subject, text }) : await viaSendgrid(c, { to: to.trim(), subject, text });
+    const r = c.provider === 'resend' ? await viaResend(c, { to: to.trim(), subject, text, replyTo: rt }) : await viaSendgrid(c, { to: to.trim(), subject, text, replyTo: rt });
     return { ...r, sandbox: false, sentAt: new Date().toISOString() };
   } catch (e) { return { ok: false, sandbox: false, error: e.message || 'email_send_failed' }; }
 }
 
-module.exports = { send, configured, isEmail, _setRequestImplForTests };
+module.exports = { send, configured, isEmail, senderFor, addressOf, _setRequestImplForTests };
