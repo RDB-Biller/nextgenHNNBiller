@@ -67,16 +67,27 @@ const rej = (p) => p.then(() => null, (e) => e);
   srv.close();
 
   // ---- the public demo login and evaluator accounts
-  const app2 = express(); const data = express.Router(); data.use((req, res) => res.json({ ok: true, saved: true, clients: [{ name: 'City Clinic', apiKey: 'emr_live_key_999', contact: { phone: '0241234567', email: 'billing@cityclinic.org' }, hookUrl: 'https://x/erheat-hooks/abcd1234/decision', amount: 1200 }] }));
+  const app2 = express(); app2.use(express.json()); const data = express.Router(); data.use((req, res) => res.json({ ok: true, saved: true, clients: [{ name: 'City Clinic', apiKey: 'emr_live_key_999', contact: { phone: '0241234567', email: 'billing@cityclinic.org' }, hookUrl: 'https://x/erheat-hooks/abcd1234/decision', amount: 1200 }] }));
   for (const seg of ['clients', 'payers', 'products', 'revenue', 'operating-mode', 'partners', 'accounts', 'settlement-batches']) app2.use('/api/platform/' + seg, authPlatform, data);
   app2.use('/admin-api', adminRoutes.api); const srv2 = app2.listen(0); await new Promise((r) => setTimeout(r, 50)); const b2 = `http://127.0.0.1:${srv2.address().port}`;
-  let d = await (await fetch(`${b2}/admin-api/demo`)).json(); ok(d.enabled && d.handle && d.password && /Nothing you do is saved/.test(d.note), 'the sign-in page can offer the dummy credentials');
+  let d = await (await fetch(`${b2}/admin-api/demo`)).json(); ok(d.enabled && d.handle && d.password && /private practice copy/.test(d.note), 'the sign-in page can offer the dummy credentials');
   r = await fetch(`${b2}/admin-api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: d.handle, password: 'wrong-password-1' }) }); ok(r.status === 401, 'the demo login needs its published password');
   r = await fetch(`${b2}/admin-api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: d.handle, password: d.password }) }); const dl = await r.json(); ok(r.status === 200 && dl.account.sandboxed && dl.account.demo, 'anyone can sign in with them, no registration');
   const DH = { Authorization: `Bearer ${dl.token}`, 'content-type': 'application/json' };
   r = await fetch(`${b2}/api/platform/clients`, { headers: DH }); let body = JSON.stringify(await r.json());
   ok(r.status === 200 && /City Clinic/.test(body) && !/emr_live_key_999/.test(body) && !/0241234567/.test(body) && !/billing@cityclinic/.test(body) && !/abcd1234/.test(body) && /1200/.test(body), 'the demo sees real screens with keys, phones, emails and hook secrets hidden');
-  r = await fetch(`${b2}/api/platform/clients`, { method: 'POST', headers: DH, body: '{"name":"x"}' }); const wj = await r.json(); ok(r.status === 200 && wj.demo === true && wj.saved === false, 'changes get a friendly "not saved" answer and never reach the system');
+  // each visitor gets a private scratch copy: writes show for them alone and never reach the real store
+  const probe = express.Router();
+  probe.post('/', async (req, res) => { await store.settings.set('probe:x', { v: req.body.v }); res.json({ ok: true }); }); probe.get('/', async (_q, res) => res.json({ v: ((await store.settings.get('probe:x')) || {}).v || null, scratch: store.inScratch() }));
+  app2.use('/api/platform/targets', authPlatform, probe);
+  const dl2 = await (await fetch(`${b2}/admin-api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: d.handle, password: d.password }) })).json(); const DH2 = { Authorization: `Bearer ${dl2.token}`, 'content-type': 'application/json' };
+  await store.settings.set('probe:x', { v: 'REAL' });
+  r = await fetch(`${b2}/api/platform/targets`, { method: 'POST', headers: DH, body: '{"v":"visitor-one"}' }); ok(r.status === 200, 'a demo visitor can make a change');
+  let g1 = await (await fetch(`${b2}/api/platform/targets`, { headers: DH })).json(); let g2 = await (await fetch(`${b2}/api/platform/targets`, { headers: DH2 })).json();
+  ok(g1.v === 'visitor-one' && g1.scratch === true, 'they see their own change straight away');
+  ok(g2.v === 'REAL' || g2.v === null, 'a second visitor does not see it');
+  ok(((await store.settings.get('probe:x')) || {}).v === 'REAL', 'and the real data is untouched');
+  ok(store.scratchCount() >= 2, 'each visitor has a private copy');
   for (const seg of ['products', 'revenue', 'operating-mode', 'partners', 'accounts', 'settlement-batches']) { r = await fetch(`${b2}/api/platform/${seg}`, { headers: DH }); ok(r.status === 403, `the demo cannot open ${seg}`); }
   r = await fetch(`${b2}/api/platform/products`, { method: 'PUT', headers: DH, body: '{}' }); ok(r.status === 403, 'nor write to Product Lab');
   const ev = await admins.invite({ name: 'VIP Visitor', email: 'vip@bank.com', preset: 'evaluator' }); ok(ev.account.sandboxed && ev.account.areas.join() === admins.DEMO_AREAS.join(), 'a VIP can be given a named evaluator account, no queue');

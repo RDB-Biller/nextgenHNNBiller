@@ -1190,7 +1190,8 @@ Emergency micro-loans in six lines (Energy, Rent, Health, Education, Agriculture
 - **Public dummy credentials:** the sub-admin sign-in page (`/app/platform.html`) shows `demo@hnn-demo.example` / `HNN-demo-2026` with a "Try the demo" button, so a prospect can look around without registering. Master Control → Admins → "Public demo login" switches it on or off at once (`GET/PUT /api/platform/admins/demo`; public `GET /admin-api/demo`).
 - **What the demo can and cannot do** (`services/demoGuard.js`, enforced in `middleware/access.js` for every *sandboxed* account): it opens Clients, Payers, Messaging and Claims only (never Product Lab, finance and settlement, partners and loans, accounts, or the sandbox/live switch). Every change is answered with "Demo mode: nothing was saved" and never reaches the system. Keys, tokens, passwords and hook URLs are replaced with dots, and phone numbers and email addresses are masked in everything it is sent. Sessions last 3 hours.
 - **VIP and evaluator accounts:** invite someone with the **Evaluator** role (Admins tab): the same safe tour under their own name and password, set from the invite link, with no application or waiting. Any sub-admin can also be made sandboxed. To give someone real access instead, pick a normal role.
-- Tests: `node scripts/smoke-subadmins.js` (43 checks).
+- **Private scratch copy per visitor:** each demo or evaluator sign-in gets its own throw-away in-memory copy of the seeded configuration data (`store.scratchFor`, kept 2 hours after last use, at most 150 at once). While their request runs, every store call is answered by that copy (`AsyncLocalStorage`), so changes show for that visitor alone and never reach real data. Messages, money movement, AI calls and owner alerts are simulated inside a scratch copy. Secrets and contact details are still masked.
+- Tests: `node scripts/smoke-subadmins.js` (47 checks).
 
 ## Currencies (display only)
 

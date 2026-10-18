@@ -76,7 +76,8 @@ async function set(patch = {}, by = 'HNN') {
   return { ...next, seededFromEnv: false };
 }
 
-async function isSettlementSandbox() { return (await get()).settlement.sandbox; }
-async function isMessagingSandbox() { return (await get()).messaging.sandbox; }
+// A demo visitor's scratch copy never moves money or sends a real message.
+async function isSettlementSandbox() { return require('../store').inScratch() || (await get()).settlement.sandbox; }
+async function isMessagingSandbox() { return require('../store').inScratch() || (await get()).messaging.sandbox; }
 
 module.exports = { get, set, isSettlementSandbox, isMessagingSandbox, envDefaults, KEY };

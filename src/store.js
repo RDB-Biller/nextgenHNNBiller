@@ -765,6 +765,22 @@ function memRepo(M) {
   };
 }
 
+function newMaps() {
+  return {
+    tenants: new Map(), payers: new Map(), financiers: new Map(),
+    bills: new Map(), claims: new Map(), claimTokens: new Map(),
+    payments: new Map(), financings: new Map(),
+    reports: new Map(), reportTokens: new Map(),
+    verifications: new Map(), verifyTokens: new Map(), priorApprovals: new Map(), notifications: [],
+    ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
+    users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
+    observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
+    campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
+    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(), aiAdjudications: new Map(), savingsPlans: new Map(),
+    funders: new Map(), settlementBatches: new Map(),
+  };
+}
+
 // A trivial async mutex so tx() bodies don't interleave in the single-process
 // memory backend (Postgres uses real row locks instead).
 function makeMutex() {
@@ -806,19 +822,7 @@ if (usePg) {
     console.log('Store: PostgreSQL (persistent)');
   };
 } else {
-  const M = {
-    tenants: new Map(), payers: new Map(), financiers: new Map(),
-    bills: new Map(), claims: new Map(), claimTokens: new Map(),
-    payments: new Map(), financings: new Map(),
-    reports: new Map(), reportTokens: new Map(),
-    verifications: new Map(), verifyTokens: new Map(), priorApprovals: new Map(), notifications: [],
-    ledger: [], idem: new Map(), pricing: new Map(), claimit: new Map(),
-    users: new Map(), licenses: new Map(), emrPartners: new Map(), networks: new Map(), settings: new Map(),
-    observations: new Map(), products: new Map(), accruals: [], clinicalLinks: new Map(),
-    campaignGroups: new Map(), campaignContacts: new Map(), campaigns: new Map(),
-    campaignSends: new Map(), trialRegistrations: new Map(), smsLog: new Map(), smsInbox: new Map(), pharmacyQuotes: new Map(), credits: new Map(), aiAdjudications: new Map(), savingsPlans: new Map(),
-    funders: new Map(), settlementBatches: new Map(),
-  };
+  const M = newMaps();
   repo = memRepo(M);
   const mutex = makeMutex();
   tx = (fn) => mutex(() => fn(repo)); // same repo, serialized
@@ -831,7 +835,39 @@ async function seedInto(r) {
   for (const f of seed.financiers) if (!(await r.financiers.get(f.id))) await r.financiers.save(f);
 }
 
+// ----------------------------------------------------------------------------
+// Private scratch copies for demo visitors
+// ----------------------------------------------------------------------------
+// A demo or evaluator visitor works on their own throw-away in-memory copy (the seeded configuration data only).
+// While their request runs, every store call below is answered by that copy, so what they change is visible to them
+// alone and nothing reaches the real data. Scratch copies are dropped after SCRATCH_TTL_MS without use.
+const { AsyncLocalStorage } = require('async_hooks');
+const als = new AsyncLocalStorage();
+const SCRATCH_TTL_MS = 2 * 60 * 60 * 1000; const SCRATCH_MAX = 150;
+const scratches = new Map();
+async function scratchFor(id) {
+  const now = Date.now();
+  for (const [k, v] of scratches) if (now - v.last > SCRATCH_TTL_MS) scratches.delete(k);
+  let sc = scratches.get(id);
+  if (!sc) {
+    if (scratches.size >= SCRATCH_MAX) { const oldest = [...scratches.entries()].sort((x, y) => x[1].last - y[1].last)[0]; if (oldest) scratches.delete(oldest[0]); }
+    const r = memRepo(newMaps()); await seedInto(r); const mutex = makeMutex();
+    sc = { repo: r, tx: (fn) => mutex(() => fn(r)), last: now, id }; scratches.set(id, sc);
+  }
+  sc.last = now; return sc;
+}
+const inScratch = () => !!als.getStore();
+const runInScratch = (sc, fn) => als.run(sc, fn);
+const dispatch = Object.fromEntries(Object.keys(repo).map((k) => {
+  const v = repo[k];
+  if (v && typeof v === 'object') return [k, new Proxy({}, { get: (_t, m) => (...args) => ((als.getStore() || { repo }).repo[k])[m](...args) })];
+  if (typeof v === 'function') return [k, (...args) => ((als.getStore() || { repo }).repo[k])(...args)];
+  return [k, v];
+}));
+
 module.exports = {
-  ...repo, tx, init,
-  get pool() { return pool; },
+  ...dispatch, init,
+  tx: (fn) => { const sc = als.getStore(); return sc ? sc.tx(fn) : tx(fn); },
+  inScratch, runInScratch, scratchFor, scratchCount: () => scratches.size,
+  get pool() { return als.getStore() ? null : pool; },
 };

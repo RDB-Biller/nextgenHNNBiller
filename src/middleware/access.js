@@ -20,10 +20,12 @@ async function authPlatform(req, res, next) {
       if (!verdict.ok) return res.status(403).json({ error: 'not_allowed', message: verdict.why });
       req.principal = { kind: 'subadmin', id: a._id, role: 'sub_admin', areas: a.areas, readOnly: !!a.readOnly, sandboxed: !!a.sandboxed, name: a.name };
       if (a.sandboxed) {
-        // Demo and evaluator logins: look at everything allowed, save nothing, see no secrets or contact details.
+        // Demo and evaluator logins: every visitor works on a private scratch copy, so changes show for them alone and never reach real data. No secrets or contact details are shown.
         const guard = require('../services/demoGuard');
-        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && seg !== 'me') return res.json({ ok: true, demo: true, saved: false, message: guard.DEMO_NOTE });
         const send = res.json.bind(res); res.json = (body) => send(guard.clean(body));
+        if (seg === 'me') return next();
+        const sc = await store.scratchFor(`v:${a.vid || a._id}`);
+        return store.runInScratch(sc, () => next());
       }
       return next();
     }
