@@ -58,6 +58,9 @@ function errorHandler(err, req, res, _next) {
   if (err.detail && status < 500) payload.detail = err.detail;
   if (err.body) payload.upstream = err.body;
   if (status >= 500) console.error(err);
+  const np = require('../lib/nextPage');
+  if (np.wantsHtml(req)) return res.status(status).type('html').send(np.html(status >= 500 ? 'Something went wrong on our side' : 'That did not work', status >= 500 ? 'Please try again in a moment.' : err.message || 'The request could not be completed.'));
+  payload.next = np.NEXT; payload.help = np.support();
   res.status(status).json(payload);
 }
 

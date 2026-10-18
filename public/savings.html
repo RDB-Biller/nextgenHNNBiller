@@ -4,7 +4,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/app/app.css"/><link rel="stylesheet" href="/app/credit.css"/>
-<style>.sv-bar{height:12px;border-radius:9px;background:#dfe6e1;overflow:hidden}.sv-bar>span{display:block;height:100%;background:var(--ac)}.sv-ms{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.sv-ms.paid{color:var(--brand)}.sv-ms.overdue{color:var(--bad)}</style></head><body>
+<style>.sv-bar{height:12px;border-radius:9px;background:#dfe6e1;overflow:hidden}.sv-bar>span{display:block;height:100%;background:var(--ac)}.sv-ms{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.sv-ms.paid{color:var(--brand)}.sv-ms.overdue{color:var(--bad)}</style><script src="/app/nextstep.js"></script></head><body>
 <div class="wrap ic" id="sv" style="max-width:600px"><p class="muted">Loading…</p></div>
 <div class="toast" id="toast"></div>
 <script>
@@ -15,8 +15,8 @@
   const Q=new URLSearchParams(location.search); const root=document.getElementById('sv');
   async function api(path,body){const r=await fetch('/savings/api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.message||j.error||'Something went wrong');e.code=j.error&&j.error!=='error'?j.error:j.message;throw e;}return j;}
   function lookupForm(msg){root.innerHTML=`<div class="ic-card"><div class="ic-brand">Savings plan</div><p class="muted" style="font-size:14px">${esc(msg||'Open your plan with the plan number from your text message.')}</p>
-    <div class="field"><label>Plan number (8 digits)</label><input id="lk_no" inputmode="numeric"/></div><div class="field"><label>Phone number the text was sent to</label><input id="lk_ph" type="tel"/></div><button class="ic-btn" id="lk_go" type="button">Open my plan</button></div>`;
-    root.querySelector('#lk_go').addEventListener('click',async()=>{try{const r=await api('lookup',{planNo:root.querySelector('#lk_no').value,phone:root.querySelector('#lk_ph').value});location.href='/savings/?t='+encodeURIComponent(r.token);}catch(e){toast(e.code==='plan_not_found'?'Those details do not match a plan':e.message);}});}
+    <div class="field"><label>Plan number (8 digits)</label><input id="lk_no" inputmode="numeric"/></div><div class="field"><label>Phone number the text was sent to</label><input id="lk_ph" type="tel"/></div><button class="ic-btn" id="lk_go" type="button">Open my plan</button><div id="lk_next"></div></div>`;
+    root.querySelector('#lk_go').addEventListener('click',async()=>{try{const r=await api('lookup',{planNo:root.querySelector('#lk_no').value,phone:root.querySelector('#lk_ph').value});location.href='/savings/?t='+encodeURIComponent(r.token);}catch(e){const m=e.code==='plan_not_found'?'Those details do not match a plan':e.message;toast(m);if(window.NextStep)NextStep.mount(root.querySelector('#lk_next'),m+'. Check the plan number and phone number, or start a plan.','missing');}});}
   function paint(v){
     const p=v.progress; const today=new Date().toISOString().slice(0,10);
     const ms=(v.schedule||[]).map(m=>`<div class="sv-ms ${m.status==='paid'?'paid':(m.dueDate<today?'overdue':'')}"><span>${m.status==='paid'?'✓ ':''}${esc(m.label)} · ${esc(m.dueDate)}</span><b>GHS ${num(m.amount)}</b></div>`).join('');
@@ -36,7 +36,7 @@
       <p class="ic-note">${esc(v.disclaimer||'')} ${esc(v.programme)} records what you save; the money is held by ${esc(v.partner)} or paid at the hospital, never by HNN Biller.</p>`;
     root.querySelector('#q_go').addEventListener('click',async()=>{const answers={};root.querySelectorAll('[data-q]').forEach(e=>{if(e.value!=='')answers[e.dataset.q]=e.value;});try{paint(await api(encodeURIComponent(Q.get('t'))+'/answers',{answers}));toast('Plan updated');}catch(e){toast(e.message);}});
   }
-  (async()=>{try{if(!Q.get('t'))return lookupForm();paint(await api(encodeURIComponent(Q.get('t'))));}catch(e){if(e.code==='plan_not_found')return lookupForm('This link did not work. Open your plan with the plan number instead.');root.innerHTML=`<div class="ic-card"><p style="color:var(--bad)">${esc(e.message)}</p></div>`;}})();
+  (async()=>{try{if(!Q.get('t'))return lookupForm();paint(await api(encodeURIComponent(Q.get('t'))));}catch(e){if(e.code==='plan_not_found')return lookupForm('This link did not work. Open your plan with the plan number instead.');root.innerHTML='<div class="ic-card" id="sv_err"></div>';if(window.NextStep)NextStep.mount(document.getElementById('sv_err'),e.message,'server');else document.getElementById('sv_err').textContent=e.message;}})();
 })();
 </script><script src="/app/i18n.js" data-audience="patient" data-auto="true"></script>
 <script src="/o/widget.js" defer></script>

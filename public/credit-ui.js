@@ -177,7 +177,7 @@
     } catch (e) {
       const m = { offer_not_found: 'This link was not found.', note_not_found: 'This note was not found.', note_withdrawn: 'The sender has withdrawn this note.', note_expired: 'This note has expired.' }[e.code] || e.message;
       if (e.code === 'offer_not_found') return lookupForm('This link did not work (it may have been cut short in the text message). Open your offer with your application number instead.');
-      root.innerHTML = `<div class="ic-card"><b>InsureCredit</b><p style="color:var(--bad)">${esc(m)}</p></div>`;
+      root.innerHTML = '<div class="ic-card"><b>InsureCredit</b><div id="ic_err"></div></div>'; if (window.NextStep) NextStep.mount(document.getElementById('ic_err'), m, 'missing'); else document.getElementById('ic_err').textContent = m;
     }
   }
   window.IC = { boot, demoView };

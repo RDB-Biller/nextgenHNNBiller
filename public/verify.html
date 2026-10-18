@@ -3,7 +3,7 @@
 <title>Bill Verification</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="app.css"/></head><body>
+<link rel="stylesheet" href="app.css"/><script src="/app/nextstep.js"></script></head><body>
 <div class="wrap" style="max-width:560px">
   <div class="top"><div class="brandmark">Verify<span class="dot">.</span></div><span class="muted" id="provname"></span></div>
   <div class="card" id="root"><p class="muted">Loading your bill…</p></div>
@@ -18,9 +18,9 @@ const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':
 const num=(n)=>Number(n||0).toFixed(2);
 
 async function load(){
-  if(!token) return root.innerHTML='<p style="color:var(--bad)">Missing verification link.</p>';
+  if(!token) return NextStep.mount(root,'This page needs the link from your message. Missing verification link.','missing');
   const r=await fetch(`/verify/api/${encodeURIComponent(token)}`);
-  if(!r.ok) return root.innerHTML='<p style="color:var(--bad)">Verification link not found or expired.</p>';
+  if(!r.ok) return NextStep.mount(root,'Verification link not found or expired.','missing');
   render(await r.json());
 }
 function render(v){
