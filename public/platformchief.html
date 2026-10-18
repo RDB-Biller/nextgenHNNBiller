@@ -198,7 +198,7 @@
     <div class="card" style="margin-bottom:14px"><h2>Sent campaigns</h2><div id="cp_list"></div></div>
 
     <div class="card"><h2>Trial registrations</h2>
-      <p class="muted" style="margin-top:0;font-size:13px">Sign-ups from <span class="key">/register/</span> — whether from a campaign's "YES" reply or a direct visit. Approving here texts (and, if given, emails) the applicant but doesn't create a client by itself; do that from the <b>Clients</b> tab once you're ready.</p>
+      <p class="muted" style="margin-top:0;font-size:13px">Sign-ups from <span class="key">/register/</span> — whether from a campaign's "YES" reply or a direct visit. Approving here gives the applicant their own evaluation login: they get a text (and an email, if given) with a link to choose their password. It does not create a billing client; do that from the <b>Clients</b> tab once you're ready.</p>
       <div id="tr_list"></div>
     </div>
   </div>
@@ -1496,7 +1496,7 @@ async function loadTrialRegistrations(){
       <td><select onchange="setRegStatus('${x.id}',this.value)">
         ${['new','contacted','approved','declined'].map(s=>`<option value="${s}" ${x.status===s?'selected':''}>${s}</option>`).join('')}
       </select></td>
-      <td style="font-size:12px">${x.status==='approved'?(x.notified?`SMS ${x.notified.sms.ok?(x.notified.sms.sandbox?'(test mode, not delivered)':'sent ✓'):'failed: '+esc(x.notified.sms.error)}${x.notified.email?`<br>Email ${x.notified.email.ok?(x.notified.email.sandbox?'(test mode)':'sent ✓'):'not sent: '+esc(x.notified.email.error)}`:''}<br>`:'')+`<button class="link" type="button" onclick="renotifyReg('${x.id}')">Send approval message again</button>`:'—'}</td>
+      <td style="font-size:12px">${x.status==='approved'?(x.notified?`SMS ${x.notified.sms.ok?(x.notified.sms.sandbox?'(test mode, not delivered)':'sent ✓'):'failed: '+esc(x.notified.sms.error)}${x.notified.email?`<br>Email ${x.notified.email.ok?(x.notified.email.sandbox?'(test mode)':'sent ✓'):'not sent: '+esc(x.notified.email.error)}`:''}<br>${x.notified.account&&!x.notified.account.ok?'Login not created: '+esc(x.notified.account.error)+'<br>':''}`:'')+`<button class="link" type="button" onclick="renotifyReg('${x.id}')">Send again</button>`:'—'}</td>
     </tr>`).join('')+`</tbody></table>`:'<p class="muted">No registrations yet.</p>';
 }
 async function setRegStatus(id,status){

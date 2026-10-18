@@ -55,18 +55,40 @@ async function submit(body = {}) {
 async function list() { return store.trialRegistrations.all(); }
 async function get(id) { return store.trialRegistrations.get(id); }
 
-/** Tell an approved applicant. SMS always (when there is a phone), email too when they gave one. Never contains credentials. */
+/**
+ * Approving gives the applicant their own login: an evaluator account (a private practice copy of Master Control, nothing real is touched).
+ * They get a link by text (and email if they gave one) to choose their own password, then sign in with their phone or email.
+ * Sending again after they have set a password only reminds them where to sign in; it never resets the password.
+ */
 async function notifyApproved(reg) {
+  const subAdmins = require('./subAdmins');
   const base = String(config.publicBaseUrl || '').replace(/\/$/, '');
   const first = String(reg.contactName || '').split(' ')[0] || 'there';
-  const sms = await messaging.send({ channel: 'sms', to: reg.phone, body: `Hello ${first}, your HNN Biller trial request for ${reg.orgName} is approved. Our team will contact you to finish set-up. Look around meanwhile: ${base}/app/platform.html`, tenant: null });
-  let mail = null;
+  const out = { at: new Date().toISOString(), account: null, sms: null, email: null };
+  let link = null; let existing = null;
+  try {
+    if (reg.adminId) existing = (await subAdmins.list()).find((x) => x.id === reg.adminId) || null;
+    if (existing && existing.status === 'active') out.account = { ok: true, state: 'already_active' };
+    else if (existing) { const r = await subAdmins.reinvite(reg.adminId, false); link = r.inviteLink; out.account = { ok: true, state: 'invite_renewed' }; }
+    else {
+      const r = await subAdmins.invite({ name: reg.contactName, phone: reg.phone, email: reg.email || undefined, preset: 'evaluator' }, 'trial');
+      reg.adminId = r.account.id; link = r.inviteLink; out.account = { ok: true, state: 'created' };
+    }
+  } catch (e) { out.account = { ok: false, error: e.message }; }
+  const signIn = `${base}/app/platform.html`;
+  const smsBody = link
+    ? `Hello ${first}, your HNN Biller trial for ${reg.orgName} is approved. Open ${link} to choose your password, then sign in with this phone number${reg.email ? ' or your email' : ''}. The link works for 7 days.`
+    : out.account && out.account.ok
+      ? `Hello ${first}, your HNN Biller trial for ${reg.orgName} is approved. Sign in at ${signIn} with this phone number${reg.email ? ' or your email' : ''} and the password you chose.`
+      : `Hello ${first}, your HNN Biller trial request for ${reg.orgName} is approved. Our team will contact you to finish set-up. Look around meanwhile: ${signIn}`;
+  const sms = await messaging.send({ channel: 'sms', to: reg.phone, body: smsBody, tenant: null });
+  out.sms = { ok: !!sms.ok, sandbox: !!sms.sandbox, error: sms.ok ? null : (sms.error || 'send_failed') };
   if (reg.email) {
-    mail = await email.send({ to: reg.email, subject: `Your HNN Biller trial for ${reg.orgName} is approved`, text: `Hello ${first},\n\nYour HNN Biller trial request for ${reg.orgName} is approved. Our team will contact you to finish set-up.\n\nWhile you wait, look around the demo: ${base}/app/platform.html\n\nHNN Biller` });
+    const mail = await email.send({ to: reg.email, subject: `Your HNN Biller trial for ${reg.orgName} is approved`, text: `${smsBody}\n\nHNN Biller` });
+    out.email = { ok: !!mail.ok, sandbox: !!mail.sandbox, error: mail.ok ? null : (mail.error || 'send_failed') };
   }
-  const result = { at: new Date().toISOString(), sms: { ok: !!sms.ok, sandbox: !!sms.sandbox, error: sms.ok ? null : (sms.error || 'send_failed') }, email: mail ? { ok: !!mail.ok, sandbox: !!mail.sandbox, error: mail.ok ? null : (mail.error || 'send_failed') } : null };
   if (!sms.ok) console.error(`[trial] approval SMS to ${reg.orgName} failed: ${sms.error}`);
-  return result;
+  return out;
 }
 
 async function setStatus(id, status, by) {
