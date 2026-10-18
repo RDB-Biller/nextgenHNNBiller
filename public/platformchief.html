@@ -713,7 +713,7 @@ function tab(n,el){document.querySelectorAll('.panel').forEach(p=>p.classList.re
   $('p-'+n).classList.add('on'); el.classList.add('on');}
 
 async function boot(){
-  if(window.ADMIN_MODE==='sub')return false; if(!window.SUB_TOKEN&&!$('pkey').value.trim())return false;
+  if(window.ADMIN_MODE==='sub'&&!window.SUB_TOKEN)return false; if(!window.SUB_TOKEN&&!$('pkey').value.trim())return false;
   const ov=await (await fetch('/api/platform/overview',{headers:H()})).json().catch(()=>null);
   if(!ov||ov.error){toast(window.SUB_TOKEN?'Please sign in again':'Invalid platform key');return false;}
   try{if(!window.SUB_TOKEN)sessionStorage.setItem('hnn.key',$('pkey').value.trim())}catch(e){}
@@ -1725,6 +1725,7 @@ window.addEventListener('load',()=>boot());
 <script src="erheat-ui.js"></script>
 <script src="accounts-ui.js"></script>
 <script src="admins-ui.js"></script>
+<script src="currencies-ui.js"></script>
 <script src="admin-gate.js"></script>
 <script src="/app/i18n.js" data-audience="staff" data-auto="true"></script>
 </body></html>

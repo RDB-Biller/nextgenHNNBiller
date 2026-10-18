@@ -18,7 +18,13 @@ async function authPlatform(req, res, next) {
       const seg = (/^\/api\/platform\/?([^/]*)/.exec(full) || [])[1] || '';
       const verdict = subAdmins.allows(a, seg, req.method);
       if (!verdict.ok) return res.status(403).json({ error: 'not_allowed', message: verdict.why });
-      req.principal = { kind: 'subadmin', id: a._id, role: 'sub_admin', areas: a.areas, readOnly: !!a.readOnly, name: a.name };
+      req.principal = { kind: 'subadmin', id: a._id, role: 'sub_admin', areas: a.areas, readOnly: !!a.readOnly, sandboxed: !!a.sandboxed, name: a.name };
+      if (a.sandboxed) {
+        // Demo and evaluator logins: look at everything allowed, save nothing, see no secrets or contact details.
+        const guard = require('../services/demoGuard');
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && seg !== 'me') return res.json({ ok: true, demo: true, saved: false, message: guard.DEMO_NOTE });
+        const send = res.json.bind(res); res.json = (body) => send(guard.clean(body));
+      }
       return next();
     }
     const key = req.header('x-platform-key') || req.header('x-console-key');
