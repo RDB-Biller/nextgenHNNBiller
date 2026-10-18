@@ -29,7 +29,7 @@ const AREAS = {
   messaging: { label: 'Messaging, campaigns, outreach and languages', paths: ['messaging', 'sms', 'campaigns', 'outreach', 'i18n'] },
   product_lab: { label: 'Product Lab and solutions', paths: ['products', 'solutions'] },
   claims: { label: 'Claims, pricing, reconciliation and savings', paths: ['submissions', 'claims-automation', 'claim-expiry', 'ai-adjudication', 'pharmacy-quotes', 'pharmacy-pricing', 'reconciliation', 'savings'] },
-  finance: { label: 'Revenue, settlement and licences', paths: ['revenue', 'settlement-batches', 'licenses', 'licensing'] },
+  finance: { label: 'Revenue, settlement and licences', paths: ['revenue', 'settlement-batches', 'licenses', 'licensing', 'currencies'] },
   operating_mode: { label: 'Switch sandbox and live', paths: ['operating-mode'] },
   partners: { label: 'ER HEAT partners, loans and sign-up rules', paths: ['partners', 'erheat', 'patient-auth'] },
   accounts: { label: 'Account directory (deactivate, approve sign-ups)', paths: ['accounts'] },

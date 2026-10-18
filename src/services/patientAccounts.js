@@ -145,6 +145,9 @@ async function updateProfile(a, body = {}) {
     if (!i18n.isKnown(body.language)) throw err(422, 'Unknown language');
     a.language = i18n.normalise(body.language);
   }
+  if (body.currency !== undefined) {
+    const cu = require('./currencies'); if (!cu.isKnown(body.currency)) throw err(422, 'Unknown currency'); a.currency = cu.norm(body.currency);
+  }
   for (const f of PROFILE_FIELDS) if (body[f] !== undefined && !(f === 'email' && a.emailLogin)) a[f] = typeof body[f] === 'string' ? body[f].trim().slice(0, 200) : body[f];
   if (!a.first_name || !a.last_name) throw err(422, 'First and last name are required');
   a.updatedAt = iso();
