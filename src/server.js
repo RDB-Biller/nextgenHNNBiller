@@ -38,6 +38,7 @@ const partnerRoutes = require('./routes/partners');
 const patientAuthAdmin = require('./routes/patientAuthAdmin');
 const erheat = require('./services/erheat');
 const accountControlAdmin = require('./routes/accountControlAdmin');
+const subAdminRoutes = require('./routes/subAdmins');
 const savingsRoutes = require('./routes/savings');
 const savingsHooks = require('./routes/savingsHooks');
 const patientApi = require('./routes/patientApi');
@@ -113,6 +114,17 @@ app.use('/report', express.static(PUBLIC, { index: 'report.html' }));
 // family as /verify and /clinical above.
 app.use('/register/api', registerPortalRoutes);
 app.use('/register', express.static(PUBLIC, { index: 'register.html' }));
+// Master Control has two doors. /app/platformchief.html is the chief administrator's (platform key; keep this address to yourself).
+// /app/platform.html is for sub-admins: they sign in with their own password and see only the areas they were given.
+const adminPage = (mode) => (req, res, next) => {
+  try {
+    const html = require('fs').readFileSync(require('path').join(PUBLIC, 'platformchief.html'), 'utf8')
+      .replace('<head>', `<head><script>window.ADMIN_MODE=${JSON.stringify(mode)};${mode === 'sub' ? "try{window.SUB_TOKEN=sessionStorage.getItem('hnn.sub')||''}catch(e){}" : ''}</script>`);
+    res.set('Content-Type', 'text/html; charset=utf-8'); res.set('Cache-Control', 'no-store'); res.send(html);
+  } catch (e) { next(e); }
+};
+app.get('/app/platform.html', adminPage('sub'));
+app.get('/app/platformchief.html', adminPage('chief'));
 app.use('/app', express.static(PUBLIC));
 
 // Payer API (insurer RX / employer HR systems) — payer key
@@ -124,6 +136,8 @@ app.use('/sms-hooks', smsHooksRoutes);
 app.use('/api/platform/i18n', authPlatform, platformI18n);
 app.use('/api/platform/outreach', authPlatform, outreachRoutes.admin);
 app.use('/api/platform/erheat', authPlatform, erheatRoutes.admin);
+app.use('/admin-api', subAdminRoutes.api);
+app.use('/api/platform/admins', authPlatform, subAdminRoutes.admin);
 app.use('/api/platform/accounts', authPlatform, accountControlAdmin);
 app.use('/api/platform/partners', authPlatform, partnerRoutes.admin);
 app.use('/api/platform/patient-auth', authPlatform, patientAuthAdmin);
@@ -164,7 +178,7 @@ if (require.main === module) {
     console.log(`  Clinic dashboard: http://localhost:${config.port}/app/dashboard.html`);
     console.log(`  Payer inbox     : http://localhost:${config.port}/app/payers.html`);
     console.log(`  IT-lead console : http://localhost:${config.port}/app/admin.html`);
-    console.log(`  Master control  : http://localhost:${config.port}/app/platform.html`);
+    console.log(`  Master control  : http://localhost:${config.port}/app/platformchief.html (sub-admins: /app/platform.html)`);
     console.log(`  Clinical check-in: http://localhost:${config.port}/clinical/`);
 
     // Background sweeps: claim expiry/revert-to-RX and consolidated settlement

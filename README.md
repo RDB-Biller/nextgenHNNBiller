@@ -474,7 +474,7 @@ flag flip — no redeploy, no data migration, **nothing deleted on downgrade**.
 | `non_commercial` | Billing, payer routing, patient payments, dashboard, notifications, medical reports |
 | `commercial` | Above **plus** revenue rules & other charges, financing, ClaimIt, payer tabs, ledger |
 
-- **Master control board** — `/app/platform.html`, auth `x-platform-key` (env `PLATFORM_ADMIN_KEY`).
+- **Master control board** — the chief administrator's page is `/app/platformchief.html`, auth `x-platform-key` (env `PLATFORM_ADMIN_KEY`; set a long random value, the built-in demo key only applies while it is unset). `/app/platform.html` is the sub-admin sign-in (see "Sub-admins" below).
   Manage clients, payers, EMR/EHR partners, IT leads, and licences.
 - **IT leads** get personal **org-scoped** console keys (`x-console-key`); they can only
   configure their own organisation (`403 out_of_scope` otherwise). Keys are rotatable and suspendable.
@@ -1179,3 +1179,9 @@ Emergency micro-loans in six lines (Energy, Rent, Health, Education, Agriculture
 - **Master Control → Accounts:** every account of every kind (patients, partners, hospitals and clinics, insurers, EMR/EHR providers, console staff) with search and state filters. *Deactivate* stops sign-in and API access immediately (`acctctl:<kind>:<id>` control record; the accounts themselves are untouched). *Clearances* (`productLab`, `goLive`) are enforced for console staff (platform_admin users): without `productLab` they get 403 on `/api/platform/products` and `/solutions`; without `goLive` they cannot change `/api/platform/operating-mode`. Staff have both by default; the env `PLATFORM_ADMIN_KEY` is never restricted. For facilities, insurers and EMR providers the clearances are recorded and ready to enforce.
 - API: `GET /api/platform/accounts?kind=&q=&status=`, `PATCH /api/platform/accounts/:kind/:id { disabled, reason, grants }`, `POST /api/platform/partners/:id/approve|reject`.
 - Test: `node scripts/smoke-accounts.js`.
+
+### Sub-admins (Master Control for other people)
+- The chief administrator (platform key) opens **Admins** on `/app/platformchief.html`, enters a name and an email and/or mobile, picks a role (Partner manager, Support, Messaging manager, Finance officer, Claims officer, Product lead, or Custom areas) and optionally *read-only*. The page returns a one-time invite link (7 days; optional SMS).
+- The person opens `/app/platform.html#invite=...`, **chooses their own password** (10+ characters) and signs in with their email or mobile. No shared key, no default password; the demo key is not a password. Sessions are signed 12-hour tokens (`Authorization: Bearer`, optional `ADMIN_TOKEN_SECRET`); suspending, removing, re-inviting or deactivating (Accounts tab) ends them at once.
+- Areas are enforced on the server in `middleware/access.js` by the first path segment under `/api/platform` (see `AREAS` in `services/subAdmins.js`). Anything not listed (admin management, user creation, unknown routes) is chief-only. Sub-admins in the accounts area cannot change clearances or touch staff and admin accounts. Their page shows only the tabs they were given.
+- API: chief `GET/POST /api/platform/admins`, `PATCH/DELETE /api/platform/admins/:id`, `POST /api/platform/admins/:id/invite`; public `POST /admin-api/login`, `/admin-api/accept-invite`, `GET /admin-api/me`, `POST /admin-api/password`. Test: `node scripts/smoke-subadmins.js`.

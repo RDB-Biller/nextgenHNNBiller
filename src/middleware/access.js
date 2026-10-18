@@ -9,6 +9,18 @@ const editions = require('../services/editions');
  */
 async function authPlatform(req, res, next) {
   try {
+    // A sub-admin signs in with their own password (see services/subAdmins.js) and may open only the areas they were given.
+    const bearer = req.header('authorization');
+    if (bearer && /^Bearer\s+/i.test(bearer) && !req.header('x-platform-key') && !req.header('x-console-key')) {
+      const subAdmins = require('../services/subAdmins');
+      let a; try { a = await subAdmins.authenticate(bearer); } catch (e) { return res.status(e.status || 401).json({ error: e.message }); }
+      const full = String(req.originalUrl || (req.baseUrl || '') + req.path).split('?')[0];
+      const seg = (/^\/api\/platform\/?([^/]*)/.exec(full) || [])[1] || '';
+      const verdict = subAdmins.allows(a, seg, req.method);
+      if (!verdict.ok) return res.status(403).json({ error: 'not_allowed', message: verdict.why });
+      req.principal = { kind: 'subadmin', id: a._id, role: 'sub_admin', areas: a.areas, readOnly: !!a.readOnly, name: a.name };
+      return next();
+    }
     const key = req.header('x-platform-key') || req.header('x-console-key');
     if (!key) return res.status(401).json({ error: 'missing_platform_key' });
     if (key === (process.env.PLATFORM_ADMIN_KEY || 'platform_demo_key_123')) {

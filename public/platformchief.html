@@ -24,7 +24,9 @@
     <nav class="nav"><a href="apis.html" target="_blank" rel="noopener">APIs</a><a href="revenue.html" target="_blank" rel="noopener">Revenue</a><a href="submissions.html" target="_blank" rel="noopener">Submissions</a><a href="admin.html" target="_blank" rel="noopener">IT-lead console</a><a href="biller.html" target="_blank" rel="noopener">Billing</a></nav>
   </div>
 
-  <div class="field" style="max-width:340px"><label>Platform key</label><input id="pkey" value="platform_demo_key_123" onchange="boot()"/></div>
+  <div class="field" style="max-width:340px" id="keybox"><label>Platform key</label><input id="pkey" type="password" autocomplete="off" placeholder="Enter your platform key" onchange="boot()"/></div>
+  <script>try{document.getElementById("pkey").value=sessionStorage.getItem("hnn.key")||""}catch(e){}</script>
+  <div id="gate"></div>
   <div class="grid cols-3" id="kpis" style="margin:14px 0 4px"></div>
 
   <div class="tabs">
@@ -698,7 +700,8 @@
 
 <script>
 const $=(id)=>document.getElementById(id);
-const H=()=>({'Content-Type':'application/json','x-platform-key':$('pkey').value.trim()});
+window.SUB_TOKEN=window.SUB_TOKEN||'';
+const H=()=>({'Content-Type':'application/json',...(window.SUB_TOKEN?{Authorization:'Bearer '+window.SUB_TOKEN}:{'x-platform-key':$('pkey').value.trim()})});
 const esc=(x)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n2=(n)=>Number(n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});
 const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);};
@@ -710,14 +713,16 @@ function tab(n,el){document.querySelectorAll('.panel').forEach(p=>p.classList.re
   $('p-'+n).classList.add('on'); el.classList.add('on');}
 
 async function boot(){
+  if(window.ADMIN_MODE==='sub')return false; if(!window.SUB_TOKEN&&!$('pkey').value.trim())return false;
   const ov=await (await fetch('/api/platform/overview',{headers:H()})).json().catch(()=>null);
-  if(!ov||ov.error){toast('Invalid platform key');return;}
+  if(!ov||ov.error){toast(window.SUB_TOKEN?'Please sign in again':'Invalid platform key');return false;}
+  try{if(!window.SUB_TOKEN)sessionStorage.setItem('hnn.key',$('pkey').value.trim())}catch(e){}
   $('kpis').innerHTML=[['Clients',`${ov.clients} (${ov.commercial} comm / ${ov.nonCommercial} non)`],
     ['Payers',`${ov.insurers} insurers · ${ov.corporatePayers} corporate`],
     ['IT leads & partners',`${ov.itLeads} leads · ${ov.emrPartners} EMR`]]
     .map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="bignum" style="font-size:22px">${k[1]}</div></div>`).join('');
   await loadProviderMeta();
-  await Promise.all([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics(),loadTestAccount(),loadOperatingMode()]);
+  await Promise.allSettled([loadClients(),loadUsers(),loadPayers(),loadEmr(),loadLics(),loadTestAccount(),loadOperatingMode()]);
   orgOptions();
 }
 
@@ -1500,7 +1505,7 @@ async function setRegStatus(id,status){
 }
 
 const _origBoot=boot;
-boot=async function(){await _origBoot();loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();aiaLoad();svLoad();
+boot=async function(){if((await _origBoot())===false)return false;loadPolicy();loadLicState();pdLoadMetrics();loadProducts();icLoad();aiaLoad();svLoad();
   loadCampaignGroups();loadCampaignsList();loadTrialRegistrations();updateCharCount();if(window.smsBoot)smsBoot();};
 
 // ===== Gaps from the call: auto-adjudication, claim expiry, settlement =====
@@ -1711,13 +1716,15 @@ async function downloadReconciliationCsv(){
 }
 
 const _origBoot2=boot;
-boot=async function(){await _origBoot2();loadAutomationPolicy();loadExpiryPolicy();loadBatchQueue();loadFunders();};
-boot();
+boot=async function(){if((await _origBoot2())===false)return false;loadAutomationPolicy();loadExpiryPolicy();loadBatchQueue();loadFunders();};
+window.addEventListener('load',()=>boot());
 </script>
 <script src="platform-extra.js"></script>
 <script src="outreach-ui.js"></script>
 <script src="community-ui.js"></script>
 <script src="erheat-ui.js"></script>
 <script src="accounts-ui.js"></script>
+<script src="admins-ui.js"></script>
+<script src="admin-gate.js"></script>
 <script src="/app/i18n.js" data-audience="staff" data-auto="true"></script>
 </body></html>

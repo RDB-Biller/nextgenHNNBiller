@@ -9,5 +9,9 @@ const wrap = (fn) => async (req, res) => { try { await fn(req, res); } catch (e)
 // Every account of every kind, with its state and clearances.   GET ?kind=&q=&status=&limit=
 r.get('/', wrap(async (req, res) => res.json(await ctl.directory(req.query || {}))));
 // Switch an account off or on, or change its clearances.  PATCH { disabled?, reason?, grants?: { productLab?, goLive? }, note? }
-r.patch('/:kind/:id', wrap(async (req, res) => res.json({ control: await ctl.update(req.params.kind, req.params.id, req.body || {}, (req.principal && req.principal.id) || 'master') })));
+r.patch('/:kind/:id', wrap(async (req, res) => {
+  const p = req.principal || {};
+  if (p.kind === 'subadmin' && ((req.body || {}).grants || ['staff', 'subadmin'].includes(req.params.kind))) return res.status(403).json({ error: 'Only the chief administrator can change clearances or manage staff and admin accounts.' });
+  res.json({ control: await ctl.update(req.params.kind, req.params.id, req.body || {}, (req.principal && req.principal.id) || 'master') });
+}));
 module.exports = r;

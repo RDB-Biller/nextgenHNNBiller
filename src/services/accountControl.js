@@ -21,6 +21,7 @@ const KINDS = {
   insurer: { label: 'Insurers and payers', grants: ['productLab', 'goLive'] },
   emr_provider: { label: 'EMR/EHR providers', grants: ['productLab', 'goLive'] },
   staff: { label: 'Console users and staff', grants: ['productLab', 'goLive'] },
+  subadmin: { label: 'Sub-admins (Master Control)', grants: [] },
 };
 const GRANTS = { productLab: 'Use Product Lab', goLive: 'Switch from sandbox to live' };
 const keyOf = (kind, id) => `acctctl:${kind}:${id}`;
@@ -50,6 +51,7 @@ async function all(kind) {
   if (!kind || kind === 'facility') for (const t of await store.tenants.all()) out.push({ kind: 'facility', id: t.id, name: t.name, org: '', phone: (t.contact || {}).phone || '', email: (t.contact || {}).email || '', status: 'active', edition: t.edition || '', createdAt: t.createdAt || '' });
   if (!kind || kind === 'insurer') for (const p of await store.payers.all()) out.push({ kind: 'insurer', id: p.id, name: p.name, org: p.kind || '', phone: (p.contact || {}).phone || '', email: (p.contact || {}).email || '', status: 'active', createdAt: p.createdAt || '' });
   if (!kind || kind === 'emr_provider') for (const p of await store.emrPartners.all()) out.push({ kind: 'emr_provider', id: p.id, name: p.name || p.id, org: '', phone: '', email: (p.contact || {}).email || p.email || '', status: 'active', createdAt: p.createdAt || '' });
+  if (!kind || kind === 'subadmin') for (const k of await store.settings.keys('admin:acct:')) { const a = await store.settings.get(k); if (a && a.status !== 'removed') out.push({ kind: 'subadmin', id: a._id, name: a.name, org: (a.areas || []).join(', '), phone: a.phone || '', email: a.email || '', status: a.status === 'invited' ? 'pending' : a.status, role: a.preset || '', createdAt: a.createdAt || '', lastLoginAt: a.lastLoginAt || '' }); }
   if (!kind || kind === 'staff') for (const u of await store.users.all()) out.push({ kind: 'staff', id: u.id, name: u.name || u.email || u.id, org: [u.orgType, u.orgId].filter(Boolean).join(': '), phone: u.phone || '', email: u.email || '', status: u.status || 'active', role: u.role || '', createdAt: u.createdAt || '' });
   return out;
 }
@@ -77,6 +79,7 @@ async function exists(kind, id) {
   if (kind === 'insurer') return !!(await store.payers.get(id));
   if (kind === 'emr_provider') return !!(await store.emrPartners.get(id));
   if (kind === 'staff') return !!(await store.users.get(id));
+  if (kind === 'subadmin') return !!(await store.settings.get(`admin:acct:${id}`));
   return false;
 }
 async function update(kind, id, patch, by) { if (!KINDS[kind]) throw err(422, 'Unknown account kind.'); if (!(await exists(kind, id))) throw err(404, 'account_not_found'); return set(kind, id, patch, by); }
