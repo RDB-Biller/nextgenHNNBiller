@@ -9,6 +9,18 @@ const editions = require('../services/editions');
  */
 async function authPlatform(req, res, next) {
   try {
+    // A sub-admin signs in with their own password (see services/subAdmins.js) and may open only the areas they were given.
+    const bearer = req.header('authorization');
+    if (bearer && /^Bearer\s+/i.test(bearer) && !req.header('x-platform-key') && !req.header('x-console-key')) {
+      const subAdmins = require('../services/subAdmins');
+      let a; try { a = await subAdmins.authenticate(bearer); } catch (e) { return res.status(e.status || 401).json({ error: e.message }); }
+      const full = String(req.originalUrl || (req.baseUrl || '') + req.path).split('?')[0];
+      const seg = (/^\/api\/platform\/?([^/]*)/.exec(full) || [])[1] || '';
+      const verdict = subAdmins.allows(a, seg, req.method);
+      if (!verdict.ok) return res.status(403).json({ error: 'not_allowed', message: verdict.why });
+      req.principal = { kind: 'subadmin', id: a._id, role: 'sub_admin', areas: a.areas, readOnly: !!a.readOnly, name: a.name };
+      return next();
+    }
     const key = req.header('x-platform-key') || req.header('x-console-key');
     if (!key) return res.status(401).json({ error: 'missing_platform_key' });
     if (key === (process.env.PLATFORM_ADMIN_KEY || 'platform_demo_key_123')) {
@@ -19,6 +31,14 @@ async function authPlatform(req, res, next) {
     if (!user || user.status !== 'active' || user.role !== 'platform_admin') {
       return res.status(401).json({ error: 'invalid_platform_key' });
     }
+    const ctl = require('../services/accountControl');
+    const c = await ctl.get('staff', user.id);
+    if (c.disabled) return res.status(403).json({ error: 'account_disabled', message: 'This account has been deactivated.' });
+    // Clearances: staff keep both by default. Master Control can take either away from a person.
+    const full = String(req.originalUrl || (req.baseUrl || '') + req.path).split('?')[0];
+    const labPath = /^(\/api\/platform)?\/(products|solutions)(\/|$)/.test(full);
+    if (labPath && !c.grants.productLab) return res.status(403).json({ error: 'clearance_required', message: 'Your account has not been cleared to use Product Lab.' });
+    if (/^(\/api\/platform)?\/operating-mode\/?$/.test(full) && req.method !== 'GET' && !c.grants.goLive) return res.status(403).json({ error: 'clearance_required', message: 'Your account has not been cleared to switch between sandbox and live.' });
     req.principal = { kind: 'platform', id: user.id, role: user.role, user };
     next();
   } catch (e) { next(e); }
@@ -47,6 +67,7 @@ async function authConsole(req, res, next) {
     if (consoleKey) {
       const user = await store.users.byApiKey(consoleKey);
       if (!user || user.status !== 'active') return res.status(401).json({ error: 'invalid_console_key' });
+      if (await require('../services/accountControl').isDisabled('staff', user.id)) return res.status(403).json({ error: 'account_disabled', message: 'This account has been deactivated.' });
       req.principal = {
         kind: 'user', id: user.id, role: user.role, user,
         scope: user.role === 'platform_admin' ? 'all' : 'org',

@@ -16,15 +16,19 @@ const authed = (fn) => wrap(async (req, res) => fn(req, res, await partners.auth
 // ---- Master Control: issue and manage partner logins
 const admin = express.Router();
 admin.use(express.json({ limit: '50kb' }));
-admin.get('/', wrap(async (_q, res) => res.json({ sectors: Object.entries(partners.SECTORS).map(([key, s]) => ({ key, label: s.label, who: s.who, lines: s.lines })), partners: await partners.list() })));
+admin.get('/', wrap(async (_q, res) => res.json({ roles: Object.entries(partners.ROLES).map(([key, r]) => ({ key, label: r.label, sector: r.sector })), sectors: Object.entries(partners.SECTORS).map(([key, s]) => ({ key, label: s.label, who: s.who, lines: s.lines })), partners: await partners.list() })));
 admin.post('/', wrap(async (req, res) => res.status(201).json(await partners.create(req.body || {}, (req.principal && req.principal.id) || 'master'))));
 admin.patch('/:id', wrap(async (req, res) => res.json({ account: await partners.update(req.params.id, req.body || {}) })));
+admin.post('/:id/approve', wrap(async (req, res) => res.json({ account: await partners.approve(req.params.id, req.body || {}) })));
+admin.post('/:id/reject', wrap(async (req, res) => res.json({ account: await partners.reject(req.params.id, req.body || {}) })));
 admin.post('/:id/reset-password', wrap(async (req, res) => res.json(await partners.resetPassword(req.params.id, req.body || {}))));
 admin.post('/:id/universal', wrap(async (req, res) => res.json({ account: await partners.setUniversal(req.params.id, !(req.body && req.body.approve === false)) })));
 
 // ---- Partner console API (served to /app/partner.html)
 const api = express.Router();
 api.use(express.json({ limit: '20kb' }));
+api.get('/signup-options', wrap(async (_q, res) => res.json({ requirePhone: !!(await require('../services/patientAccounts').authConfig()).requirePhone, roles: Object.entries(partners.ROLES).map(([key, r]) => ({ key, label: r.label, sector: r.sector })), sectors: Object.entries(partners.SECTORS).filter(([k]) => k !== 'universal').map(([key, s]) => ({ key, label: s.label })) })));
+api.post('/signup', limiter(10, 3600000), wrap(async (req, res) => res.status(201).json(await partners.signup(req.body || {}, req.ip))));
 api.post('/login', limiter(15, 60000), wrap(async (req, res) => res.json(await partners.login(req.body || {}))));
 api.get('/me', authed(async (_q, res, a) => res.json({ account: partners.view(a) })));
 api.post('/password', limiter(10, 60000), authed(async (req, res, a) => res.json(await partners.changePassword(a, req.body || {}))));

@@ -126,6 +126,7 @@ async function register({ first_name, last_name, phone, email: em, password, lan
 async function login({ phone, email: em, identifier, password } = {}) {
   const a = await byLogin({ identifier, phone, email: em });
   if (!a || !checkPassword(password, a.passwordHash)) throw err(401, 'Incorrect phone number, email or password');
+  if (await require('./accountControl').isDisabled('patient', a._id)) throw err(403, 'This account has been deactivated. Please contact support.');
   return session(a);
 }
 
@@ -134,6 +135,7 @@ async function authenticate(authHeader) {
   const p = m && (await verifyToken(m[1]));
   const a = p && (await byId(p.sub));
   if (!a) throw err(401, 'Please sign in again');
+  if (await require('./accountControl').isDisabled('patient', a._id)) throw err(403, 'This account has been deactivated. Please contact support.');
   return a;
 }
 

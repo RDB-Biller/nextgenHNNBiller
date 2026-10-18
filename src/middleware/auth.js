@@ -9,6 +9,7 @@ async function authTenant(req, res, next) {
     if (!key) return res.status(401).json({ error: 'missing_api_key' });
     const tenant = await store.tenants.byApiKey(key);
     if (!tenant) return res.status(401).json({ error: 'invalid_api_key' });
+    if (await require('../services/accountControl').isDisabled('facility', tenant.id)) return res.status(403).json({ error: 'account_disabled', message: 'This account has been deactivated. Please contact HNN.' });
     req.tenant = tenant;
     next();
   } catch (e) { next(e); }
@@ -24,6 +25,7 @@ async function authEmrPartner(req, res, next) {
     if (!key) return res.status(401).json({ error: 'missing_api_key' });
     const partner = await store.emrPartners.byApiKey(key);
     if (!partner) return res.status(401).json({ error: 'invalid_api_key' });
+    if (await require('../services/accountControl').isDisabled('emr_provider', partner.id)) return res.status(403).json({ error: 'account_disabled', message: 'This account has been deactivated. Please contact HNN.' });
     req.emrPartner = partner;
     next();
   } catch (e) { next(e); }

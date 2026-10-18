@@ -91,7 +91,7 @@ const tokenIn = (m) => /erheat\/v\/([a-z0-9]+)/.exec(m)[1];
   let res = await fetch(`${base}/partner-api/requests`); ok(res.status === 401, 'HTTP: console needs a login');
   res = await fetch(`${base}/partner-api/login`, { method: 'POST', headers: J, body: JSON.stringify({ handle: 'ops@hnn.com', password: uni.temporaryPassword }) }); let j = await res.json(); ok(res.status === 200 && j.token, 'HTTP: sign in');
   res = await fetch(`${base}/partner-api/requests`, { headers: { Authorization: `Bearer ${j.token}` } }); j = await res.json(); ok(res.status === 200 && j.lines.length === 6, 'HTTP: universal sees six lines');
-  res = await fetch(`${base}/pm`, { headers: J }); j = await res.json(); ok(res.status === 200 && j.sectors.length === 7 && j.partners.length === 4, 'HTTP: Master Control lists sectors and partners');
+  res = await fetch(`${base}/pm`, { headers: J }); j = await res.json(); ok(res.status === 200 && j.sectors.length === 8 && j.partners.length === 4, 'HTTP: Master Control lists sectors and partners');
   res = await fetch(`${base}/pm`, { method: 'POST', headers: J, body: JSON.stringify({ name: 'School', handle: 'bursar@school.edu', sector: 'education' }) }); j = await res.json(); ok(res.status === 201 && j.temporaryPassword, 'HTTP: Master Control issues a login');
   srv.close(); console.log(`\n${a} assertions`); process.exit(process.exitCode || 0);
 })().catch((e) => { console.error(e); process.exit(1); });

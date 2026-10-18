@@ -30,9 +30,22 @@ const SECTORS = {
   energy: { label: 'Energy', lines: ['energy'], who: 'Fuel stations, utility agents and generator rental', unit: 'orders', verify: 'Confirm the order, then redeem the voucher when the customer collects.', tools: ['requests', 'redeem'] },
   agriculture: { label: 'Agriculture and food', lines: ['agriculture'], who: 'Suppliers, dealers and traders', unit: 'orders', verify: 'Confirm the order, then redeem the voucher when the customer collects.', tools: ['requests', 'redeem'] },
   transport: { label: 'Transport', lines: ['transport'], who: 'Bus operators and terminal agents', unit: 'bookings', verify: 'Confirm the booking, then redeem the ticket voucher at the terminal.', tools: ['requests', 'redeem'] },
+  finance: { label: 'Banking and lending', lines: Object.keys(erheat.LINES), who: 'Bankers, credit officers and lenders', unit: 'requests', verify: 'Review requests across every line. You do not confirm on behalf of a payee.', tools: ['requests'] },
   universal: { label: 'Universal', lines: Object.keys(erheat.LINES), who: 'Approved by Master Control for every line', unit: 'requests', verify: 'Work any line.', tools: ['requests', 'redeem'] },
 };
 
+// Who people are. Each role works one sector; Master Control can change either when it approves a sign-up.
+const ROLES = {
+  landlord: { label: 'Landlord', sector: 'real_estate' }, property_manager: { label: 'Property manager', sector: 'real_estate' },
+  hospital_admin: { label: 'Hospital administrator', sector: 'health' }, doctor: { label: 'Doctor', sector: 'health' }, nurse: { label: 'Nurse', sector: 'health' },
+  pharmacist: { label: 'Pharmacist', sector: 'health' }, clinic_owner: { label: 'Clinic or pharmacy owner', sector: 'health' },
+  school_head: { label: 'School head or bursar', sector: 'education' },
+  fuel_agent: { label: 'Fuel, utility or generator agent', sector: 'energy' },
+  supplier: { label: 'Farm input, food or shop supplier', sector: 'agriculture' },
+  transport_operator: { label: 'Transport operator or terminal agent', sector: 'transport' },
+  banker: { label: 'Banker', sector: 'finance' }, credit_officer: { label: 'Credit or loan officer', sector: 'finance' }, lender_admin: { label: 'Lender administrator', sector: 'finance' },
+  other: { label: 'Other (tell us in your organisation name)', sector: null },
+};
 const keyOf = (id) => `partner:acct:${id}`; const loginKey = (h) => `partner:login:${h}`;
 function handleOf(raw) { const s = String(raw || '').trim(); if (s.includes('@')) { if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) throw err(422, 'Enter a valid email address or phone number.'); return s.toLowerCase(); } const p = dial(s); if (!validPhone(p)) throw err(422, 'Enter a valid email address or phone number.'); return p; }
 const byId = (id) => (id ? store.settings.get(keyOf(id)) : null);
@@ -60,7 +73,7 @@ const linesOf = (a) => SECTORS[effective(a)].lines;
 /** What the account is, as the console and Master Control see it. Never the password hash. */
 function view(a) {
   const e = effective(a); const s = SECTORS[e];
-  return { id: a._id, name: a.name, org: a.org, handle: a.handle, contactPhone: a.contactPhone || '', sector: a.sector, effectiveSector: e, sectorLabel: s.label, universal: !!a.universal, universalRequested: !!a.universalRequested,
+  return { id: a._id, name: a.name, org: a.org, handle: a.handle, email: a.email || '', role: a.role || '', roleLabel: (ROLES[a.role] || {}).label || '', requestedSector: a.requestedSector || '', signup: !!a.signup, decisionNote: a.decisionNote || '', contactPhone: a.contactPhone || '', sector: a.sector, effectiveSector: e, sectorLabel: s.label, universal: !!a.universal, universalRequested: !!a.universalRequested,
     phones: a.phones, view: a.view, status: a.status, mustChange: !!a.mustChange, lines: s.lines, tools: s.tools, unit: s.unit, verifyHelp: s.verify, createdAt: a.createdAt, createdBy: a.createdBy, lastLoginAt: a.lastLoginAt || null };
 }
 function cleanPhones(list) { const out = []; for (const p of Array.isArray(list) ? list : String(list || '').split(/[,\n;]+/)) { const t = String(p).trim(); if (!t) continue; const d = dial(t); if (!validPhone(d)) throw err(422, `Not a valid phone number: ${t}`); if (!out.includes(d)) out.push(d); } return out; }
@@ -69,10 +82,10 @@ function cleanPhones(list) { const out = []; for (const p of Array.isArray(list)
 async function create(b = {}, by = 'master') {
   const name = String(b.name || '').trim().slice(0, 100); const org = String(b.org || '').trim().slice(0, 120);
   if (!name) throw err(422, 'Enter the person\'s name.');
-  const sector = b.universal ? 'universal' : b.sector; if (!SECTORS[sector]) throw err(422, `Choose a sector: ${Object.keys(SECTORS).join(', ')}.`);
+  const role = ROLES[b.role] ? b.role : ''; const sector = b.universal ? 'universal' : (b.sector || (ROLES[role] || {}).sector); if (!SECTORS[sector]) throw err(422, `Choose a sector: ${Object.keys(SECTORS).join(', ')}.`);
   const handle = handleOf(b.handle); if (await store.settings.get(loginKey(handle))) throw err(409, 'That email or phone number already has a login.');
   const phones = cleanPhones(b.phones); const pw = String(b.password || '') || tempPassword(); if (pw.length < 8) throw err(422, 'A password needs at least 8 characters.');
-  const a = { _id: `pt_${crypto.randomBytes(8).toString('hex')}`, name, org, handle, contactPhone: b.contactPhone ? dial(b.contactPhone) : (handle.startsWith('+') ? handle : ''), sector: sector === 'universal' ? 'real_estate' : sector,
+  const a = { _id: `pt_${crypto.randomBytes(8).toString('hex')}`, role, name, org, handle, contactPhone: b.contactPhone ? dial(b.contactPhone) : (handle.startsWith('+') ? handle : ''), sector: sector === 'universal' ? 'real_estate' : sector,
     universal: sector === 'universal', universalRequested: false, phones, view: b.view === 'all' ? 'all' : 'mine', status: 'active', passwordHash: hash(pw), pv: 1, mustChange: true, createdAt: now(), createdBy: by };
   await store.settings.set(loginKey(handle), { id: a._id }); await save(a);
   let sms = null;
@@ -85,15 +98,48 @@ async function update(id, b = {}) {
   const a = await must(id);
   if (b.name !== undefined) { a.name = String(b.name).trim().slice(0, 100); if (!a.name) throw err(422, 'Enter the person\'s name.'); }
   if (b.org !== undefined) a.org = String(b.org).trim().slice(0, 120);
+  if (b.role !== undefined) { if (b.role && !ROLES[b.role]) throw err(422, 'Unknown role.'); a.role = b.role; }
   if (b.sector !== undefined) { if (!SECTORS[b.sector] || b.sector === 'universal') throw err(422, 'Choose a sector (use approve for universal).'); a.sector = b.sector; }
   if (b.phones !== undefined) a.phones = cleanPhones(b.phones);
   if (b.view !== undefined) a.view = b.view === 'all' ? 'all' : 'mine';
   if (b.contactPhone !== undefined) a.contactPhone = b.contactPhone ? dial(b.contactPhone) : '';
-  if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status)) throw err(422, 'Status must be active or suspended.'); if (b.status !== a.status) a.pv += 1; a.status = b.status; }
+  if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status) || (b.status === 'active' && a.status === 'pending')) throw err(422, a.status === 'pending' ? 'Use approve or reject for a sign-up request.' : 'Status must be active or suspended.'); if (b.status !== a.status) a.pv += 1; a.status = b.status; }
   await save(a); return view(a);
 }
 async function resetPassword(id, b = {}) { const a = await must(id); const pw = String(b.password || '') || tempPassword(); if (pw.length < 8) throw err(422, 'A password needs at least 8 characters.'); a.passwordHash = hash(pw); a.pv += 1; a.mustChange = true; await save(a); return { account: view(a), temporaryPassword: pw }; }
 async function setUniversal(id, on) { const a = await must(id); a.universal = !!on; a.universalRequested = false; await save(a); return view(a); }
+
+// ---------------------------------------------------------------- public sign-up (needs approval)
+const signupHits = new Map();
+async function signup(b = {}, ip = '') {
+  const k = String(ip || 'x'); const h = (signupHits.get(k) || []).filter((t) => Date.now() - t < 3600000); if (h.length >= 5) throw err(429, 'Too many sign-up requests from this connection. Try again later.'); h.push(Date.now()); signupHits.set(k, h);
+  const name = String(b.name || '').trim().slice(0, 100); const org = String(b.org || '').trim().slice(0, 120);
+  if (!name) throw err(422, 'Enter your name.'); if (!org) throw err(422, 'Enter your organisation, for example the hospital, bank or school.');
+  const role = String(b.role || ''); if (!ROLES[role]) throw err(422, 'Choose your role.');
+  const sector = ROLES[role].sector || b.sector; if (!SECTORS[sector] || sector === 'universal') throw err(422, 'Choose the sector you work in.');
+  const requirePhone = !!(await require('./patientAccounts').authConfig()).requirePhone;
+  const emailRaw = String(b.email || '').trim().toLowerCase(); const phoneRaw = String(b.phone || '').trim();
+  if (!emailRaw && !phoneRaw) throw err(422, 'Enter an email address or a mobile number.');
+  if (requirePhone && !phoneRaw) throw err(422, 'A mobile number is needed to sign up.');
+  const email = emailRaw ? handleOf(emailRaw) : ''; const phone = phoneRaw ? handleOf(phoneRaw) : '';
+  if (email && !email.includes('@')) throw err(422, 'Enter a valid email address.'); if (phone && phone.includes('@')) throw err(422, 'Enter a valid mobile number.');
+  for (const h2 of [email, phone].filter(Boolean)) if (await store.settings.get(loginKey(h2))) throw err(409, 'That email or phone number already has a login or a pending request.');
+  const pw = String(b.password || ''); if (pw.length < 8) throw err(422, 'Choose a password of at least 8 characters.');
+  const handle = email || phone;
+  const a = { _id: `pt_${crypto.randomBytes(8).toString('hex')}`, role, name, org, handle, email, contactPhone: phone, sector, requestedSector: sector, signup: true, universal: false, universalRequested: false,
+    phones: phone ? [phone] : [], view: 'mine', status: 'pending', passwordHash: hash(pw), pv: 1, mustChange: false, createdAt: now(), createdBy: 'self_signup' };
+  for (const h2 of [email, phone].filter(Boolean)) await store.settings.set(loginKey(h2), { id: a._id });
+  await save(a); return { ok: true, status: 'pending', message: 'Thank you. HNN will review your request. You can sign in once it is approved.' };
+}
+async function approve(id, b = {}) {
+  const a = await must(id); if (a.status !== 'pending') throw err(409, 'This request is not waiting for approval.');
+  if (b.sector !== undefined) { if (!SECTORS[b.sector] || b.sector === 'universal') throw err(422, 'Choose a sector.'); a.sector = b.sector; }
+  if (b.phones !== undefined) a.phones = cleanPhones(b.phones);
+  if (b.view !== undefined) a.view = b.view === 'all' ? 'all' : 'mine';
+  if (b.universal) { a.universal = true; a.universalRequested = false; }
+  a.status = 'active'; a.pv += 1; a.decisionNote = ''; a.approvedAt = now(); await save(a); return view(a);
+}
+async function reject(id, b = {}) { const a = await must(id); if (a.status !== 'pending') throw err(409, 'This request is not waiting for approval.'); a.status = 'rejected'; a.pv += 1; a.decisionNote = String(b.reason || '').slice(0, 200); await save(a); return view(a); }
 
 // ---------------------------------------------------------------- partner sessions
 const fails = new Map();
@@ -102,13 +148,15 @@ async function login({ handle, password } = {}) {
   if (f.length >= 8) throw err(429, 'Too many tries. Wait 15 minutes, or ask Master Control to reset your password.');
   const a = await byHandle(handle);
   if (!a || !check(password, a.passwordHash)) { f.push(Date.now()); fails.set(hk, f); throw err(401, 'Incorrect login or password.'); }
-  if (a.status !== 'active') throw err(403, 'This login is suspended. Contact Master Control.');
+  if (a.status === 'pending') throw err(403, 'Your request is waiting for approval by HNN. You will be able to sign in once it is approved.');
+  if (a.status === 'rejected') throw err(403, 'This request was not approved.' + (a.decisionNote ? ' ' + a.decisionNote : ''));
+  if (a.status !== 'active' || (await require('./accountControl').isDisabled('partner', a._id))) throw err(403, 'This login is suspended. Contact Master Control.');
   fails.delete(hk); a.lastLoginAt = now(); await save(a);
   return { token: await sign({ sub: a._id, pv: a.pv, exp: Date.now() + TTL_MS }), account: view(a) };
 }
 async function authenticate(header) {
   const m = /^Bearer\s+(.+)$/i.exec(header || ''); const p = m && await unsign(m[1]); const a = p && await byId(p.sub);
-  if (!a || a.pv !== p.pv || a.status !== 'active') throw err(401, 'Please sign in again.');
+  if (!a || a.pv !== p.pv || a.status !== 'active' || (await require('./accountControl').isDisabled('partner', a._id))) throw err(401, 'Please sign in again.');
   return a;
 }
 async function changePassword(a, { current, password } = {}) {
@@ -130,4 +178,4 @@ async function redeem(a, { code, otp, phone } = {}) {
   const p = dial(phone || a.phones[0]); if (!a.phones.map(dial).includes(p)) throw err(403, 'Use one of the phone numbers registered to your account.');
   return erheat.redeem({ code, otp, phone: p });
 }
-module.exports = { SECTORS, create, list, update, resetPassword, setUniversal, login, authenticate, changePassword, requestUniversal, requests, redeem, view };
+module.exports = { ROLES, signup, approve, reject, SECTORS, create, list, update, resetPassword, setUniversal, login, authenticate, changePassword, requestUniversal, requests, redeem, view };
