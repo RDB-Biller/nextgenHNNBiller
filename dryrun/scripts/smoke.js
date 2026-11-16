@@ -234,6 +234,7 @@ async function main() {
 
   section('Product Lab');
   r = await call('GET', '/api/org/lab/archetypes', ADMIN); ok(r.s === 200 && r.j.length >= 7 && r.j.some((a) => a.key === 'maternity') && !r.j.some((a) => a.key === 'cover_cash'), 'insurer sees insurance product types, not fintech ones');
+  r = await call('POST', '/api/org/lab/coach', ADMIN, { message: 'how do I build a product?' }); ok(r.s === 200 && /Build a product/i.test(r.j.reply), 'Lab Coach answers how to build a product'); ok(/compare|version/i.test((await call('POST', '/api/org/lab/coach', ADMIN, { message: 'how do I compare versions?' })).j.reply), 'Lab Coach explains comparing versions');
   r = await call('GET', '/api/org/lab/archetypes', FIN); ok(r.j.map((a) => a.key).sort().join() === 'cover_cash,instalment_overdraft', 'fintech sees finance types');
   ok((await call('POST', '/api/org/lab/generate', FIN, { archetype: 'maternity', params: {} })).s === 404, 'a type from another sector is refused');
   r = await call('POST', '/api/org/lab/preview', ADMIN, { archetype: 'micro_health', params: { monthlyPremium: 30 } }); ok(r.s === 200 && r.j.summary.premium === 30 && r.j.summary.tiers.length === 2 && r.j.data.options.length === 2, 'preview builds a product from a few parameters without saving');

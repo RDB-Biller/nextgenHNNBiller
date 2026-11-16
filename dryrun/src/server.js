@@ -16,6 +16,7 @@ const eng = require('./engagements');
 const requests = require('./requests');
 const proposals = require('./proposals');
 const lab = require('./lab');
+const labcoach = require('./labcoach');
 const demo = require('./demo');
 const { err, wrap } = require('./util');
 
@@ -194,6 +195,7 @@ O.post('/proposals', need('write'), wrap(async (req, res) => {
 }));
 O.post('/proposals/:pid/respond', need('read'), wrap(async (req, res) => res.json(await proposals.respond(oid(req), req.actor, req.role, req.params.pid, req.body || {}))));
 O.get('/lab/archetypes', need('read'), (req, res) => res.json(lab.archetypes(oid(req))));
+O.post('/lab/coach', need('read'), (req, res) => res.json({ reply: labcoach.reply({ message: req.body && req.body.message, pack: packs.detail(req.org.pack) }) }));
 O.post('/lab/preview', need('read'), (req, res) => res.json(lab.preview(oid(req), req.body.archetype, req.body.params)));
 O.post('/lab/generate', need('write'), wrap(async (req, res) => res.status(201).json(await lab.generate(oid(req), req.actor, req.role, req.body || {}))));
 O.post('/lab/assets/:id/regenerate', need('write'), wrap(async (req, res) => res.json(await lab.regenerate(oid(req), req.actor, req.role, req.params.id, (req.body || {}).params, (req.body || {}).note))));
