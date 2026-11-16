@@ -221,6 +221,27 @@ async function main() {
   r = await call('POST', '/api/org/proposals', FIN, { kind: 'request', title: 'Looking for an insurer partner', summary: 'We want to offer instalments' }); ok(r.s === 201 && r.j.kind === 'request', 'an insurer or fintech can also post a request without a design');
   r = await plat('PATCH', '/config', { linkFeePct: 4 }); ok(r.j.linkFeePct === 4, 'default platform link fee is configurable');
 
+  section('Product Lab');
+  r = await call('GET', '/api/org/lab/archetypes', ADMIN); ok(r.s === 200 && r.j.length >= 7 && r.j.some((a) => a.key === 'maternity') && !r.j.some((a) => a.key === 'cover_cash'), 'insurer sees insurance product types, not fintech ones');
+  r = await call('GET', '/api/org/lab/archetypes', FIN); ok(r.j.map((a) => a.key).sort().join() === 'cover_cash,instalment_overdraft', 'fintech sees finance types');
+  ok((await call('POST', '/api/org/lab/generate', FIN, { archetype: 'maternity', params: {} })).s === 404, 'a type from another sector is refused');
+  r = await call('POST', '/api/org/lab/preview', ADMIN, { archetype: 'micro_health', params: { monthlyPremium: 30 } }); ok(r.s === 200 && r.j.summary.premium === 30 && r.j.summary.tiers.length === 2 && r.j.data.options.length === 2, 'preview builds a product from a few parameters without saving');
+  ok((await call('POST', '/api/org/lab/preview', ADMIN, { archetype: 'micro_health', params: { monthlyPremium: 1 } })).s === 422, 'out-of-range parameters refused');
+  r = await call('POST', '/api/org/lab/generate', ADMIN, { archetype: 'outpatient_cover', params: { name: 'Lab outpatient', monthlyPremium: 80, annualCap: 2000 } }); ok(r.s === 201 && r.j.asset.kind === 'product' && r.j.run && r.j.run.scenario === 'plan_options' && r.j.run.result.options.length === 3, 'one step makes a complete draft product and runs it'); const LP = r.j.asset.id; ok(r.j.suggestions.length === 4 && r.j.asset.latestGate === 'draft', 'draft with suggested variations');
+  r = await call('POST', `/api/org/lab/assets/${LP}/regenerate`, ADMIN, { params: { monthlyPremium: 85, coPayPct: 5 } }); ok(r.s === 200 && r.j.latest === 2, 'changing parameters makes version 2 of the same product');
+  r = await call('POST', `/api/org/lab/assets/${LP}/variation`, ADMIN, { changes: { premiumPct: -8 } }); ok(r.s === 201 && r.j.asset.name.includes('premium -8%') && r.j.regulatory.overall, 'variation copies it with a change and says what the regulator would make of it'); const V1 = r.j.asset.id;
+  r = await call('POST', `/api/org/lab/assets/${LP}/variation`, ADMIN, { changes: { capPct: 25, coPayPct: 10 } }); const V2 = r.j.asset.id; ok(r.s === 201, 'second variation');
+  ok((await call('POST', `/api/org/lab/assets/${LP}/variation`, ADMIN, { changes: {} })).s === 422, 'an empty variation is refused');
+  r = await call('GET', `/api/org/lab/assets/${V2}/family`, ADMIN); ok(r.j.length === 3 && r.j.filter((x) => x.isRoot).length === 1, 'the product and its variations are grouped');
+  r = await call('POST', '/api/org/lab/compare', ADMIN, { assetIds: [LP, V1, V2] }); ok(r.s === 200 && r.j.comparison.runs.length === 3 && r.j.comparison.metrics.some((m) => m.metric === 'lossRatioPct') && r.j.regulatory.length === 3, 'compare runs all of them side by side with regulator classification');
+  ok((await call('POST', '/api/org/lab/compare', ADMIN, { assetIds: [LP] })).s === 422, 'compare needs two or more');
+  r = await call('POST', '/api/org/lab/ideas', BUILD, { title: 'Pay for dental scaling', proposal: 'Add a dental cleaning benefit', whoBenefits: 'Younger members', archetype: 'outpatient_cover' }); ok(r.s === 201 && r.j.votes.length === 1, 'builder adds an idea'); const IDEA = r.j.id;
+  ok((await call('POST', `/api/org/lab/ideas/${IDEA}/vote`, ADMIN, {})).j.votes === 2, 'teammate votes'); ok((await call('POST', `/api/org/lab/ideas/${IDEA}/vote`, ADMIN, {})).j.votes === 1, 'vote toggles off');
+  r = await call('GET', '/api/org/lab/ideas', ADMIN); ok(r.j.length === 1 && r.j[0].title.includes('dental'), 'ideas board lists it');
+  r = await call('POST', `/api/org/lab/ideas/${IDEA}/promote`, BUILD, {}); ok(r.s === 200 && r.j.idea.status === 'promoted' && r.j.asset.name === 'Pay for dental scaling', 'promoting an idea builds a draft product from it'); ok((await call('POST', `/api/org/lab/ideas/${IDEA}/promote`, BUILD, {})).s === 409, 'cannot promote twice');
+  r = await call('POST', '/api/org/lab/generate', FIN, { archetype: 'instalment_overdraft', params: { installments: '4', feePct: 4 } }); ok(r.s === 201 && r.j.asset.kind === 'finance_offer' && r.j.run.scenario === 'premium_financing', 'fintech builds a finance offer the same way');
+  r = await call('POST', '/api/org/lab/generate', ADMIN, { archetype: 'cashback_loyalty', params: { cashbackPct: 8 } }); ok(r.s === 201 && r.j.asset.kind === 'campaign' && r.j.run.scenario === 'campaign', 'loyalty cashback builds a campaign and runs it');
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');

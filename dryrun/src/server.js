@@ -15,6 +15,7 @@ const live = require('./live');
 const eng = require('./engagements');
 const requests = require('./requests');
 const proposals = require('./proposals');
+const lab = require('./lab');
 const demo = require('./demo');
 const { err, wrap } = require('./util');
 
@@ -150,6 +151,18 @@ O.post('/proposals', need('write'), wrap(async (req, res) => {
   res.status(201).json(p);
 }));
 O.post('/proposals/:pid/respond', need('read'), wrap(async (req, res) => res.json(await proposals.respond(oid(req), req.actor, req.role, req.params.pid, req.body || {}))));
+O.get('/lab/archetypes', need('read'), (req, res) => res.json(lab.archetypes(oid(req))));
+O.post('/lab/preview', need('read'), (req, res) => res.json(lab.preview(oid(req), req.body.archetype, req.body.params)));
+O.post('/lab/generate', need('write'), wrap(async (req, res) => res.status(201).json(await lab.generate(oid(req), req.actor, req.role, req.body || {}))));
+O.post('/lab/assets/:id/regenerate', need('write'), wrap(async (req, res) => res.json(await lab.regenerate(oid(req), req.actor, req.role, req.params.id, (req.body || {}).params, (req.body || {}).note))));
+O.post('/lab/assets/:id/variation', need('write'), wrap(async (req, res) => res.status(201).json(await lab.variation(oid(req), req.actor, req.role, req.params.id, req.body || {}))));
+O.get('/lab/assets/:id/family', need('read'), wrap(async (req, res) => res.json(await lab.family(oid(req), req.params.id))));
+O.post('/lab/compare', need('run'), wrap(async (req, res) => res.json(await lab.compareProducts(oid(req), req.actor, req.role, (req.body || {}).assetIds, (req.body || {}).params))));
+O.get('/lab/ideas', need('read'), wrap(async (req, res) => res.json(await lab.ideas(oid(req), req.actor.id))));
+O.post('/lab/ideas', need('write'), wrap(async (req, res) => res.status(201).json(await lab.addIdea(oid(req), req.actor, req.body || {}))));
+O.post('/lab/ideas/:id/vote', need('read'), wrap(async (req, res) => res.json(await lab.vote(oid(req), req.actor, req.params.id))));
+O.post('/lab/ideas/:id/promote', need('write'), wrap(async (req, res) => res.json(await lab.promote(oid(req), req.actor, req.role, req.params.id, req.body || {}))));
+O.post('/lab/ideas/:id/close', need('write'), wrap(async (req, res) => res.json(await lab.closeIdea(oid(req), req.actor, req.params.id))));
 O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30) }));
 O.patch('/team/:mid', need('team'), (req, res) => res.json(orgs.setRole(oid(req), req.params.mid, req.body.role)));
 O.delete('/team/:mid', need('team'), (req, res) => res.json(orgs.removeMember(oid(req), req.params.mid)));

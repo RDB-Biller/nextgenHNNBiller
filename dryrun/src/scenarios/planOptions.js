@@ -16,7 +16,7 @@ function run({ product, params = {}, seed = 1 }) {
   const p = product; const opts = p.options && p.options.length ? p.options : [{ name: 'Standard', tiers: [(p.hospitalTiers[0] || {}).name || 'T1'], premiumAdjPct: 0 }];
   if (!p.premium || !p.benefitCap || !(p.hospitalTiers || []).length) throw Object.assign(new Error('The product needs a premium, a benefit cap and hospital tiers.'), { status: 422 });
   const N = Math.min(Number(params.members || 2000), 20000), r = rng(seed), mult = new Map(p.hospitalTiers.map((t) => [t.name, Number(t.costMultiple) || 1]));
-  const freq = Number(params.claimsPerMemberYear ?? 3), med = Number(params.medianClaimCost ?? 140), sigma = 0.8, higher = Number(params.higherTierUsePct ?? 60) / 100, desire = Number(params.desireHigherTierPct ?? 35) / 100;
+  const ty = p.typical || {}; const freq = Number(params.claimsPerMemberYear ?? ty.claimsPerMemberYear ?? 3), med = Number(params.medianClaimCost ?? ty.medianClaimCost ?? 140), sigma = 0.8, higher = Number(params.higherTierUsePct ?? 60) / 100, desire = Number(params.desireHigherTierPct ?? 35) / 100;
   const sens = Number(params.priceSensitivity ?? 1.2), adverse = Number(params.adverseSelection ?? 0.3), targetLR = Number(params.targetLossRatioPct ?? 70), coPay = (Number(p.coPayPct) || 0) / 100;
   const access = opts.map((o) => Math.max(...o.tiers.map((t) => (mult.get(t) || 1))));
   const prem = opts.map((o) => p.premium * (1 + (Number(o.premiumAdjPct) || 0) / 100));
