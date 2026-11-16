@@ -77,3 +77,7 @@ Pick a product type (outpatient, inpatient and surgical, maternity, chronic care
 ## Outcomes-based care
 
 Scenario `outcomes_based_care` and Product Lab type "Outcomes-based care programme" (hypertension, diabetes, high cholesterol). Providers are scored only on their own patients across control, adherence, screening and complications, blended into one score that places them in a bonus or penalty band. Output: who lands where, complications avoided, bonuses and reductions, patient cashback, net to the insurer, and the fee-for-service trap (providers with more complications are paid more). The Coach searches better bands and keeps penalised providers under 30%. Provider response is an assumption. The Library tab is now "Product Lab Library".
+
+### Platform owner: people and messages
+
+On the Organisations tab, **People and messages** opens each organisation's members. For each person you can save a phone number, **Send sign-in details** (a new temporary password plus a sign-in link with the username filled in; they choose their own password on first sign-in) or send them a free-text **Message**. You can also message an organisation's admins, or everyone in it. Messages go by SMS (and WhatsApp if set up) and are logged without their text or passwords.

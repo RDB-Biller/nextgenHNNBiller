@@ -92,6 +92,16 @@ async function main() {
   r = await call('POST', '/api/org/team', GADMIN, { name: 'Kojo', email: 'kojo@gamma.test', phone: '0201234568', role: 'viewer', deliver: { sms: true } }); ok(r.j.delivery.length === 1 && r.j.delivery[0].channel === 'sms', 'admin can pick SMS only'); const kojoId = r.j.id;
   r = await call('POST', '/api/org/team', GADMIN, { name: 'No Phone', email: 'np@gamma.test', role: 'viewer' }); ok(r.s === 201 && r.j.delivery.length === 0 && r.j.password && r.j.username, 'no phone: username and password shown on screen instead');
   r = await plat('POST', `/orgs/${GAMMA}/members/${kojoId}/resend`, { deliver: { sms: true } }); ok(r.s === 200 && r.j.delivery[0].ok && r.j.password, 'platform owner can re-send (issues a fresh password)');
+  { // platform owner: set a phone, resend with a sign-in link, message one person or an org
+    const gd = await plat('GET', '/directory'); const gm = gd.j.find((o) => o.id === GAMMA).members.find((m) => m.id === kojoId);
+    r = await plat('PATCH', `/orgs/${GAMMA}/members/${gm.id}`, { phone: '12' }); ok(r.s === 422, 'a bad phone number is refused when the owner sets it');
+    r = await plat('PATCH', `/orgs/${GAMMA}/members/${gm.id}`, { phone: '0244111222' }); ok(r.s === 200, 'platform owner can set a phone number');
+    atCalls.length = 0; r = await plat('POST', `/orgs/${GAMMA}/members/${gm.id}/resend`, { deliver: { sms: true } }); const rt = decodeURIComponent(atCalls[0].body.replace(/\+/g, ' '));
+    ok(r.s === 200 && atCalls.length === 1 && rt.includes('/app?u=' + r.j.username) && rt.includes(r.j.password), 'resent sign-in text carries a link with the username filled in');
+    atCalls.length = 0; r = await plat('POST', `/orgs/${GAMMA}/message`, { memberId: gm.id, text: 'Hello from Dry Run' }); ok(r.s === 200 && r.j.sent === 1 && atCalls.length === 1 && decodeURIComponent(atCalls[0].body.replace(/\+/g, ' ')).includes('Hello from Dry Run'), 'owner can message one person');
+    r = await plat('POST', `/orgs/${GAMMA}/message`, { to: 'all', text: '' }); ok(r.s === 422, 'an empty message is refused');
+    r = await plat('POST', `/orgs/${GAMMA}/message`, { to: 'admins', text: 'Admins only' }); ok(r.s === 200 && r.j.results.every((x) => x.name), 'owner can message an org\'s admins');
+  }
   const dirOrg = (await plat('GET', '/directory')).j.find((o) => o.id === GAMMA); ok(dirOrg.members.length === 4 && dirOrg.members.some((m) => m.name === 'Efua' && m.addedBy === 'Yaw' && m.phone.includes('•')), 'directory shows who added whom, with masked phones');
   const msgs = (await plat('GET', '/messaging')).j; ok(msgs.configured.sms && msgs.recent.length >= 5 && !JSON.stringify(msgs.recent).includes(gpw), 'delivery log kept without passwords');
   for (const k of Object.keys(AT)) delete process.env[k]; r = await plat('POST', '/orgs', { name: 'Delta Insurance', adminEmail: 'd@d.test', adminPhone: '0244000111', plan: 'paid', deliver: { sms: true } }); ok(r.s === 201 && r.j.delivery[0].ok === false && r.j.admin.password, 'if SMS is not set up the org is still created and the password is shown'); Object.assign(process.env, AT);

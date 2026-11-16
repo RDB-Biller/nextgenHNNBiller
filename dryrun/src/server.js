@@ -38,9 +38,9 @@ const joinUrl = (req, orgId) => `${siteUrl(req)}/join${orgId ? '?ref=' + orgs.re
 async function sendCreds(req, { orgId, member, username, password, role, by, deliver, adminAppointment }) {
   const channels = { sms: !!(deliver && deliver.sms), whatsapp: !!(deliver && deliver.whatsapp) };
   if (!channels.sms && !channels.whatsapp) return [];
-  const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const url = `${siteUrl(req)}/app`;
+  const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const base = `${siteUrl(req)}/app`; const url = `${base}?u=${encodeURIComponent(username)}`;
   const text = adminAppointment
-    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) })
+    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}&go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) })
     : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) });
   return messaging.deliver({ phone: member.phone, channels, text, orgId, orgName: o.name, who: role, purpose: adminAppointment ? 'admin appointment' : 'team invite' });
 }
@@ -82,10 +82,34 @@ P.post('/orgs', wrap(async (req, res) => {
 P.get('/directory', (req, res) => res.json(orgs.directory()));
 P.get('/messaging', (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(null, 50) }));
 P.post('/orgs/:id/members/:mid/resend', wrap(async (req, res) => {
-  const o = orgs.raw(req.params.id); const m = orgs.memberRaw(req.params.id, req.params.mid); if (!m.phone) throw err(422, 'This person has no phone number on file.');
+  const o = orgs.raw(req.params.id); const m = orgs.memberRaw(req.params.id, req.params.mid);
+  if (req.body && req.body.phone) { if (!messaging.validPhone(req.body.phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); m.phone = String(req.body.phone).trim(); require('./registry').save(); }
+  if (!m.phone) throw err(422, 'This person has no phone number on file.');
   const k = orgs.resetPassword(req.params.id, m.id);
   const delivery = await sendCreds(req, { orgId: o.id, member: m, username: k.username, password: k.password, role: m.role, by: 'the platform owner', deliver: req.body.deliver || { sms: true }, adminAppointment: m.role === 'admin' });
   res.json({ ...k, delivery });
+}));
+P.patch('/orgs/:id/members/:mid', (req, res) => {
+  const m = orgs.memberRaw(req.params.id, req.params.mid); const b = req.body || {};
+  if (b.phone !== undefined) { if (b.phone && !messaging.validPhone(b.phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); m.phone = String(b.phone || '').trim(); }
+  if (b.email) m.email = String(b.email).trim();
+  require('./registry').save(); res.json({ ok: true });
+});
+// Free-text message from the platform owner to one person, the org's admins, or everyone in the org.
+P.post('/orgs/:id/message', wrap(async (req, res) => {
+  const o = orgs.raw(req.params.id); plans.assertNotDemo(o, 'Sending messages'); const b = req.body || {};
+  const text = String(b.text || '').trim(); if (!text) throw err(422, 'Write the message first.'); if (text.length > 480) throw err(422, 'Keep it under 480 characters.');
+  const channels = { sms: !(b.deliver && b.deliver.sms === false), whatsapp: !!(b.deliver && b.deliver.whatsapp) };
+  const all = Object.values(o.members);
+  const to = b.memberId ? all.filter((m) => m.id === b.memberId) : b.to === 'admins' ? all.filter((m) => m.role === 'admin') : all;
+  if (!to.length) throw err(404, 'Nobody to send to.');
+  const results = [];
+  for (const m of to) {
+    if (!m.phone) { results.push({ name: m.name, ok: false, error: 'No phone number on file.' }); continue; }
+    const d = await messaging.deliver({ phone: m.phone, channels, text, orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message' });
+    results.push({ name: m.name, ok: d.length > 0 && d.every((x) => x.ok), error: (d.find((x) => !x.ok) || {}).error || null });
+  }
+  res.json({ results, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
 }));
 P.post('/message-preview', (req, res) => res.json(previewTexts(req, req.body || {})));
 P.get('/proposals', (req, res) => res.json(proposals.listAll()));
