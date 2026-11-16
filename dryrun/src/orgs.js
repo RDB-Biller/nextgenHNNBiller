@@ -75,6 +75,15 @@ function changePassword(orgId, memberId, current, next) {
 }
 /** A fresh temporary password (the old one stops working). Used for re-sending sign-in details. */
 function resetPassword(orgId, memberId) { const m = raw(orgId).members[memberId]; if (!m) throw err(404, 'Unknown member.'); if (!m.username) m.username = creds.makeUsername(m.name, raw(orgId).name, usernames()); const password = creds.genPassword(); m.passwordHash = creds.hashPassword(password); m.mustChange = true; m.sessions = []; reg.save(); return { id: m.id, username: m.username, password, note: 'Shown once. The old password no longer works.' }; }
+/** Self-service: find a member by username and, if they have a phone on file, reset to a new temporary password (to be sent by SMS). */
+function forgotPassword(username) {
+  const u = String(username || '').trim().toLowerCase(); if (!u) return { found: false };
+  const hit = allMembers().find((x) => (x.m.username || '').toLowerCase() === u);
+  if (!hit) return { found: false };
+  if (!hit.m.phone) return { found: true, hasPhone: false, orgId: hit.o.id, member: { id: hit.m.id, name: hit.m.name } };
+  const r = resetPassword(hit.o.id, hit.m.id);
+  return { found: true, hasPhone: true, orgId: hit.o.id, member: { id: hit.m.id, name: hit.m.name, phone: hit.m.phone }, username: r.username, password: r.password };
+}
 
 // ---- team ----------------------------------------------------------------------------------------------------------------
 function addMember(orgId, { name, email, phone, role = 'builder' } = {}, addedBy) {
@@ -157,4 +166,4 @@ const raws = raw;
 function openSession(orgId, memberId) { const m = raw(orgId).members[memberId]; const key = newKey('dr_s'); m.sessions = [{ hash: sha(key), exp: Date.now() + SESSION_MS * 4 }]; reg.save(); return key; }
 async function removeOrg(orgId) { const o = raw(orgId); try { await store.build(o.storage).purge(orgId); } catch {} delete reg.load().orgs[orgId]; reg.save(); }
 const refCode = (orgId) => String(orgId).slice(4, 12);
-module.exports = { openSession, removeOrg, refCode, login, changePassword, resetPassword, setRegulatoryRules, memberRaw, directory, ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };
+module.exports = { openSession, removeOrg, refCode, login, changePassword, resetPassword, forgotPassword, setRegulatoryRules, memberRaw, directory, ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };

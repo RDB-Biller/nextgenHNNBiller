@@ -202,6 +202,7 @@ async function main() {
   ok((await call('POST', `/api/org/team-requests/${tr[0].id}/approve`, ADMIN, { role: 'viewer' })).s === 409, 'cannot approve twice');
   r = await call('POST', '/api/org/team-invite/rotate', ADMIN, {}); ok(r.j.url.split('team=')[1] !== TTOK && (await call('GET', '/api/public/team-invite/' + TTOK, null)).s === 404, 'a new link retires the old one');
   await call('POST', '/api/org/team-invite/off', ADMIN, {}); await plat('PATCH', `/orgs/${orgId}/plan`, { plan: 'free_trial' }); ok((await call('GET', '/api/public/team-invite/' + r.j.url.split('team=')[1], null)).s === 404, 'switching off stops requests');
+  atCalls.length = 0; { const fp = await call('POST', '/api/public/forgot-password', null, { username: gun }); ok(fp.s === 200 && atCalls.length === 1 && atCalls[0].url.startsWith('/sms') && dec(atCalls[0]).includes('temporary password'), 'forgot-password texts a new temporary password by SMS'); } ok((await call('POST', '/api/public/forgot-password', null, { username: 'nobody.nowhere' })).s === 200, 'forgot-password gives a generic answer for unknown usernames'); ok((await call('POST', '/api/login', null, { username: gun, password: gpw })).s === 401, 'the previous password stops working after a reset');
 
   section('Fintech designs, proposes, insurer accepts');
   const fs2 = require('fs'), path2 = require('path'); const walk = (d) => fs2.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path2.join(d, e.name)) : [path2.join(d, e.name)]);

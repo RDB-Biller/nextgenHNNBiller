@@ -54,6 +54,15 @@ function previewTexts(req, { org = 'XYZ Insurance', name = 'Ama Mensah', email =
 // ---- public: sign in, request an account, demo ------------------------------------------------------------------------------------
 const clientIp = (req) => String(req.get('x-forwarded-for') || req.headers.host || 'x').split(',')[0].trim();
 app.post('/api/login', (req, res) => res.json(orgs.login(req.body.username, req.body.password)));
+app.post('/api/public/forgot-password', wrap(async (req, res) => {
+  const r = orgs.forgotPassword((req.body || {}).username);
+  if (r.found && r.hasPhone) {
+    const o = orgs.raw(r.orgId); const url = `${siteUrl(req)}/app?u=${encodeURIComponent(r.username)}`;
+    const text = `Dry Run: your new temporary password is ${r.password}. Sign in at ${url} and change it. If you did not ask for this, tell your admin.`;
+    await messaging.deliver({ phone: r.member.phone, channels: { sms: true }, text, orgId: o.id, orgName: o.name, who: 'member', purpose: 'password reset' });
+  }
+  res.json({ message: 'If that username exists and has a mobile number on file, a new temporary password has just been sent by SMS. It can take a minute to arrive.' });
+}));
 app.post('/api/public/request-account', wrap(async (req, res) => {
   const r = requests.submit(req.body || {}, clientIp(req));
   if (r.request && process.env.NOTIFY_PHONE) messaging.deliver({ phone: process.env.NOTIFY_PHONE, channels: { sms: true }, text: `Dry Run: new account request from ${r.request.organisation} (${r.request.sector}). Review: ${siteUrl(req)}/app`, orgName: 'platform', who: 'owner', purpose: 'new request' }).catch(() => {});
