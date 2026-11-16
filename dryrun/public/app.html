@@ -29,14 +29,14 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.45rem .
 @media (prefers-reduced-motion:no-preference){.card{transition:box-shadow .15s}}
 </style></head><body><div id="app"></div>
 <script>
-const $app=document.getElementById('app');let KEY=sessionStorage.getItem('dr_key')||'',KIND=sessionStorage.getItem('dr_kind')||'',S={tab:'overview',msg:null,err:null};
+const $app=document.getElementById('app');let KEY=sessionStorage.getItem('dr_key')||'',KIND=sessionStorage.getItem('dr_kind')||'',S={tab:'lab',msg:null,err:null};
 function h(t,a,...k){const e=document.createElement(t);for(const[n,v]of Object.entries(a||{})){if(n==='class')e.className=v;else if(n.startsWith('on'))e.addEventListener(n.slice(2),v);else if(v===true)e.setAttribute(n,'');else if(v!==false&&v!=null)e.setAttribute(n,v)}for(const c of k.flat(Infinity))if(c!=null&&c!==false)e.append(c.nodeType?c:document.createTextNode(c));return e}
 async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json',[KIND==='platform'?'x-platform-key':'x-api-key']:KEY},body:b===undefined?undefined:JSON.stringify(b)});let j=null;try{j=await r.json()}catch{}if(!r.ok){const e=new Error((j&&j.error)||('Request failed ('+r.status+')'));e.code=j&&j.code;if(e.code==='must_change_password')S.mustChange=true;throw e}return j}
 const O=(m,u,b)=>api(m,'/api/org'+u,b),P=(m,u,b)=>api(m,'/api/platform'+u,b);
 const fmt=n=>n==null?'—':typeof n==='number'?n.toLocaleString(undefined,{maximumFractionDigits:2}):n;
 const say=(m)=>{S.msg=m;S.err=null},fail=(e)=>{S.err=e.message||String(e);S.msg=null};
 async function act(fn,after){try{await fn();if(after)await after()}catch(e){fail(e)}render()}
-function signOut(){sessionStorage.clear();KEY='';KIND='';S={tab:'overview'};render()}
+function signOut(){sessionStorage.clear();KEY='';KIND='';S={tab:'lab'};render()}
 function msgs(){return[S.err&&h('div',{class:'err',role:'alert'},S.err),S.msg&&h('div',{class:'note',role:'status'},S.msg)]}
 
 const OO=(m,u,b)=>S.work?O(m,`/engagements/${S.work}/work`+u,b):O(m,u,b);
@@ -62,7 +62,7 @@ function changePw(){let cur,n1,n2;return h('div',{class:'login'},h('h1',{},'Choo
 // ---------- state ----------
 let DEMO=false,REQS={pending:0,requests:[]},ME=null,ORG=null,PACK=null,ASSETS=[],RUNS=[],TEAM=[],PACE=[],PLAT=null,CONF=null,SURVEYS=[],LIVE=[],MSGS={},RULES=null,DIR=[],LIVEALL=[],MSGLOG={recent:[],configured:{}};
 async function boot(){if(KIND==='platform'){PLAT=await P('GET','/orgs');CONF=await P('GET','/config');MSGLOG=await P('GET','/messaging');DIR=await P('GET','/directory');LIVEALL=await P('GET','/live');ENGALL=await P('GET','/engagements');REQS=await P('GET','/requests');PROPALL=await P('GET','/proposals');if(!['orgs','requests','deals','directory','network','live','caps'].includes(S.tab))S.tab='orgs';return}
- const me=await O('GET','/');ME=me.me;ORG=me.org;PACK=me.pack;DEMO=!!me.demo;if(ME.mustChange){S.mustChange=true;return}S.mustChange=false;ASSETS=await O('GET','/assets');RUNS=await O('GET','/runs');PACE=await O('GET','/pace');SURVEYS=await O('GET','/surveys');LIVE=await O('GET','/live');MSGS=(await O('GET','/messaging')).configured;RULES=await O('GET','/regulatory-rules');if(can('team')){TEAM=await O('GET','/team');await loadTeamInv()}ENGS=await O('GET','/engagements');if(!isPartner()||true){try{await loadProps();await loadLab()}catch{}}PARTNERS=isPartner()?[]:await O('GET','/partners');if(['orgs','requests','deals','directory','network','caps'].includes(S.tab))S.tab='overview';if(!S.wentAdmin&&new URLSearchParams(location.search).get('go')==='admin'&&ME.role==='admin'){S.tab='team';S.wentAdmin=true}}
+ const me=await O('GET','/');ME=me.me;ORG=me.org;PACK=me.pack;DEMO=!!me.demo;if(ME.mustChange){S.mustChange=true;return}S.mustChange=false;ASSETS=await O('GET','/assets');RUNS=await O('GET','/runs');PACE=await O('GET','/pace');SURVEYS=await O('GET','/surveys');LIVE=await O('GET','/live');MSGS=(await O('GET','/messaging')).configured;RULES=await O('GET','/regulatory-rules');if(can('team')){TEAM=await O('GET','/team');await loadTeamInv()}ENGS=await O('GET','/engagements');if(!isPartner()||true){try{await loadProps();await loadLab()}catch{}}PARTNERS=isPartner()?[]:await O('GET','/partners');if(['orgs','requests','deals','directory','network','caps'].includes(S.tab))S.tab='lab';if(isPartner()&&S.tab==='lab')S.tab='overview';if(!S.wentAdmin&&new URLSearchParams(location.search).get('go')==='admin'&&ME.role==='admin'){S.tab='team';S.wentAdmin=true}}
 const CAN={admin:'read write run promote approve team settings',builder:'read write run promote',approver:'read run promote approve',viewer:'read'};const can=a=>ME&&(CAN[ME.role]||'').split(' ').includes(a);
 const refresh=async()=>{KIND==='platform'?await boot():await boot()};
 
