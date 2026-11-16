@@ -53,13 +53,15 @@ async function deliver({ phone, channels, text, orgId, orgName, who, purpose }) 
 }
 const history = (orgId, limit = 100) => (reg.load().messages || []).filter((m) => !orgId || m.orgId === orgId).slice(0, limit);
 const first = (n) => String(n || '').trim().split(/\s+/)[0] || 'there';
-const tail = (inviteUrl) => `\nInvite others to apply to join your team.\nInvite others: ${inviteUrl}`;
+const tail = (inviteUrl, teamUrl) => `
+Invite your colleagues to apply to join your team: ${teamUrl}
+Invite other organisations to try Dry Run: ${inviteUrl}`;
 /** Welcome message for an admin the platform owner appoints. */
-const adminText = ({ name, org, username, password, url, adminUrl, subdomain, inviteUrl }) =>
+const adminText = ({ name, org, username, password, url, adminUrl, subdomain, inviteUrl, teamUrl }) =>
   `Welcome to Dry Run, ${first(name)}. You are now admin of Dry Run for ${org}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nInterface: ${url}\nAdmin console: ${adminUrl}\n` +
-  `You can run Dry Run on your own address${subdomain ? `, e.g. ${subdomain}` : ''}. Just ask.` + tail(inviteUrl);
+  `You can run Dry Run on your own address${subdomain ? `, e.g. ${subdomain}` : ''}. Just ask.` + tail(inviteUrl, teamUrl);
 /** Welcome message for a teammate an admin adds. No admin console, no domain offer. */
-const memberText = ({ name, by, org, role, username, password, url, inviteUrl }) =>
-  `Hi ${first(name)}, ${by} added you to Dry Run for ${org} as ${role}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nSign in: ${url}` + tail(inviteUrl);
+const memberText = ({ name, by, org, role, username, password, url, inviteUrl, teamUrl }) =>
+  `Hi ${first(name)}, ${by} added you to Dry Run for ${org} as ${role}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nSign in: ${url}` + tail(inviteUrl, teamUrl);
 const surveyText = ({ org, url, inviteUrl }) => `${org} would like your views (2 minutes): ${url}\nGet Dry Run for your organisation: ${inviteUrl}`;
 module.exports = { surveyText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };

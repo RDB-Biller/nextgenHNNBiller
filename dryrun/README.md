@@ -56,3 +56,9 @@ No packages are required. (`pg` is optional, only for Postgres storage.)
 - **Account requests**: public form on `/join` (honeypot, 5 per hour per IP). The platform owner approves or declines from the Requests tab; approving creates the workspace and sends sign-in details.
 - **Demo**: one click on `/join`, a private 48-hour workspace with sample data. No messaging, storage changes, partners or own address. Capped at 150 live demos and 6 per hour per IP. Expired demos are swept every 15 minutes.
 - **Own address**: admins ask for `dryrun.theircompany.com` in Settings; the platform owner marks it connected after DNS is added on Railway.
+
+## Two kinds of invite
+
+- **General invite** (`/join?ref=<org>`): sent to other organisations. They ask for their own workspace and the platform owner decides. The inviting organisation is recorded as the introducer.
+- **Team invite** (`/join?team=<token>`): for colleagues of one organisation. They ask to join that team, and that organisation's admin approves, picks the role and sends sign-in details. Seat limits apply. Admins can copy, replace or switch off the link in the Team tab. These requests never reach the platform owner's queue.
+- Both appear in the credential SMS, team link first.

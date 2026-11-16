@@ -30,6 +30,7 @@ app.get('/api/packs/:key', (req, res) => res.json(packs.detail(req.params.key)))
 
 
 const siteUrl = (req) => (process.env.DRYRUN_PUBLIC_URL || `${req.get('x-forwarded-proto') || 'http'}://${req.get('host')}`).replace(/\/$/, '');
+const teamUrl = (req, orgId) => `${siteUrl(req)}/join?team=${require('./requests').teamToken(orgId).token}`;
 const joinUrl = (req, orgId) => `${siteUrl(req)}/join${orgId ? '?ref=' + orgs.refCode(orgId) : ''}`;
 /** Send sign-in details on the chosen channels. Never throws; the username and password are still returned so nothing is lost if a send fails. */
 async function sendCreds(req, { orgId, member, username, password, role, by, deliver, adminAppointment }) {
@@ -37,14 +38,14 @@ async function sendCreds(req, { orgId, member, username, password, role, by, del
   if (!channels.sms && !channels.whatsapp) return [];
   const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const url = `${siteUrl(req)}/app`;
   const text = adminAppointment
-    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId) })
-    : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId) });
+    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) })
+    : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) });
   return messaging.deliver({ phone: member.phone, channels, text, orgId, orgName: o.name, who: role, purpose: adminAppointment ? 'admin appointment' : 'team invite' });
 }
 /** What a message would look like, with the password hidden. */
 function previewTexts(req, { org = 'XYZ Insurance', name = 'Ama Mensah', email = 'ama@xyz-insurance.com', by = 'Ama Mensah', role = 'builder' } = {}) {
-  const url = `${siteUrl(req)}/app`; const inv = `${siteUrl(req)}/join?ref=abc12345`; const un = require('./creds').makeUsername(name, org, new Set());
-  return { admin: messaging.adminText({ name, org, username: un, password: '••••••••••', url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(email), inviteUrl: inv }), teammate: messaging.memberText({ name: 'Kofi Asante', by, org, role, username: require('./creds').makeUsername('Kofi Asante', org, new Set()), password: '••••••••••', url, inviteUrl: inv }) };
+  const url = `${siteUrl(req)}/app`; const inv = `${siteUrl(req)}/join?ref=abc12345`, tm = `${siteUrl(req)}/join?team=tm_9f2c41d07a`; const un = require('./creds').makeUsername(name, org, new Set());
+  return { admin: messaging.adminText({ name, org, username: un, password: '••••••••••', url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(email), inviteUrl: inv, teamUrl: tm }), teammate: messaging.memberText({ name: 'Kofi Asante', by, org, role, username: require('./creds').makeUsername('Kofi Asante', org, new Set()), password: '••••••••••', url, inviteUrl: inv, teamUrl: tm }) };
 }
 
 // ---- public: sign in, request an account, demo ------------------------------------------------------------------------------------
@@ -54,6 +55,12 @@ app.post('/api/public/request-account', wrap(async (req, res) => {
   const r = requests.submit(req.body || {}, clientIp(req));
   if (r.request && process.env.NOTIFY_PHONE) messaging.deliver({ phone: process.env.NOTIFY_PHONE, channels: { sms: true }, text: `Dry Run: new account request from ${r.request.organisation} (${r.request.sector}). Review: ${siteUrl(req)}/app`, orgName: 'platform', who: 'owner', purpose: 'new request' }).catch(() => {});
   res.status(201).json({ received: true });
+}));
+app.get('/api/public/team-invite/:token', wrap(async (req, res) => { const o = requests.orgFromTeamToken(req.params.token); if (!o) throw err(404, 'This invite link is no longer active.'); res.json({ org: o.name }); }));
+app.post('/api/public/request-team', wrap(async (req, res) => {
+  const r = requests.submitTeam(req.body || {}, clientIp(req));
+  if (r.request) { const o = orgs.raw(r.request.orgId); for (const m of Object.values(o.members)) if (m.role === 'admin' && m.phone) messaging.deliver({ phone: m.phone, channels: { sms: true }, text: `Dry Run: ${r.request.contactName} asked to join the ${o.name} team. Review: ${siteUrl(req)}/app?go=admin`, orgId: o.id, orgName: o.name, who: 'admin', purpose: 'team request' }).catch(() => {}); }
+  res.status(201).json({ received: true, org: r.org });
 }));
 app.post('/api/public/demo', wrap(async (req, res) => res.status(201).json(await demo.create(clientIp(req)))));
 
@@ -118,6 +125,18 @@ O.post('/team', need('team'), wrap(async (req, res) => {
   const deliver = req.body.deliver || (req.body.phone ? { sms: true, whatsapp: true } : {});
   const delivery = req.body.phone ? await sendCreds(req, { orgId: oid(req), member: { name: m.name, email: m.email, phone: req.body.phone }, username: m.username, password: m.password, role: m.role, by: req.actor.name, deliver }) : [];
   res.status(201).json({ ...m, delivery });
+}));
+O.get('/team-invite', need('team'), (req, res) => { const t = requests.teamToken(oid(req)); res.json({ on: t.on, url: teamUrl(req, oid(req)), pending: requests.teamPending(oid(req)) }); });
+O.post('/team-invite/rotate', need('team'), (req, res) => { plans.assertNotDemo(req.org, 'Team invite links'); requests.teamToken(oid(req), true); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
+O.post('/team-invite/off', need('team'), (req, res) => { requests.teamInviteOff(oid(req)); res.json({ on: false }); });
+O.post('/team-invite/on', need('team'), (req, res) => { requests.teamInviteOn(oid(req)); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
+O.get('/team-requests', need('team'), (req, res) => res.json(requests.teamList(oid(req))));
+O.post('/team-requests/:rid/decline', need('team'), (req, res) => res.json(requests.teamDecline(oid(req), req.params.rid, req.body && req.body.reason, req.actor.name)));
+O.post('/team-requests/:rid/approve', need('team'), wrap(async (req, res) => {
+  const { request, member } = requests.teamApprove(oid(req), req.params.rid, req.body && req.body.role, req.actor.name);
+  const deliver = request.phone ? ((req.body && req.body.deliver) || { sms: true, whatsapp: true }) : {};
+  const delivery = request.phone ? await sendCreds(req, { orgId: oid(req), member: { name: member.name, email: member.email, phone: request.phone }, username: member.username, password: member.password, role: member.role, by: req.actor.name, deliver }) : [];
+  res.json({ ...member, delivery });
 }));
 O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30) }));
 O.patch('/team/:mid', need('team'), (req, res) => res.json(orgs.setRole(oid(req), req.params.mid, req.body.role)));

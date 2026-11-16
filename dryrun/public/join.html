@@ -21,7 +21,16 @@ ul{padding-left:1.1rem;margin:.6rem 0}li{margin:.25rem 0}.sm{font-size:14px;colo
 <h1>Look around, or ask for your own workspace</h1>
 <p class="lead">The demo opens straight away with sample insurance data. If you want to test your own product, tell us a little about your organisation and we will set you up.</p>
 <div id="invited" class="invited" hidden>You were invited by a Dry Run customer. Mention that in your request and we will look at it first.</div>
-<div class="grid">
+<div id="teamMode" hidden><h1 id="th">Ask to join the team</h1><p class="lead" id="tl"></p>
+ <section class="panel" style="max-width:520px;margin-top:1.4rem"><form id="tf" novalidate>
+  <label for="t_name">Your name</label><input id="t_name" required autocomplete="name">
+  <label for="t_job">Your role</label><input id="t_job" autocomplete="organization-title">
+  <label for="t_email">Work email</label><input id="t_email" type="email" required autocomplete="email">
+  <label for="t_phone">Phone or WhatsApp (your sign-in details are sent here)</label><input id="t_phone" type="tel" placeholder="024… or +233…" autocomplete="tel">
+  <label for="t_note">What will you use it for? (optional)</label><textarea id="t_note"></textarea>
+  <div class="hp" aria-hidden="true"><label>Website<input id="t_web" tabindex="-1" autocomplete="off"></label></div>
+  <p><button class="go" type="submit" id="tbtn">Ask to join</button></p><div id="terr"></div></form><div id="tok" class="done" hidden></div></section></div>
+<div id="mainMode"><div class="grid">
  <section class="panel demo" id="demo"><h2>Try the demo</h2>
   <p>No sign-up. You get a private workspace for 48 hours with:</p>
   <ul><li>a sample health product, rule set and payment plan</li><li>three finished runs to compare</li><li>a survey with eight answers already in</li></ul>
@@ -39,14 +48,17 @@ ul{padding-left:1.1rem;margin:.6rem 0}li{margin:.25rem 0}.sm{font-size:14px;colo
    <div class="hp" aria-hidden="true"><label>Website<input id="website" tabindex="-1" autocomplete="off"></label></div>
    <p><button class="go" type="submit" id="sbtn">Send request</button></p><div id="ferr"></div>
   </form><div id="ok" class="done" hidden></div></section>
-</div></main>
+</div></div></main>
 <script>
-const $=id=>document.getElementById(id);const ref=new URLSearchParams(location.search).get('ref')||'';if(ref)$('invited').hidden=false;
+const $=id=>document.getElementById(id);const QS=new URLSearchParams(location.search),TEAM=QS.get('team')||'';const ref=new URLSearchParams(location.search).get('ref')||'';if(ref)$('invited').hidden=false;
 const LABEL={insurer:'Insurance',bank:'Bank',fintech:'Fintech',mfi:'Microfinance',telco:'Telecoms',hospital:'Hospital or clinic',pharmacy:'Pharmacy',school:'School',research_firm:'Research or advisory firm',operator:'Operator or white-label partner'};
 fetch('/api/packs').then(r=>r.json()).then(p=>{const ids=(Array.isArray(p)?p:p.packs||[]).map(x=>x.key);$('sector').replaceChildren(...(ids.length?ids:Object.keys(LABEL)).map(id=>{const o=document.createElement('option');o.value=id;o.textContent=LABEL[id]||id;return o}))}).catch(()=>{$('sector').replaceChildren(...Object.keys(LABEL).map(id=>{const o=document.createElement('option');o.value=id;o.textContent=LABEL[id];return o}))});
 const show=(el,t)=>{el.innerHTML='';if(t){const d=document.createElement('div');d.className='err';d.setAttribute('role','alert');d.textContent=t;el.append(d)}};
 $('dbtn').onclick=async()=>{$('dbtn').disabled=true;show($('derr'));try{const r=await fetch('/api/public/demo',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const j=await r.json();if(!r.ok)throw new Error(j.error||'The demo could not open.');sessionStorage.setItem('dr_key',j.sessionKey);sessionStorage.setItem('dr_kind','member');location.href='/app'}catch(e){show($('derr'),e.message);$('dbtn').disabled=false}};
 $('f').onsubmit=async e=>{e.preventDefault();$('sbtn').disabled=true;show($('ferr'));const b={ref};for(const k of['organisation','contactName','jobTitle','email','phone','sector','interest','website'])b[k]=$(k).value.trim();
  try{const r=await fetch('/api/public/request-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();if(!r.ok)throw new Error(j.error||'We could not send the request.');$('f').hidden=true;$('ok').hidden=false;$('ok').textContent=j.message||'Thank you. We have your request and will reply by email'+(b.phone?' and message you on '+b.phone:'')+'.'}catch(e){show($('ferr'),e.message);$('sbtn').disabled=false}};
+if(TEAM){$('mainMode').hidden=true;document.querySelector('main>h1').hidden=true;document.querySelector('main>.lead').hidden=true;$('invited').hidden=true;$('teamMode').hidden=false;
+ fetch('/api/public/team-invite/'+encodeURIComponent(TEAM)).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error);$('th').textContent='Ask to join the '+j.org+' team';$('tl').textContent='Your admin at '+j.org+' will review your request and send your sign-in details. This is for colleagues of '+j.org+'. If you want Dry Run for your own organisation, ';const a=document.createElement('a');a.href='/join';a.textContent='ask for an account here';$('tl').append(a,'.')}).catch(e=>{$('th').textContent='This invite is not active';$('tl').textContent='Ask your colleague for a new team link.';$('tf').hidden=true});
+ $('tf').onsubmit=async e=>{e.preventDefault();$('tbtn').disabled=true;show($('terr'));try{const r=await fetch('/api/public/request-team',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TEAM,contactName:$('t_name').value.trim(),jobTitle:$('t_job').value.trim(),email:$('t_email').value.trim(),phone:$('t_phone').value.trim(),interest:$('t_note').value.trim(),website:$('t_web').value})});const j=await r.json();if(!r.ok)throw new Error(j.error||'We could not send the request.');$('tf').hidden=true;$('tok').hidden=false;$('tok').textContent='Thank you. Your admin has your request and will send your sign-in details'+($('t_phone').value?' to '+$('t_phone').value:' by email')+'.'}catch(e){show($('terr'),e.message);$('tbtn').disabled=false}}}
 if(location.hash==='#demo')$('demo').scrollIntoView();
 </script></body></html>
