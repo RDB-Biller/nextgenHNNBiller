@@ -7,9 +7,12 @@ const { err } = require('./util');
 const PLANS = {
   free_trial:     { label: 'Free trial',     limits: { members: 3,  assets: 60,   runsPerMonth: 100,  datasetRows: 20000, surveyResponses: 500 } },
   extended_trial: { label: 'Extended trial', limits: { members: 6,  assets: 150,  runsPerMonth: 300,  datasetRows: 50000, surveyResponses: 2000 } },
+  demo:           { label: 'Demo',           limits: { members: 1,  assets: 30,   runsPerMonth: 40,   datasetRows: 3000,  surveyResponses: 30 } },
   paid:           { label: 'Paid',           limits: { members: 50, assets: 2000, runsPerMonth: 5000, datasetRows: 500000, surveyResponses: 50000 } },
 };
-const isFree = (org) => org.plan !== 'paid';
+const isFree = (org) => org.plan !== 'paid' && org.plan !== 'demo';
+const isDemo = (org) => org.plan === 'demo';
+function assertNotDemo(org, what) { if (org.plan === 'demo') throw err(403, `${what} is turned off in the demo. Request an account to use it.`); }
 const limitsFor = (org) => ({ ...(PLANS[org.plan] || PLANS.free_trial).limits, ...(org.limitOverrides || {}) });
 const DAY = 86400000;
 
@@ -32,4 +35,4 @@ function assertRoom(org, what, current) {
   const lim = limitsFor(org)[what];
   if (lim !== undefined && current >= lim) throw err(402, `Your ${PLANS[org.plan].label.toLowerCase()} plan allows ${lim} ${what.replace(/([A-Z])/g, ' $1').toLowerCase()}. Ask the platform owner to raise the limit or switch to paid.`);
 }
-module.exports = { PLANS, isFree, limitsFor, statusOf, daysLeft, assertWritable, assertRoom, DAY };
+module.exports = { isDemo, assertNotDemo, PLANS, isFree, limitsFor, statusOf, daysLeft, assertWritable, assertRoom, DAY };

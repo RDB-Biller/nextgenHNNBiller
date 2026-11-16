@@ -66,10 +66,10 @@ async function results(orgId, surveyId) {
   return { survey: pub(s, rs.length), questions: qs, feeds };
 }
 /** Send the link to a short list of people. Numbers are not stored; only the count and the masked log entries. */
-async function invite(orgId, actor, surveyId, url, { phones, channels }) {
-  const o = orgs.raw(orgId); plans.assertWritable(o); const s = await adapter(orgId).get(orgId, 'surveys', surveyId); if (!s) throw err(404, 'Unknown survey.');
+async function invite(orgId, actor, surveyId, url, { phones, channels }, inviteUrl) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); plans.assertNotDemo(o, 'Sending messages'); const s = await adapter(orgId).get(orgId, 'surveys', surveyId); if (!s) throw err(404, 'Unknown survey.');
   const list = [...new Set((phones || []).map(String).map((x) => x.trim()).filter(Boolean))]; if (!list.length) throw err(422, 'Add at least one phone number.'); if (list.length > 50) throw err(422, 'Send to at most 50 numbers at a time.');
-  const text = `${o.name} would like your views (2 minutes): ${url}`; let sent = 0, failed = 0;
+  const text = messaging.surveyText({ org: o.name, url, inviteUrl }); let sent = 0, failed = 0;
   for (const p of list) { const r = await messaging.deliver({ phone: p, channels: channels || { sms: true }, text, orgId, orgName: o.name, who: 'survey', purpose: 'survey invite' }); if (r.length && r.every((x) => x.ok)) sent++; else failed++; }
   await audit.log(orgId, actor, 'survey.invite', { surveyId, sent, failed }); return { sent, failed };
 }

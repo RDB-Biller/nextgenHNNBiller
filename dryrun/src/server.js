@@ -13,11 +13,16 @@ const messaging = require('./messaging');
 const surveys = require('./surveys');
 const live = require('./live');
 const eng = require('./engagements');
+const requests = require('./requests');
+const demo = require('./demo');
 const { err, wrap } = require('./util');
 
 const app = express();
 app.use(express.json({ limit: '25mb' })); app.use(express.text({ type: 'text/csv', limit: '25mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+const PUBLIC = path.join(__dirname, '..', 'public');
+const ALIAS = { '/app': '/app.html', '/join': '/join.html' };
+for (const [from, file] of Object.entries(ALIAS)) { app.get(from, (req, res) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(require('fs').readFileSync(path.join(PUBLIC, file))); }); app.get(from + '/', (req, res) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(require('fs').readFileSync(path.join(PUBLIC, file))); }); }
+app.use(express.static(PUBLIC));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'dry-run', hnnConnected: hnn.configured() }));
 app.get('/api/packs', (req, res) => res.json(packs.list()));
@@ -25,13 +30,32 @@ app.get('/api/packs/:key', (req, res) => res.json(packs.detail(req.params.key)))
 
 
 const siteUrl = (req) => (process.env.DRYRUN_PUBLIC_URL || `${req.get('x-forwarded-proto') || 'http'}://${req.get('host')}`).replace(/\/$/, '');
-/** Send sign-in details on the chosen channels. Never throws; the key is still returned to the caller so nothing is lost if a send fails. */
-async function sendCreds(req, { org, orgId, phone, key, role, by, deliver, adminAppointment }) {
+const joinUrl = (req, orgId) => `${siteUrl(req)}/join${orgId ? '?ref=' + orgs.refCode(orgId) : ''}`;
+/** Send sign-in details on the chosen channels. Never throws; the username and password are still returned so nothing is lost if a send fails. */
+async function sendCreds(req, { orgId, member, username, password, role, by, deliver, adminAppointment }) {
   const channels = { sms: !!(deliver && deliver.sms), whatsapp: !!(deliver && deliver.whatsapp) };
   if (!channels.sms && !channels.whatsapp) return [];
-  const text = adminAppointment ? messaging.adminText(org, siteUrl(req), key) : messaging.memberText(org, by, role, siteUrl(req), key);
-  return messaging.deliver({ phone, channels, text, orgId, orgName: org, who: role, purpose: adminAppointment ? 'admin appointment' : 'team invite' });
+  const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const url = `${siteUrl(req)}/app`;
+  const text = adminAppointment
+    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId) })
+    : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId) });
+  return messaging.deliver({ phone: member.phone, channels, text, orgId, orgName: o.name, who: role, purpose: adminAppointment ? 'admin appointment' : 'team invite' });
 }
+/** What a message would look like, with the password hidden. */
+function previewTexts(req, { org = 'XYZ Insurance', name = 'Ama Mensah', email = 'ama@xyz-insurance.com', by = 'Ama Mensah', role = 'builder' } = {}) {
+  const url = `${siteUrl(req)}/app`; const inv = `${siteUrl(req)}/join?ref=abc12345`; const un = require('./creds').makeUsername(name, org, new Set());
+  return { admin: messaging.adminText({ name, org, username: un, password: '••••••••••', url, adminUrl: `${url}?go=admin`, subdomain: require('./creds').subdomainHint(email), inviteUrl: inv }), teammate: messaging.memberText({ name: 'Kofi Asante', by, org, role, username: require('./creds').makeUsername('Kofi Asante', org, new Set()), password: '••••••••••', url, inviteUrl: inv }) };
+}
+
+// ---- public: sign in, request an account, demo ------------------------------------------------------------------------------------
+const clientIp = (req) => String(req.get('x-forwarded-for') || req.headers.host || 'x').split(',')[0].trim();
+app.post('/api/login', (req, res) => res.json(orgs.login(req.body.username, req.body.password)));
+app.post('/api/public/request-account', wrap(async (req, res) => {
+  const r = requests.submit(req.body || {}, clientIp(req));
+  if (r.request && process.env.NOTIFY_PHONE) messaging.deliver({ phone: process.env.NOTIFY_PHONE, channels: { sms: true }, text: `Dry Run: new account request from ${r.request.organisation} (${r.request.sector}). Review: ${siteUrl(req)}/app`, orgName: 'platform', who: 'owner', purpose: 'new request' }).catch(() => {});
+  res.status(201).json({ received: true });
+}));
+app.post('/api/public/demo', wrap(async (req, res) => res.status(201).json(await demo.create(clientIp(req)))));
 
 // ---- public: survey pages (no sign-in) ------------------------------------------------------------------------------------------
 app.get('/api/public/survey/:token', wrap(async (req, res) => res.json(await surveys.publicView(req.params.token))));
@@ -43,17 +67,27 @@ const P = express.Router(); P.use(platformOnly);
 P.get('/orgs', (req, res) => res.json(orgs.list()));
 P.post('/orgs', wrap(async (req, res) => {
   const r = orgs.create(req.body, packs);
-  const delivery = await sendCreds(req, { org: r.org.name, orgId: r.org.id, phone: req.body.adminPhone, key: r.admin.apiKey, role: 'admin', deliver: req.body.deliver, adminAppointment: true });
+  const delivery = await sendCreds(req, { orgId: r.org.id, member: { name: r.admin.name, email: r.admin.email, phone: req.body.adminPhone }, username: r.admin.username, password: r.admin.password, role: 'admin', deliver: req.body.deliver, adminAppointment: true });
   res.status(201).json({ ...r, delivery, signInUrl: siteUrl(req) });
 }));
 P.get('/directory', (req, res) => res.json(orgs.directory()));
 P.get('/messaging', (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(null, 50) }));
 P.post('/orgs/:id/members/:mid/resend', wrap(async (req, res) => {
   const o = orgs.raw(req.params.id); const m = orgs.memberRaw(req.params.id, req.params.mid); if (!m.phone) throw err(422, 'This person has no phone number on file.');
-  const k = orgs.rotateKey(req.params.id, m.id);
-  const delivery = await sendCreds(req, { org: o.name, orgId: o.id, phone: m.phone, key: k.apiKey, role: m.role, by: 'the platform owner', deliver: req.body.deliver || { sms: true }, adminAppointment: m.role === 'admin' });
+  const k = orgs.resetPassword(req.params.id, m.id);
+  const delivery = await sendCreds(req, { orgId: o.id, member: m, username: k.username, password: k.password, role: m.role, by: 'the platform owner', deliver: req.body.deliver || { sms: true }, adminAppointment: m.role === 'admin' });
   res.json({ ...k, delivery });
 }));
+P.post('/message-preview', (req, res) => res.json(previewTexts(req, req.body || {})));
+P.get('/requests', (req, res) => res.json({ pending: requests.pending(), requests: requests.list() }));
+P.post('/requests/:id/decline', (req, res) => res.json(requests.decline(req.params.id, req.body.reason)));
+P.post('/requests/:id/approve', wrap(async (req, res) => {
+  const { request, created } = requests.approve(req.params.id, req.body); const r = created;
+  const delivery = await sendCreds(req, { orgId: r.org.id, member: { name: r.admin.name, email: r.admin.email, phone: request.phone }, username: r.admin.username, password: r.admin.password, role: 'admin', deliver: request.phone ? (req.body.deliver || { sms: true, whatsapp: true }) : {}, adminAppointment: true });
+  res.json({ ...r, delivery, signInUrl: `${siteUrl(req)}/app`, request });
+}));
+P.patch('/orgs/:id/domain', (req, res) => { const o = orgs.raw(req.params.id); o.domainRequest = { ...(o.domainRequest || {}), ...(req.body.status ? { status: req.body.status } : {}), ...(req.body.note !== undefined ? { note: String(req.body.note).slice(0, 300) } : {}) }; require('./registry').save(); res.json(o.domainRequest); });
+
 P.get('/orgs/:id', (req, res) => res.json(orgs.get(req.params.id)));
 P.patch('/orgs/:id/plan', (req, res) => res.json(orgs.setPlan(req.params.id, req.body)));
 P.get('/config', (req, res) => res.json(orgs.platformConfig()));
@@ -70,30 +104,38 @@ app.use('/api/platform', P);
 const O = express.Router();
 O.use((req, res, next) => {
   const a = orgs.authenticate(req); if (a.platform) throw err(403, 'Use a member key for workspace routes. The platform owner manages organisations under /api/platform.');
-  req.org = a.org; req.actor = { id: a.member.id, name: a.member.name, role: a.member.role }; req.role = a.member.role; next();
+  if (a.via === 'session' && a.member.mustChange && !['/', '/password'].includes(req.url.split('?')[0])) { const e = err(403, 'Choose a new password before you continue.'); e.code = 'must_change_password'; throw e; }
+  req.org = a.org; req.actor = { id: a.member.id, name: a.member.name, role: a.member.role, mustChange: !!a.member.mustChange && a.via === 'session' }; req.role = a.member.role; next();
 });
 const need = (action) => (req, res, next) => { if (!orgs.can(req.role, action)) throw err(403, `Your role (${req.role}) cannot do this.`); next(); };
 const oid = (req) => req.org.id;
 
-O.get('/', (req, res) => res.json({ me: req.actor, org: orgs.get(oid(req)), pack: packs.detail(req.org.pack) }));
+O.post('/password', (req, res) => res.json(orgs.changePassword(oid(req), req.actor.id, req.body.current, req.body.next)));
+O.get('/', (req, res) => res.json({ demo: plans.isDemo(req.org), me: req.actor, org: orgs.get(oid(req)), pack: packs.detail(req.org.pack) }));
 O.get('/team', need('read'), (req, res) => res.json(orgs.members(oid(req))));
 O.post('/team', need('team'), wrap(async (req, res) => {
   const m = orgs.addMember(oid(req), req.body, req.actor.name);
   const deliver = req.body.deliver || (req.body.phone ? { sms: true, whatsapp: true } : {});
-  const delivery = req.body.phone ? await sendCreds(req, { org: req.org.name, orgId: oid(req), phone: req.body.phone, key: m.apiKey, role: m.role, by: req.actor.name, deliver }) : [];
+  const delivery = req.body.phone ? await sendCreds(req, { orgId: oid(req), member: { name: m.name, email: m.email, phone: req.body.phone }, username: m.username, password: m.password, role: m.role, by: req.actor.name, deliver }) : [];
   res.status(201).json({ ...m, delivery });
 }));
 O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30) }));
 O.patch('/team/:mid', need('team'), (req, res) => res.json(orgs.setRole(oid(req), req.params.mid, req.body.role)));
 O.delete('/team/:mid', need('team'), (req, res) => res.json(orgs.removeMember(oid(req), req.params.mid)));
-O.post('/team/:mid/rotate-key', need('team'), wrap(async (req, res) => {
-  const m = orgs.memberRaw(oid(req), req.params.mid); const k = orgs.rotateKey(oid(req), m.id);
-  const delivery = m.phone && req.body && req.body.deliver ? await sendCreds(req, { org: req.org.name, orgId: oid(req), phone: m.phone, key: k.apiKey, role: m.role, by: req.actor.name, deliver: req.body.deliver }) : [];
+O.post('/team/:mid/rotate-key', need('team'), (req, res) => res.json(orgs.rotateKey(oid(req), req.params.mid)));
+O.post('/team/:mid/reset-password', need('team'), wrap(async (req, res) => {
+  const m = orgs.memberRaw(oid(req), req.params.mid); const k = orgs.resetPassword(oid(req), m.id);
+  const delivery = m.phone && req.body && req.body.deliver ? await sendCreds(req, { orgId: oid(req), member: m, username: k.username, password: k.password, role: m.role, by: req.actor.name, deliver: req.body.deliver, adminAppointment: false }) : [];
   res.json({ ...k, delivery });
 }));
+O.post('/team/preview', need('team'), (req, res) => res.json({ teammate: previewTexts(req, { org: req.org.name, by: req.actor.name, role: req.body.role || 'builder' }).teammate }));
+O.post('/domain-request', need('settings'), (req, res) => {
+  plans.assertNotDemo(req.org, 'Using your own address'); const d = String(req.body.domain || '').trim().toLowerCase(); if (!/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/.test(d)) throw err(422, 'Enter an address such as dryrun.yourcompany.com.');
+  req.org.domainRequest = { domain: d, status: 'requested', requestedAt: new Date().toISOString(), requestedBy: req.actor.name }; require('./registry').save(); res.json(req.org.domainRequest);
+});
 O.patch('/settings', need('settings'), (req, res) => res.json(orgs.settings(oid(req), req.body)));
 O.get('/storage', need('read'), (req, res) => res.json(store.describe(req.org.storage)));
-O.put('/storage', need('settings'), wrap(async (req, res) => res.json(await orgs.setStorage(oid(req), req.body))));
+O.put('/storage', need('settings'), wrap(async (req, res) => { plans.assertNotDemo(req.org, 'Moving your data'); res.json(await orgs.setStorage(oid(req), req.body)); }));
 
 O.get('/assets', need('read'), wrap(async (req, res) => res.json(await assets.list(oid(req), req.query.kind))));
 O.post('/assets', need('write'), wrap(async (req, res) => res.status(201).json(await assets.create(oid(req), req.actor, req.body))));
@@ -122,7 +164,7 @@ O.get('/surveys', need('read'), wrap(async (req, res) => res.json(await surveys.
 O.post('/surveys', need('write'), wrap(async (req, res) => res.status(201).json({ ...(await surveys.create(oid(req), req.actor, req.body)), } )));
 O.get('/surveys/:id/results', need('read'), wrap(async (req, res) => res.json(await surveys.results(oid(req), req.params.id))));
 O.post('/surveys/:id/status', need('write'), wrap(async (req, res) => res.json(await surveys.setStatus(oid(req), req.actor, req.params.id, req.body.status))));
-O.post('/surveys/:id/invite', need('write'), wrap(async (req, res) => { const s = (await surveys.list(oid(req))).find((x) => x.id === req.params.id); if (!s) throw err(404, 'Unknown survey.'); res.json(await surveys.invite(oid(req), req.actor, req.params.id, `${siteUrl(req)}/s.html?t=${encodeURIComponent(s.token)}`, req.body)); }));
+O.post('/surveys/:id/invite', need('write'), wrap(async (req, res) => { const s = (await surveys.list(oid(req))).find((x) => x.id === req.params.id); if (!s) throw err(404, 'Unknown survey.'); res.json(await surveys.invite(oid(req), req.actor, req.params.id, `${siteUrl(req)}/s.html?t=${encodeURIComponent(s.token)}`, req.body, joinUrl(req, oid(req)))); }));
 
 O.get('/live', need('read'), wrap(async (req, res) => res.json(await live.list(oid(req)))));
 O.post('/live', need('approve'), wrap(async (req, res) => res.status(201).json(await live.create(oid(req), req.actor, req.role, req.body))));
@@ -139,7 +181,7 @@ const W = (role, write) => (req, res, next) => {
 };
 O.get('/partners', need('read'), (req, res) => res.json(eng.partners()));
 O.get('/engagements', need('read'), (req, res) => res.json(eng.listFor(oid(req))));
-O.post('/engagements', need('settings'), (req, res) => res.status(201).json(eng.create(oid(req), req.actor, req.body)));
+O.post('/engagements', need('settings'), (req, res) => { plans.assertNotDemo(req.org, 'Engaging partners'); return res.status(201).json(eng.create(oid(req), req.actor, req.body)); });
 O.post('/engagements/:eid/:action', need('settings'), (req, res) => res.json(eng.respond(oid(req), req.actor, req.params.eid, req.params.action)));
 O.get('/engagements/:eid/statement', need('read'), wrap(async (req, res) => { const e = eng.listFor(oid(req)).find((x) => x.id === req.params.eid); if (!e) throw err(404, 'Unknown engagement.'); res.json(await eng.statement(oid(req), req.params.eid, e.side)); }));
 O.get('/engagements/:eid/work/info', need('read'), W(), wrap(async (req, res) => { const c = orgs.raw(req.work.clientId); res.json({ client: req.work.clientName, role: req.work.e.role, scope: req.work.e.scope, surveyTemplates: (packs.get(c.pack) || {}).surveyTemplates || [] }); }));
@@ -149,7 +191,7 @@ O.post('/engagements/:eid/work/surveys', W('researcher', true), wrap(async (req,
 const sv = (req) => { if (!eng.inScope(req.work.e, 'surveyIds', req.params.id)) throw err(403, 'The client has not given you access to this survey.'); return req.params.id; };
 O.get('/engagements/:eid/work/surveys/:id/results', need('read'), W('researcher'), wrap(async (req, res) => res.json(await surveys.results(req.work.clientId, sv(req)))));
 O.post('/engagements/:eid/work/surveys/:id/status', W('researcher', true), wrap(async (req, res) => res.json(await surveys.setStatus(req.work.clientId, req.work.actor, sv(req), req.body.status))));
-O.post('/engagements/:eid/work/surveys/:id/invite', W('researcher', true), wrap(async (req, res) => { const s = (await surveys.list(req.work.clientId)).find((x) => x.id === sv(req)); res.json(await surveys.invite(req.work.clientId, req.work.actor, s.id, `${siteUrl(req)}/s.html?t=${encodeURIComponent(s.token)}`, req.body)); }));
+O.post('/engagements/:eid/work/surveys/:id/invite', W('researcher', true), wrap(async (req, res) => { const s = (await surveys.list(req.work.clientId)).find((x) => x.id === sv(req)); res.json(await surveys.invite(req.work.clientId, req.work.actor, s.id, `${siteUrl(req)}/s.html?t=${encodeURIComponent(s.token)}`, req.body, joinUrl(req, oid(req)))); }));
 // operator
 const lv = (req) => { if (!eng.inScope(req.work.e, 'liveIds', req.params.id)) throw err(403, 'The client has not given you access to this programme.'); return req.params.id; };
 O.get('/engagements/:eid/work/live', need('read'), W('operator'), wrap(async (req, res) => res.json((await live.list(req.work.clientId)).filter((p) => eng.inScope(req.work.e, 'liveIds', p.id)))));
@@ -170,7 +212,7 @@ O.post('/hnn/import', need('write'), wrap(async (req, res) => {
 app.use('/api/org', O);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
-app.use((e, req, res, next) => { const s = e.status || 500; if (s === 500) console.error(e); res.status(s).json({ error: s === 500 ? 'Something went wrong on our side.' : e.message }); });
+app.use((e, req, res, next) => { const s = e.status || 500; if (s === 500) console.error(e); res.status(s).json({ error: s === 500 ? 'Something went wrong on our side.' : e.message, ...(e.code ? { code: e.code } : {}) }); });
 
 module.exports = app;
-if (require.main === module) { const port = process.env.PORT || 4100; app.listen(port, () => console.log(`Dry Run listening on ${port}`)); }
+if (require.main === module) { const port = process.env.PORT || 4100; app.listen(port, () => console.log(`Dry Run listening on ${port}`)); setInterval(() => demo.sweep().catch(() => {}), 15 * 60 * 1000).unref(); }

@@ -46,3 +46,13 @@ No packages are required. (`pg` is optional, only for Postgres storage.)
 - Postgres storage is written but not tested against a live database.
 - The Coach does not use an LLM yet; it explains itself in fixed wording.
 - Keys are per member; there is no email invite or password flow yet.
+
+
+## Sign-in, requests and demo
+
+- **Pages**: `/` public landing, `/join` request an account or open a demo, `/app` the workspace (`/app?go=admin` opens the Team area for admins).
+- **Sign-in**: username and password (texted to people when they are added). The first password is temporary and must be changed on first sign-in. Five wrong tries lock a username for 15 minutes. Access keys and the platform key still work from "Use an access key".
+- **Messages** (SMS and WhatsApp via Africa's Talking): admin appointment and teammate invite both carry the interface link and an invite link (`/join?ref=...`). The admin message also carries the admin console link and, when the admin's email is on a company domain, an offer of `dryrun.<their domain>`. Previews are on the Create-organisation form and the Team form.
+- **Account requests**: public form on `/join` (honeypot, 5 per hour per IP). The platform owner approves or declines from the Requests tab; approving creates the workspace and sends sign-in details.
+- **Demo**: one click on `/join`, a private 48-hour workspace with sample data. No messaging, storage changes, partners or own address. Capped at 150 live demos and 6 per hour per IP. Expired demos are swept every 15 minutes.
+- **Own address**: admins ask for `dryrun.theircompany.com` in Settings; the platform owner marks it connected after DNS is added on Railway.
