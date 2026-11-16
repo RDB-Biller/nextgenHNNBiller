@@ -9,6 +9,7 @@ const settle = require('../scenarios/expeditedSettlement');
 const planOpts = require('../scenarios/planOptions');
 const campaign = require('../scenarios/campaign');
 const financing = require('../scenarios/financing');
+const outcomesSc = require('../scenarios/outcomes');
 
 const SCENARIOS = {
   adjudication_ladder: {
@@ -66,6 +67,17 @@ const SCENARIOS = {
       months: ['Month 1: gather co-payment and wallet data', 'Month 2: model by service type', 'Month 3: pilot', 'Month 4: review actuals'],
     },
   },
+  outcomes_based_care: {
+    key: 'outcomes_based_care', label: 'Outcomes-based care', engine: outcomesSc,
+    summary: 'Pay providers by how their own patients do. Pick a condition, weight a few clinical measures into one score, and set bonus and penalty bands. Shows who lands where, complications avoided, what it costs and saves, and how fee-for-service pays more when patients have complications.',
+    inputs: [{ kind: 'outcomes_programme', required: true, syntheticOk: true }],
+    params: [{ key: 'providers', label: 'Providers to simulate', default: 20 }, { key: 'patientsPerProvider', label: 'Patients with the condition per provider', default: 150 }, { key: 'feePerPatientYear', label: 'Base fee per patient a year', default: 900 }, { key: 'complicationCost', label: 'Cost of one complication', default: 4000 }, { key: 'extraBillPerComplication', label: 'Extra a provider bills for a complication', default: 1500 }, { key: 'providerResponse', label: 'How strongly providers respond to the bands, 0 to 1 (assumption)', default: 0.6 }],
+    pace: {
+      days: ['Pick a condition and the measures that matter', 'Set bonus and penalty bands', 'Run and read the bands, savings and who is penalised', 'Ask the Coach for better bands and compare', 'Agree a pilot with a few providers'],
+      weeks: ['Week 1: agree measures and weights with clinicians', 'Week 2: gather a baseline from real patient records', 'Week 3: run, compare and use the Coach', 'Week 4: agree the pilot and how each provider will see their score'],
+      months: ['Month 1: baseline and data quality', 'Month 2: design bands with providers', 'Month 3: shadow scoring on live data without paying', 'Month 4: pilot payments with a few providers', 'Month 5: review and widen'],
+    },
+  },
   campaign: {
     key: 'campaign', label: 'Marketing campaign', engine: campaign,
     summary: 'Pick an audience from your customer list, choose channels and an offer, and see responses, sign-ups, cost and first-year margin before you spend.',
@@ -80,7 +92,7 @@ const SCENARIOS = {
 };
 const shell = (key, label, vocab, extra = {}) => ({ key, label, status: 'shell', vocab, scenarios: [], templates: [], note: 'The pack is set up (vocabulary and asset types) with no scenarios yet. Scenarios are added as clients in this sector come on board.', ...extra });
 const PACKS = {
-  insurer: { key: 'insurer', label: 'Health and general insurers', status: 'ready', vocab: { customer: 'member', transaction: 'claim', provider: 'provider', product: 'plan' }, scenarios: ['adjudication_ladder', 'expedited_settlement', 'plan_options', 'campaign'], surveyTemplates: [{ key: 'hospital_choice', title: 'What would you choose on your plan?', purpose: 'Find out whether members want access to higher-tier hospitals and what they would pay.', questions: [{ type: 'choice', prompt: 'Which hospitals do you use most today?', options: ['Local clinic or health centre', 'District or general hospital', 'Private or teaching hospital'] }, { type: 'choice', prompt: 'Would you pay a little more to also reach a few higher-tier hospitals?', options: ['Yes', 'No', 'Not sure'], feeds: { param: 'desireHigherTierPct', option: 'Yes' } }, { type: 'number', prompt: 'How much more per month would you pay (GHS)?' }, { type: 'rating', prompt: 'How important is it that your yearly cap lasts the whole year? (1 = not at all, 5 = very)' }, { type: 'text', prompt: 'What would make this plan better for you? (please do not write names or phone numbers)' }] }],
+  insurer: { key: 'insurer', label: 'Health and general insurers', status: 'ready', vocab: { customer: 'member', transaction: 'claim', provider: 'provider', product: 'plan' }, scenarios: ['adjudication_ladder', 'expedited_settlement', 'plan_options', 'campaign', 'outcomes_based_care'], surveyTemplates: [{ key: 'hospital_choice', title: 'What would you choose on your plan?', purpose: 'Find out whether members want access to higher-tier hospitals and what they would pay.', questions: [{ type: 'choice', prompt: 'Which hospitals do you use most today?', options: ['Local clinic or health centre', 'District or general hospital', 'Private or teaching hospital'] }, { type: 'choice', prompt: 'Would you pay a little more to also reach a few higher-tier hospitals?', options: ['Yes', 'No', 'Not sure'], feeds: { param: 'desireHigherTierPct', option: 'Yes' } }, { type: 'number', prompt: 'How much more per month would you pay (GHS)?' }, { type: 'rating', prompt: 'How important is it that your yearly cap lasts the whole year? (1 = not at all, 5 = very)' }, { type: 'text', prompt: 'What would make this plan better for you? (please do not write names or phone numbers)' }] }],
   templates: [{ kind: 'rule_set', name: 'Starter outpatient auto-approve rules', fromSynthetic: true }, { kind: 'payment_plan', name: 'Starter early-pay tiers', data: { baselineDays: 30, tiers: [{ days: 14, discountPct: 10 }, { days: 1, discountPct: 15 }] } }] },
   research_firm: { key: 'research_firm', label: 'Research firms and fieldwork partners', status: 'partner', vocab: { customer: 'respondent', transaction: 'survey', provider: 'fieldworker', product: 'study' }, scenarios: [], templates: [], note: 'A partner account. Clients engage you from the network to run surveys and fieldwork. You see only what each client allows.' },
   operator: { key: 'operator', label: 'White-label operators', status: 'partner', vocab: { customer: 'member', transaction: 'programme', provider: 'operator', product: 'programme' }, scenarios: [], templates: [], note: 'A partner account. Clients engage you to launch and monitor programmes. You see only the programmes each client allows.' },

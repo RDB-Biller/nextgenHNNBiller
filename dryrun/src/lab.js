@@ -11,6 +11,7 @@ const engine = require('./engine');
 const audit = require('./audit');
 const regulatory = require('./regulatory');
 const fin = require('./scenarios/financing');
+const outcomes = require('./scenarios/outcomes');
 const campaignSc = require('./scenarios/campaign');
 const { err, iso, id, round } = require('./util');
 
@@ -46,6 +47,9 @@ for (const [key, h] of Object.entries(HEALTH)) ARCH[key] = { key, label: h.label
 ARCH.cashback_loyalty = { key: 'cashback_loyalty', label: 'Loyalty cashback or discount', summary: 'Reward members for a qualifying action, such as renewing early or using a partner clinic.', packs: ['insurer'], kind: 'campaign', scenario: 'campaign', input: 'campaign',
   params: [txt('name', 'Programme name', 'Loyalty cashback'), num('cashbackPct', 'Reward', 5, 0, 30, 'Cashback or discount as a share of the premium.', '%'), num('monthlyPremium', 'Premium a month', 70, 5, 5000, '', 'GHS'), num('marginPct', 'Your margin on the premium', 22, 0, 80, '', '%'), num('budget', 'Budget', 2000, 100, 1000000, 'Most you will spend contacting people.', 'GHS'), sel('segment', 'Who it is for', 'member', [['member', 'Current members'], ['prospect', 'New prospects'], ['lapsed', 'Lapsed members'], ['all', 'Everyone']], '')],
   build: (p) => ({ ...campaignSc.DEFAULT_CAMPAIGN(), name: p.name, audience: { segment: p.segment, minAge: 18, maxAge: 70, regions: [] }, offer: { discountPct: Number(p.cashbackPct) }, product: { monthlyPremium: Number(p.monthlyPremium), marginPct: Number(p.marginPct), firstYearRetentionPct: 75 }, budget: Number(p.budget) }) };
+ARCH.outcomes_care = { key: 'outcomes_care', label: 'Outcomes-based care programme', summary: 'Pay providers by how their own patients do, for hypertension, diabetes or high cholesterol.', packs: ['insurer'], kind: 'outcomes_programme', scenario: 'outcomes_based_care', input: 'outcomes_programme',
+  params: [txt('name', 'Programme name', 'Outcomes-based care'), sel('condition', 'Condition', 'hypertension', [['hypertension', 'Hypertension'], ['diabetes', 'Diabetes'], ['dyslipidemia', 'High cholesterol']], ''), num('controlWeight', 'Weight on getting the condition under control', 40, 0, 100, 'Out of 100 across all measures.', '%'), num('adherenceWeight', 'Weight on follow-up and medicine adherence', 25, 0, 100, '', '%'), num('screeningWeight', 'Weight on screening', 10, 0, 100, '', '%'), num('complicationWeight', 'Weight on fewer complications', 25, 0, 100, '', '%'), num('bonusMaxPct', 'Largest bonus', 10, 0, 30, 'As a share of the base fee.', '%'), num('penaltyMaxPct', 'Largest reduction', 6, 0, 20, 'As a share of the base fee.', '%'), num('cashback', 'Patient cashback a year for staying in control', 8, 0, 200, '0 to switch it off.', 'GHS')],
+  build: (p) => { const b = Number(p.bonusMaxPct), pn = Number(p.penaltyMaxPct); return { name: p.name, condition: p.condition, weights: { control: Number(p.controlWeight), adherence: Number(p.adherenceWeight), screening: Number(p.screeningWeight), complications: Number(p.complicationWeight) }, bands: [{ minScore: 80, adjPct: b }, { minScore: 65, adjPct: round(b / 2, 1) }, { minScore: 50, adjPct: 0 }, { minScore: 35, adjPct: -round(pn / 2, 1) }, { minScore: 0, adjPct: -pn }], patientCashback: { enabled: Number(p.cashback) > 0, amount: Number(p.cashback) } }; } };
 ARCH.instalment_overdraft = { key: 'instalment_overdraft', label: 'Instalment premium with overdraft', summary: 'Premium paid in instalments by auto-debit, with an overdraft when the wallet is short.', packs: ['fintech'], kind: 'finance_offer', scenario: 'premium_financing', input: 'finance_offer',
   params: [txt('name', 'Offer name', 'Instalment premium with overdraft'), sel('installments', 'Instalments a year', '4', [['2', 'Twice a year'], ['4', 'Quarterly'], ['12', 'Monthly']], ''), num('loadingPct', 'Loading for paying in instalments', 6, 0, 25, 'Extra the customer pays because the money comes later.', '%'), num('feePct', 'Overdraft fee', 3, 0, 15, 'Charged on each advance.', '%'), num('termDays', 'Days to repay', 30, 7, 120, '', 'days'), num('limitMultiple', 'Overdraft limit', 1, 0.25, 3, 'As a multiple of one instalment.', '×'), num('eligibleSharePct', 'Customers eligible', 65, 5, 100, 'Share with enough wallet history.', '%')],
   build: (p) => ({ ...fin.DEFAULT_OFFER(), name: p.name, coverCash: { ...fin.DEFAULT_OFFER().coverCash, enabled: false }, premiumOverdraft: { enabled: true, installments: Number(p.installments), loadingPct: Number(p.loadingPct), feePct: Number(p.feePct), termDays: Number(p.termDays), limitMultiple: Number(p.limitMultiple), eligibleSharePct: Number(p.eligibleSharePct) } }) };
@@ -69,10 +73,17 @@ function cleanParams(a, input = {}) {
 const SUGGEST = [
   { label: 'Lower the premium by 8%', changes: { premiumPct: -8 } }, { label: 'Raise the yearly cap by 25%', changes: { capPct: 25 } }, { label: 'Add a 10% co-payment', changes: { coPayPct: 10 } }, { label: 'Halve the waiting period', changes: { waitingFactor: 0.5 } },
 ];
+function describeAny(kind, d) {
+  if (kind === 'product') return describeProduct(d);
+  if (kind === 'outcomes_programme') return { rows: [['Condition', d.condition], ['Score weights', Object.entries(d.weights).map(([k, v]) => `${k} ${v}`).join(', ')], ['Pay bands', d.bands.map((b) => `score ${b.minScore}+: ${b.adjPct > 0 ? '+' : ''}${b.adjPct}%`).join('; ')], ['Patient cashback', d.patientCashback && d.patientCashback.enabled ? `${d.patientCashback.amount} a year` : 'None']] };
+  if (kind === 'campaign') return { rows: [['Audience', d.audience.segment], ['Reward', `${d.offer.discountPct}% of the premium`], ['Premium a month', d.product.monthlyPremium], ['Budget', d.budget]] };
+  if (kind === 'finance_offer') { const rows = []; const po = d.premiumOverdraft, cc = d.coverCash; if (po && po.enabled !== false) rows.push(['Instalments', `${po.installments} a year, ${po.loadingPct}% loading`], ['Overdraft', `${po.feePct}% fee for ${po.termDays} days, limit ${po.limitMultiple}× an instalment`]); if (cc && cc.enabled !== false) rows.push(['Cash advances', `${cc.feePct}% fee for ${cc.repayDays} days, up to ${cc.maxAdvance}`]); return { rows }; }
+  return null;
+}
 function describeProduct(d) { return { name: d.name, premium: d.premium, benefitCap: d.benefitCap, coPayPct: d.coPayPct, waitingDays: d.waitingDays, tiers: d.hospitalTiers.map((t) => `${t.name} (${t.costMultiple}×)`), options: (d.options || []).map((o) => `${o.name} (${o.premiumAdjPct > 0 ? '+' : ''}${o.premiumAdjPct}%)`), exclusions: d.exclusions }; }
 
 /** Build the data from parameters without saving anything, so the form can show what it would make. */
-function preview(orgId, key, params) { const a = arch(orgId, key); const p = cleanParams(a, params); const data = a.build(p); return { params: p, data, summary: a.kind === 'product' ? describeProduct(data) : null }; }
+function preview(orgId, key, params) { const a = arch(orgId, key); const p = cleanParams(a, params); const data = a.build(p); return { params: p, data, summary: describeAny(a.kind, data) }; }
 
 async function generate(orgId, actor, role, { archetype, params, note } = {}) {
   const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot create products.');
@@ -82,7 +93,7 @@ async function generate(orgId, actor, role, { archetype, params, note } = {}) {
   let run = null, runNote = null;
   if (orgs.can(role, 'run')) { try { run = await engine.run(orgId, actor, role, { scenario: a.scenario, name: `${p.name}: first run`, inputs: { [a.input]: { assetId: asset.id } }, params: {} }); } catch (e) { runNote = `The first run was skipped: ${e.message}`; } }
   await audit.log(orgId, actor, 'lab.generate', { assetId: asset.id, archetype: a.key });
-  return { asset: await assets.detail(orgId, asset.id, {}), run, runNote, summary: a.kind === 'product' ? describeProduct(data) : null, suggestions: a.kind === 'product' ? SUGGEST : [], nextSteps: ['Read the first run. Check the loss ratio against your target.', 'Make a few variations and compare them side by side.', 'When one looks right, move it through the gates: dry run, shadow, then approved.'] };
+  return { asset: await assets.detail(orgId, asset.id, {}), run, runNote, summary: describeAny(a.kind, data), suggestions: a.kind === 'product' ? SUGGEST : [], nextSteps: ['Read the first run. Check the loss ratio against your target.', 'Make a few variations and compare them side by side.', 'When one looks right, move it through the gates: dry run, shadow, then approved.'] };
 }
 const adapter = (orgId) => audit.adapter(orgId);
 

@@ -73,3 +73,7 @@ No packages are required. (`pg` is optional, only for Postgres storage.)
 ## Product Lab
 
 Pick a product type (outpatient, inpatient and surgical, maternity, chronic care, micro health, family plan, loyalty cashback; for fintechs, instalment premium with overdraft and cover cash), enter a few parameters and get a complete draft with a first run. Then: change the parameters as a new version, make variations (one change each) that are grouped with the original, compare them side by side with what each would need from the regulator, and use the ideas board (suggest, vote, build a draft from an idea). Everything lands in the Library as a draft and passes the same gates. Claims frequency and cost for each product type are typical assumptions stored on the product, not real data.
+
+## Outcomes-based care
+
+Scenario `outcomes_based_care` and Product Lab type "Outcomes-based care programme" (hypertension, diabetes, high cholesterol). Providers are scored only on their own patients across control, adherence, screening and complications, blended into one score that places them in a bonus or penalty band. Output: who lands where, complications avoided, bonuses and reductions, patient cashback, net to the insurer, and the fee-for-service trap (providers with more complications are paid more). The Coach searches better bands and keeps penalised providers under 30%. Provider response is an assumption. The Library tab is now "Lab Library".

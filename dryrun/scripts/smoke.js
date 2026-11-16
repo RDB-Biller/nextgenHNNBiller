@@ -25,7 +25,7 @@ async function main() {
   ok((await call('POST', '/api/platform/orgs', 'wrong', {}, 'x-platform-key')).s === 401, 'bad platform key rejected');
   let r = await plat('POST', '/orgs', { name: 'Nationwide Medical Insurance', sector: 'insurer', adminName: 'Ama', adminEmail: 'ama@nationwide.test', pace: 'weeks' }); ok(r.s === 201 && r.j.admin.apiKey, 'org created with admin key');
   const orgId = r.j.org.id; const ADMIN = r.j.admin.apiKey; ok(r.j.org.plan === 'free_trial' && r.j.org.daysLeft > 50, 'starts on a free trial');
-  ok((await call('GET', '/api/org', ADMIN)).j.pack.scenarios.length === 4, 'insurer pack offers four scenarios');
+  ok((await call('GET', '/api/org', ADMIN)).j.pack.scenarios.length === 5, 'insurer pack offers five scenarios');
   ok((await plat('POST', '/orgs', { name: 'X', sector: 'nope', adminEmail: 'x@x.test' })).s === 422, 'unknown pack refused');
 
   section('Team, roles and limits');
@@ -211,7 +211,7 @@ async function main() {
   const inbox = (await call('GET', '/api/org/proposals', ADMIN)).j; ok(inbox.length === 1 && inbox[0].side === 'received' && inbox[0].evidence.length === 2 && inbox[0].terms.premiumOverdraft, 'insurer sees the design and evidence'); ok(!JSON.stringify(inbox).includes('customers"'), 'but not the proposer\'s data');
   ok((await call('POST', `/api/org/proposals/${PID}/respond`, BUILD, { action: 'accept' })).s === 403, 'a builder cannot accept'); ok((await call('POST', `/api/org/proposals/${PID}/respond`, FIN, { action: 'accept' })).s === 403, 'the sender cannot accept their own proposal');
   ok((await call('POST', `/api/org/proposals/${PID}/respond`, ADMIN, { action: 'reply', note: 'Can the limit be lower?' })).s === 200, 'insurer can reply'); 
-  r = await call('POST', `/api/org/proposals/${PID}/respond`, ADMIN, { action: 'accept' }); ok(r.s === 200 && r.j.status === 'accepted' && r.j.importedAssetId, 'insurer accepts'); const got = (await call('GET', '/api/org/assets?kind=finance_offer', ADMIN)).j; ok(got.length === 1 && got[0].name.startsWith('Proposal:'), 'the design lands in the insurer library as a draft');
+  r = await call('POST', `/api/org/proposals/${PID}/respond`, ADMIN, { action: 'accept' }); ok(r.s === 200 && r.j.status === 'accepted' && r.j.importedAssetId, 'insurer accepts'); const got = (await call('GET', '/api/org/assets?kind=finance_offer', ADMIN)).j; ok(got.length === 1 && got[0].name.startsWith('Proposal:'), 'the design lands in the insurer Lab Library as a draft');
   ok((await call('POST', `/api/org/proposals/${PID}/respond`, ADMIN, { action: 'decline' })).s === 409, 'closed proposals stay closed');
   r = await call('POST', '/api/org/proposals', FIN, { title: 'Second', summary: 'Please introduce us to a suitable insurer', assetId: OFF, runIds: [R1] }); ok(r.j.status === 'awaiting_introduction', 'no code: waits for an introduction'); const PID2 = r.j.id;
   ok((await call('GET', '/api/org/proposals', ADMIN)).j.length === 1, 'insurer cannot see it yet');
@@ -241,6 +241,15 @@ async function main() {
   r = await call('POST', `/api/org/lab/ideas/${IDEA}/promote`, BUILD, {}); ok(r.s === 200 && r.j.idea.status === 'promoted' && r.j.asset.name === 'Pay for dental scaling', 'promoting an idea builds a draft product from it'); ok((await call('POST', `/api/org/lab/ideas/${IDEA}/promote`, BUILD, {})).s === 409, 'cannot promote twice');
   r = await call('POST', '/api/org/lab/generate', FIN, { archetype: 'instalment_overdraft', params: { installments: '4', feePct: 4 } }); ok(r.s === 201 && r.j.asset.kind === 'finance_offer' && r.j.run.scenario === 'premium_financing', 'fintech builds a finance offer the same way');
   r = await call('POST', '/api/org/lab/generate', ADMIN, { archetype: 'cashback_loyalty', params: { cashbackPct: 8 } }); ok(r.s === 201 && r.j.asset.kind === 'campaign' && r.j.run.scenario === 'campaign', 'loyalty cashback builds a campaign and runs it');
+
+  section('Outcomes-based care');
+  r = await call('GET', '/api/org/lab/archetypes', ADMIN); ok(r.j.some((a) => a.key === 'outcomes_care'), 'outcomes-based care is offered to insurers');
+  r = await call('POST', '/api/org/lab/generate', ADMIN, { archetype: 'outcomes_care', params: { name: 'Diabetes outcomes', condition: 'diabetes' } }); ok(r.s === 201 && r.j.asset.kind === 'outcomes_programme' && r.j.run.scenario === 'outcomes_based_care' && r.j.summary.rows.length >= 3, 'one step builds the programme and runs it'); const OP = r.j.asset.id; const orr = r.j.run;
+  ok(orr.result.complicationsAvoided > 0 && orr.result.bands.length === 5 && orr.result.feeForServiceTrap.extraPaidToHighComplicationProvidersPct > 0, 'it shows complications avoided, bands and the fee-for-service trap');
+  ok(orr.result.measures.map((m) => m.key).join() === 'control,adherence,screening,complications', 'scored on measures for the condition');
+  r = await call('POST', `/api/org/runs/${orr.id}/coach`, ADMIN, {}); ok(r.s === 200 && (r.j.suggestions.length === 0 || r.j.suggestions[0].draft.kind === 'outcomes_programme'), 'Coach searches better bands');
+  ok((await call('POST', '/api/org/assets', ADMIN, { kind: 'outcomes_programme', name: 'bad', data: { condition: 'x' } })).s === 422, 'a programme without bands is refused');
+  ok((await call('POST', '/api/org/runs', FIN, { scenario: 'outcomes_based_care', params: {} })).s === 422, 'fintechs do not run it');
 
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
