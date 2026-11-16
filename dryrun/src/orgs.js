@@ -106,11 +106,12 @@ function setPlan(orgId, { plan, trialDays, extendDays, limitOverrides, suspended
   reg.save(); return publicOrg(o);
 }
 const platformConfig = () => reg.load().config;
-function setPlatformConfig({ maxFreeOrgs, trialDays, graceDays } = {}) {
+function setPlatformConfig({ maxFreeOrgs, trialDays, graceDays, partnerPlatformSharePct } = {}) {
   const c = reg.load().config;
   if (maxFreeOrgs !== undefined) c.caps.maxFreeOrgs = maxFreeOrgs === null ? null : Number(maxFreeOrgs);
   if (trialDays) c.defaults.trialDays = Number(trialDays);
   if (graceDays !== undefined) c.defaults.graceDays = Number(graceDays);
+  if (partnerPlatformSharePct !== undefined) c.partnerPlatformSharePct = Number(partnerPlatformSharePct);
   reg.save(); return c;
 }
 

@@ -12,6 +12,7 @@ const hnn = require('./connectors/hnn');
 const messaging = require('./messaging');
 const surveys = require('./surveys');
 const live = require('./live');
+const eng = require('./engagements');
 const { err, wrap } = require('./util');
 
 const app = express();
@@ -57,6 +58,10 @@ P.get('/orgs/:id', (req, res) => res.json(orgs.get(req.params.id)));
 P.patch('/orgs/:id/plan', (req, res) => res.json(orgs.setPlan(req.params.id, req.body)));
 P.get('/config', (req, res) => res.json(orgs.platformConfig()));
 P.patch('/config', (req, res) => res.json(orgs.setPlatformConfig(req.body)));
+P.get('/engagements', (req, res) => res.json(eng.listAll()));
+P.patch('/engagements/:id', (req, res) => res.json(eng.setShare(req.params.id, req.body.platformSharePct)));
+P.get('/engagements/:id/statement', wrap(async (req, res) => res.json(await eng.statement(null, req.params.id, 'platform'))));
+P.patch('/orgs/:id/partner', (req, res) => res.json(eng.setPartnerProfile(req.params.id, req.body)));
 P.get('/live', wrap(async (req, res) => res.json(await live.all())));
 P.patch('/live/:orgId/:id', wrap(async (req, res) => res.json(await live.setTerms(req.params.orgId, req.params.id, req.body))));
 app.use('/api/platform', P);
@@ -125,6 +130,33 @@ O.get('/live/:id', need('read'), wrap(async (req, res) => res.json(await live.ge
 O.post('/live/:id/status', need('approve'), wrap(async (req, res) => res.json(await live.setStatus(oid(req), req.actor, req.role, req.params.id, req.body.status, req.body.note))));
 O.post('/live/:id/actuals', need('write'), wrap(async (req, res) => res.json(await live.addActuals(oid(req), req.actor, req.role, req.params.id, req.body.periods || req.body))));
 O.post('/live/:id/notes', need('write'), wrap(async (req, res) => res.json(await live.addNote(oid(req), req.actor, req.role, req.params.id, req.body.note))));
+
+// ---- partner network: engagements and scoped work ------------------------------------------------------------------------------------
+const mine = (req) => ({ id: req.actor.id, name: req.actor.name });
+const W = (role, write) => (req, res, next) => {
+  if (write && !orgs.can(req.role, 'write')) throw err(403, 'Your role cannot do this.');
+  const a = eng.access(oid(req), mine(req), req.params.eid, role); req.work = a; next();
+};
+O.get('/partners', need('read'), (req, res) => res.json(eng.partners()));
+O.get('/engagements', need('read'), (req, res) => res.json(eng.listFor(oid(req))));
+O.post('/engagements', need('settings'), (req, res) => res.status(201).json(eng.create(oid(req), req.actor, req.body)));
+O.post('/engagements/:eid/:action', need('settings'), (req, res) => res.json(eng.respond(oid(req), req.actor, req.params.eid, req.params.action)));
+O.get('/engagements/:eid/statement', need('read'), wrap(async (req, res) => { const e = eng.listFor(oid(req)).find((x) => x.id === req.params.eid); if (!e) throw err(404, 'Unknown engagement.'); res.json(await eng.statement(oid(req), req.params.eid, e.side)); }));
+O.get('/engagements/:eid/work/info', need('read'), W(), wrap(async (req, res) => { const c = orgs.raw(req.work.clientId); res.json({ client: req.work.clientName, role: req.work.e.role, scope: req.work.e.scope, surveyTemplates: (packs.get(c.pack) || {}).surveyTemplates || [] }); }));
+// researcher
+O.get('/engagements/:eid/work/surveys', need('read'), W('researcher'), wrap(async (req, res) => res.json((await surveys.list(req.work.clientId)).filter((s) => eng.inScope(req.work.e, 'surveyIds', s.id)))));
+O.post('/engagements/:eid/work/surveys', W('researcher', true), wrap(async (req, res) => { const s = await surveys.create(req.work.clientId, req.work.actor, req.body); eng.addScope(req.work.e, 'surveyIds', s.id); res.status(201).json(s); }));
+const sv = (req) => { if (!eng.inScope(req.work.e, 'surveyIds', req.params.id)) throw err(403, 'The client has not given you access to this survey.'); return req.params.id; };
+O.get('/engagements/:eid/work/surveys/:id/results', need('read'), W('researcher'), wrap(async (req, res) => res.json(await surveys.results(req.work.clientId, sv(req)))));
+O.post('/engagements/:eid/work/surveys/:id/status', W('researcher', true), wrap(async (req, res) => res.json(await surveys.setStatus(req.work.clientId, req.work.actor, sv(req), req.body.status))));
+O.post('/engagements/:eid/work/surveys/:id/invite', W('researcher', true), wrap(async (req, res) => { const s = (await surveys.list(req.work.clientId)).find((x) => x.id === sv(req)); res.json(await surveys.invite(req.work.clientId, req.work.actor, s.id, `${siteUrl(req)}/s.html?t=${encodeURIComponent(s.token)}`, req.body)); }));
+// operator
+const lv = (req) => { if (!eng.inScope(req.work.e, 'liveIds', req.params.id)) throw err(403, 'The client has not given you access to this programme.'); return req.params.id; };
+O.get('/engagements/:eid/work/live', need('read'), W('operator'), wrap(async (req, res) => res.json((await live.list(req.work.clientId)).filter((p) => eng.inScope(req.work.e, 'liveIds', p.id)))));
+O.get('/engagements/:eid/work/live/:id', need('read'), W('operator'), wrap(async (req, res) => res.json(await live.get(req.work.clientId, lv(req)))));
+O.post('/engagements/:eid/work/live/:id/actuals', W('operator', true), wrap(async (req, res) => res.json(await live.addActuals(req.work.clientId, req.work.actor, 'builder', lv(req), req.body.periods || req.body))));
+O.post('/engagements/:eid/work/live/:id/notes', W('operator', true), wrap(async (req, res) => res.json(await live.addNote(req.work.clientId, req.work.actor, 'builder', lv(req), req.body.note))));
+O.post('/engagements/:eid/work/live/:id/status', W('operator', true), wrap(async (req, res) => { if (req.body.status !== 'paused') throw err(403, 'Operators can pause a programme. Starting or going live is the client\'s decision.'); res.json(await live.setStatus(req.work.clientId, req.work.actor, 'approver', lv(req), 'paused', req.body.note)); }));
 
 // The one door to HNN Biller. Read-only.
 O.get('/hnn/price-books', need('read'), wrap(async (req, res) => res.json(await hnn.listPriceBooks())));

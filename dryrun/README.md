@@ -4,7 +4,7 @@ A private workspace where an organisation rehearses a change (a rule, a price, a
 
 ## Run it
     cd dryrun && npm start         # http://localhost:4100
-    npm run smoke                  # 100+ end-to-end checks, in memory
+    npm run smoke                  # 130+ end-to-end checks, in memory
 No packages are required. (`pg` is optional, only for Postgres storage.)
 
 ## Environment
@@ -36,6 +36,7 @@ No packages are required. (`pg` is optional, only for Postgres storage.)
 - **More scenarios**: plan options and hospital tiers (who picks what, who reaches their cap sooner, loss ratio) and marketing campaigns (audience, channels, offer, cost, first-year margin). The Coach labels each suggestion with its regulator status.
 - **Surveys**: public link, no sign-in, no names or numbers stored, free text scrubbed, results hidden until 5 answers. A result can fill a scenario setting (for example, the share who want higher-tier hospitals).
 - **Dry Run Live**: an approved version (with its regulator reference where needed) becomes a capped beta, then live for the first year. Actual monthly figures are recorded and compared with the forecast; guardrails raise alerts; pausing needs a reason; decisions are logged. Dry Run does not move money or issue policies. The platform owner sees all programmes and sets managed-service terms.
+- **Partner network**: two partner sector packs, `research_firm` and `operator` (white-label). The platform owner creates them and lists the ones it vouches for. A client admin engages a listed partner, chooses exactly which surveys or live programmes the partner can work on (never customer or claims data), and agrees fees (one-off, monthly, and for operators a commission on premium collected). The partner accepts, then works inside the client's workspace through scoped screens; the client's audit log names the partner. Operators can record figures and notes and pause a programme, but starting or going live stays the client's decision. Statements are calculated from recorded figures, with Dry Run's share (set by the platform owner, default 10% of the partner's fee) shown to the partner and the platform owner but not the client. Dry Run does not collect or pay money.
 - **Pace**: days, weeks or months changes only the checklist. The platform is ready on day one.
 
 ## Known limits
