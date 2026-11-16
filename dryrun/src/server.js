@@ -158,6 +158,24 @@ O.get('/team-invite', need('team'), (req, res) => { const t = requests.teamToken
 O.post('/team-invite/rotate', need('team'), (req, res) => { plans.assertNotDemo(req.org, 'Team invite links'); requests.teamToken(oid(req), true); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
 O.post('/team-invite/off', need('team'), (req, res) => { requests.teamInviteOff(oid(req)); res.json({ on: false }); });
 O.post('/team-invite/on', need('team'), (req, res) => { requests.teamInviteOn(oid(req)); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
+// Quick Invite: text the team-invite link to up to 5 mobile numbers by SMS, so an admin can forward it without copy-paste.
+O.post('/team-invite/send', need('team'), wrap(async (req, res) => {
+  const o = orgs.raw(oid(req)); plans.assertNotDemo(o, 'Quick Invite'); plans.assertWritable(o);
+  const t = requests.teamToken(oid(req)); if (!t.on) throw err(422, 'Turn the team link on first, then send.');
+  const url = teamUrl(req, oid(req));
+  let phones = req.body && req.body.phones; if (typeof phones === 'string') phones = phones.split(/[\n,;]+/);
+  phones = [...new Set((phones || []).map((p) => String(p || '').trim()).filter(Boolean))].slice(0, 5);
+  if (!phones.length) throw err(422, 'Add at least one mobile number.');
+  const text = messaging.quickInviteText({ by: req.actor.name, org: o.name, url });
+  const results = [];
+  for (const phone of phones) {
+    if (!messaging.validPhone(phone)) { results.push({ to: phone, ok: false, error: 'That number does not look right. Use 024… or +233….' }); continue; }
+    const d = await messaging.deliver({ phone, channels: { sms: true }, text, orgId: o.id, orgName: o.name, who: 'invite', purpose: 'quick invite' });
+    const r0 = d[0] || { ok: false, error: 'Not sent.' };
+    results.push({ to: messaging.mask(phone), ok: r0.ok, error: r0.ok ? null : r0.error });
+  }
+  res.json({ sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results });
+}));
 O.get('/team-requests', need('team'), (req, res) => res.json(requests.teamList(oid(req))));
 O.post('/team-requests/:rid/decline', need('team'), (req, res) => res.json(requests.teamDecline(oid(req), req.params.rid, req.body && req.body.reason, req.actor.name)));
 O.post('/team-requests/:rid/approve', need('team'), wrap(async (req, res) => {

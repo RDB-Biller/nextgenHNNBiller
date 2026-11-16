@@ -57,11 +57,12 @@ const tail = (inviteUrl, teamUrl) => `
 Invite your colleagues to apply to join your team: ${teamUrl}
 Invite other organisations to try Dry Run: ${inviteUrl}`;
 /** Welcome message for an admin the platform owner appoints. */
-const adminText = ({ name, org, username, password, url, adminUrl, subdomain, inviteUrl, teamUrl }) =>
-  `Welcome to Dry Run, ${first(name)}. You are now admin of Dry Run for ${org}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nInterface: ${url}\nAdmin console: ${adminUrl}\n` +
-  `You can run Dry Run on your own address${subdomain ? `, e.g. ${subdomain}` : ''}. Just ask.` + tail(inviteUrl, teamUrl);
+const adminText = ({ name, org, username, password, url, adminUrl }) =>
+  `Welcome to Dry Run, ${first(name)}. You are now admin of Dry Run for ${org}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nInterface: ${url}\nAdmin console: ${adminUrl}. You can add team mates by clicking on Team when you sign in and enter their mobile phone number and optionally email.`;
 /** Welcome message for a teammate an admin adds. No admin console, no domain offer. */
 const memberText = ({ name, by, org, role, username, password, url, inviteUrl, teamUrl }) =>
   `Hi ${first(name)}, ${by} added you to Dry Run for ${org} as ${role}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nSign in: ${url}` + tail(inviteUrl, teamUrl);
 const surveyText = ({ org, url, inviteUrl }) => `${org} would like your views (2 minutes): ${url}\nGet Dry Run for your organisation: ${inviteUrl}`;
-module.exports = { surveyText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };
+/** Short SMS that carries only the team-invite link; the person taps it and fills in their details to apply. */
+const quickInviteText = ({ by, org, url }) => `${by} invites you to join the ${org} team on Dry Run. Tap to accept — you will enter a few details to join: ${url}`;
+module.exports = { surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };

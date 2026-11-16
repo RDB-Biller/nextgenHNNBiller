@@ -5,7 +5,7 @@
  */
 const { err } = require('./util');
 const PLANS = {
-  free_trial:     { label: 'Free trial',     limits: { members: 3,  assets: 60,   runsPerMonth: 100,  datasetRows: 20000, surveyResponses: 500 } },
+  free_trial:     { label: 'Free trial',     limits: { members: 5,  assets: 60,   runsPerMonth: 100,  datasetRows: 20000, surveyResponses: 500 } },
   extended_trial: { label: 'Extended trial', limits: { members: 6,  assets: 150,  runsPerMonth: 300,  datasetRows: 50000, surveyResponses: 2000 } },
   demo:           { label: 'Demo',           limits: { members: 1,  assets: 30,   runsPerMonth: 40,   datasetRows: 3000,  surveyResponses: 30 } },
   paid:           { label: 'Paid',           limits: { members: 50, assets: 2000, runsPerMonth: 5000, datasetRows: 500000, surveyResponses: 50000 } },
