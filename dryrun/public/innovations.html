@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dry Run HNN — AI for Insurance, Banking, Fintech & more</title>
+<meta name="description" content="Dry Run by HNN: rehearse AI-driven product, pricing, claims and campaign changes on your own data before they go live. AI for Insurance, Banking, Fintech and more.">
+<style>
+:root{--ink:#14222b;--ink2:#4b5b66;--paper:#f2f4f1;--card:#fff;--line:#d6dcd8;--tally:#d9532b;--dry:#2f6fa3;--ok:#2d7a4f}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+h1,h2,h3{font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;font-weight:600;margin:0 0 .5rem}
+a{color:var(--dry)}
+header{display:flex;align-items:center;gap:1rem;padding:.8rem 1.4rem;background:var(--ink);color:#fff;flex-wrap:wrap}
+header .brand{font-family:Georgia,serif;font-size:1.35rem}header .brand b{color:var(--tally)}
+.hnn{display:inline-block;margin-left:.5rem;background:#1f9d57;color:#ff7a3c;font-family:Georgia,serif;font-weight:800;letter-spacing:1px;padding:.05rem .42rem;border-radius:5px;font-size:.92rem;vertical-align:middle}
+.tag{margin-left:.6rem;font-size:12px;color:#e6edf0;vertical-align:middle}.tag b{color:#39e08a}
+header .cta{margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap}
+.btn{display:inline-block;border-radius:6px;padding:.45rem .9rem;text-decoration:none;font-size:14px;border:1px solid transparent;cursor:pointer}
+.btn.go{background:var(--tally);color:#fff}.btn.ghost{background:transparent;color:#fff;border-color:#4b5b66}
+.btn.dark{background:var(--ink);color:#fff}
+main{max-width:1060px;margin:0 auto;padding:0 1rem 4rem}
+.hero{padding:2.4rem 0 1rem}.hero h1{font-size:2.2rem;line-height:1.15;margin-bottom:.5rem}
+.hero p{font-size:1.1rem;color:var(--ink2);max-width:60ch}
+.hero .ctas{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.2rem;margin:1rem 0}
+.infotabs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.3rem 0 .2rem}
+.infotab{background:var(--paper);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:.4rem 1rem;font-size:14px;cursor:pointer}
+.infotab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.inforow{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.8rem;margin-top:.8rem}
+.infoitem{border:1px solid var(--line);border-radius:10px;padding:.85rem .95rem;background:#fff}
+.infoitem b{color:var(--dry);display:block;margin-bottom:.3rem}
+.sm{font-size:13px;color:var(--ink2)}
+footer{border-top:1px solid var(--line);margin-top:2rem;padding:1.2rem 0;color:var(--ink2);font-size:13px}
+.lede{color:var(--ink2)}
+</style></head><body>
+<header>
+  <span class="brand">Dry <b>Run</b><span class="hnn">HNN</span><span class="tag"><b>AI</b> for Insurance, Banking, Fintech &amp; more</span></span>
+  <span class="cta"><a class="btn ghost" href="/join">Request an account</a><a class="btn go" href="/app">Sign in</a></span>
+</header>
+<main>
+  <section class="hero">
+    <h1>AI for Insurance, Banking, Fintech &amp; more</h1>
+    <p>Dry Run is a private workspace where your team rehearses product, pricing, claims and campaign changes — on your own data — before any of it goes live. See the innovations below.</p>
+    <div class="ctas"><a class="btn dark" href="/join">Request an account</a><a class="btn ghost" style="color:var(--ink);border-color:var(--line)" href="/join#demo">Try a demo workspace</a><a class="btn ghost" style="color:var(--ink);border-color:var(--line)" href="/app">Sign in</a></div>
+  </section>
+  <div class="card">
+    <h2>What we build, by sector</h2>
+    <p class="lede sm">Open a sector to see the AI innovations it unlocks.</p>
+    <div class="infotabs" id="tabs"></div>
+    <h3 id="tagline" style="margin-top:.9rem"></h3>
+    <div class="inforow" id="panel"></div>
+  </div>
+  <p class="sm">Want this for your organisation? <a href="/join">Request an account</a> — it takes a minute, and your sign-in details are sent by SMS.</p>
+</main>
+<footer>
+  <strong>Dry Run</strong> by HNN · AI for Insurance, Banking, Fintech &amp; more · <a href="/app">Sign in</a> · <a href="/join">Request an account</a>
+</footer>
+<script>
+const INNOV=[
+ {key:'insurance',label:'Insurance',tagline:'AI that makes claims faster and fairer',items:[
+   {name:'AI Adjudication Ladder',desc:"Every claim is routed to auto-approve, assist, or escalate. The model learns on a held-out sample and shows exactly how much of your claims volume can be auto-approved safely — with the money saved and the risk of each rule — before any of it touches a real claim."},
+   {name:'Outcomes-based care',desc:"Pay providers by how their own patients do. Weight a few clinical measures into one score, set bonus and penalty bands, and see who lands where, complications avoided, and how today's fee-for-service quietly pays more when patients have complications."},
+   {name:'Plan options & hospital tiers',desc:"Let members choose — say a lower premium with lower-tier hospitals, or a few higher-tier ones. See who picks what, how soon each group reaches its cap, and the effect on your loss ratio."}]},
+ {key:'banking',label:'Banking',tagline:'Rehearse credit and collections on your own data',items:[
+   {name:'Instalment premium with auto-overdraft',desc:"Customers pay in instalments by auto-debit; when the wallet is short on the debit date an overdraft is raised automatically so cover never lapses. See lapses avoided, extra customers reached, the cost to the customer and the return to you."},
+   {name:'Cash for co-payments & uncovered care',desc:"Short, automatic advances when a customer must pay a co-payment or a service the plan does not cover. See uptake, return, credit loss, and the extra care it unlocks."},
+   {name:'Campaign & audience modelling',desc:"Pick an audience from your own customer list, choose channels and an offer, and see responses, sign-ups, cost and first-year margin before you spend."}]},
+ {key:'fintech',label:'Fintech',tagline:'Test new money products before you launch',items:[
+   {name:'Premium financing engine',desc:"Model instalments, loading, overdraft fees and limits, and who is eligible — then watch lapses avoided and the return, on simulated customers built to look like yours."},
+   {name:'Co-pay & cover cash',desc:"Size a micro-advance product: events per year, average amount, who can already pay, uptake and repayment — and the credit loss you would carry."},
+   {name:'Safe-by-design data',desc:"Names, phone numbers, emails and ID numbers are stripped on upload and member ids become codes, so you rehearse on the real shape of your data without holding personal details."}]},
+ {key:'more',label:'And more',tagline:'One engine for every sector',items:[
+   {name:'Expedited settlement',desc:"See what happens if you pay providers earlier for a discount — which providers take it and what it nets you after the cost of paying sooner."},
+   {name:'Surveys',desc:"Ask the people you hope to serve what they want before you design for them. Anyone with the link can answer without signing in, and no names or numbers are stored."},
+   {name:'Telco, pharmacy, school, hospital, research',desc:"The same Dry Run engine adds each sector's vocabulary and data types, so any team can rehearse a product, price, claim or campaign change on its own data before going live."}]},
+];
+const tabsEl=document.getElementById('tabs'),panelEl=document.getElementById('panel'),tagEl=document.getElementById('tagline');
+let cur=(location.hash||'').replace('#','')||'insurance';
+function draw(){
+  const sec=INNOV.find(x=>x.key===cur)||INNOV[0];cur=sec.key;
+  tabsEl.innerHTML='';INNOV.forEach(x=>{const b=document.createElement('button');b.className='infotab'+(x.key===cur?' on':'');b.textContent=x.label;b.onclick=()=>{cur=x.key;try{history.replaceState(null,'','#'+cur)}catch(e){}draw()};tabsEl.appendChild(b)});
+  tagEl.textContent=sec.tagline;
+  panelEl.innerHTML='';sec.items.forEach(it=>{const d=document.createElement('div');d.className='infoitem';const b=document.createElement('b');b.textContent=it.name;const p=document.createElement('p');p.className='sm';p.textContent=it.desc;d.appendChild(b);d.appendChild(p);panelEl.appendChild(d)});
+}
+draw();
+</script>
+</body></html>

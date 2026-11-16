@@ -23,7 +23,7 @@ const { err, wrap } = require('./util');
 const app = express();
 app.use(express.json({ limit: '25mb' })); app.use(express.text({ type: 'text/csv', limit: '25mb' }));
 const PUBLIC = path.join(__dirname, '..', 'public');
-const ALIAS = { '/app': '/app.html', '/join': '/join.html' };
+const ALIAS = { '/app': '/app.html', '/join': '/join.html', '/innovations': '/innovations.html', '/ai': '/innovations.html' };
 for (const [from, file] of Object.entries(ALIAS)) { app.get(from, (req, res) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(require('fs').readFileSync(path.join(PUBLIC, file))); }); app.get(from + '/', (req, res) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(require('fs').readFileSync(path.join(PUBLIC, file))); }); }
 app.use(express.static(PUBLIC));
 
