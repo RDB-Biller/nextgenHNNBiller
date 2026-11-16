@@ -12,4 +12,6 @@ r.put('/', wrap(async (req, res) => res.json(await pb.adminSet(req.body || {})))
 r.post('/', wrap(async (req, res) => res.status(201).json(await pb.upload('platform', req.body || {}))));
 r.delete('/:id', wrap(async (req, res) => res.json(await pb.remove('platform', req.params.id))));
 r.get('/template.csv', (_q, res) => res.type('text/csv').set('Content-Disposition', 'attachment; filename="price-book-template.csv"').send(pb.sampleCsv()));
+// Read one book with its items. Used by the Dry Run service's HNN connector (read-only).
+r.get('/:id', wrap(async (req, res) => { const b = await pb.get(null, req.params.id); if (!b) return res.status(404).json({ error: 'Unknown price book.' }); res.json({ id: b.id, name: b.name, currency: b.currency, items: b.items || [] }); }));
 module.exports = r;

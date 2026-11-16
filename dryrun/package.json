@@ -1,0 +1,15 @@
+{
+  "name": "dry-run",
+  "version": "0.1.0",
+  "description": "Dry Run: a private workspace where organisations rehearse product, pricing, claims and campaign changes on their own data before going live.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {},
+  "optionalDependencies": { "pg": "^8.11.5" }
+}
