@@ -53,7 +53,7 @@ async function deliver({ phone, channels, text, orgId, orgName, who, purpose }) 
 }
 const history = (orgId, limit = 100) => (reg.load().messages || []).filter((m) => !orgId || m.orgId === orgId).slice(0, limit);
 const first = (n) => String(n || '').trim().split(/\s+/)[0] || 'there';
-const tail = (inviteUrl) => `\nInvite others: ${inviteUrl}`;
+const tail = (inviteUrl) => `\nInvite others to apply to join your team.\nInvite others: ${inviteUrl}`;
 /** Welcome message for an admin the platform owner appoints. */
 const adminText = ({ name, org, username, password, url, adminUrl, subdomain, inviteUrl }) =>
   `Welcome to Dry Run, ${first(name)}. You are now admin of Dry Run for ${org}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nInterface: ${url}\nAdmin console: ${adminUrl}\n` +
