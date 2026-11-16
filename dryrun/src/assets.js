@@ -10,7 +10,7 @@ const audit = require('./audit');
 const regulatory = require('./regulatory');
 const { err, iso, id, sha, parseCsv } = require('./util');
 
-const KINDS = ['product', 'price_book', 'rule_set', 'campaign', 'vas', 'payment_plan', 'customer_dataset', 'claims_dataset'];
+const KINDS = ['product', 'price_book', 'rule_set', 'campaign', 'vas', 'payment_plan', 'customer_dataset', 'claims_dataset', 'finance_offer'];
 const GATES = ['draft', 'dry_run', 'shadow', 'approved'];
 const DATASET = new Set(['customer_dataset', 'claims_dataset']);
 const adapter = (orgId) => audit.adapter(orgId);
@@ -22,6 +22,7 @@ function validate(kind, data) {
   if (kind === 'rule_set' && !Array.isArray(data.rules)) throw err(422, 'A rule set needs a rules list.');
   if (kind === 'claims_dataset' && !Array.isArray(data.claims)) throw err(422, 'A claims dataset needs a claims list.');
   if (kind === 'customer_dataset' && !Array.isArray(data.customers)) throw err(422, 'A customer dataset needs a customers list.');
+  if (kind === 'finance_offer' && !(data.premiumOverdraft || data.coverCash)) throw err(422, 'A finance offer needs a premiumOverdraft or a coverCash section.');
   if (kind === 'payment_plan' && !Array.isArray(data.tiers)) throw err(422, 'A payment plan needs a tiers list.');
 }
 const rowsOf = (kind, d) => (kind === 'claims_dataset' ? d.claims.length : kind === 'customer_dataset' ? d.customers.length : kind === 'price_book' ? d.items.length : 0);

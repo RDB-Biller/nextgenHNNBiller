@@ -14,6 +14,7 @@ const surveys = require('./surveys');
 const live = require('./live');
 const eng = require('./engagements');
 const requests = require('./requests');
+const proposals = require('./proposals');
 const demo = require('./demo');
 const { err, wrap } = require('./util');
 
@@ -86,6 +87,8 @@ P.post('/orgs/:id/members/:mid/resend', wrap(async (req, res) => {
   res.json({ ...k, delivery });
 }));
 P.post('/message-preview', (req, res) => res.json(previewTexts(req, req.body || {})));
+P.get('/proposals', (req, res) => res.json(proposals.listAll()));
+P.patch('/proposals/:pid', (req, res) => res.json(proposals.platformUpdate(req.params.pid, req.body || {})));
 P.get('/requests', (req, res) => res.json({ pending: requests.pending(), requests: requests.list() }));
 P.post('/requests/:id/decline', (req, res) => res.json(requests.decline(req.params.id, req.body.reason)));
 P.post('/requests/:id/approve', wrap(async (req, res) => {
@@ -138,6 +141,15 @@ O.post('/team-requests/:rid/approve', need('team'), wrap(async (req, res) => {
   const delivery = request.phone ? await sendCreds(req, { orgId: oid(req), member: { name: member.name, email: member.email, phone: request.phone }, username: member.username, password: member.password, role: member.role, by: req.actor.name, deliver }) : [];
   res.json({ ...member, delivery });
 }));
+O.get('/partner-code', need('read'), (req, res) => res.json({ code: orgs.refCode(oid(req)) }));
+O.get('/proposals', need('read'), (req, res) => res.json(proposals.listFor(oid(req))));
+O.post('/proposals/suggest', need('write'), wrap(async (req, res) => res.json(await proposals.suggest(oid(req), req.body || {}))));
+O.post('/proposals', need('write'), wrap(async (req, res) => {
+  const p = await proposals.create(oid(req), req.actor, req.role, req.body || {});
+  if (p.toOrgId) { const t = orgs.raw(p.toOrgId); for (const m of Object.values(t.members)) if (m.role === 'admin' && m.phone) messaging.deliver({ phone: m.phone, channels: { sms: true }, text: `Dry Run: ${p.fromName} sent you a proposal: ${p.title}. Review: ${siteUrl(req)}/app`, orgId: t.id, orgName: t.name, who: 'admin', purpose: 'proposal' }).catch(() => {}); }
+  res.status(201).json(p);
+}));
+O.post('/proposals/:pid/respond', need('read'), wrap(async (req, res) => res.json(await proposals.respond(oid(req), req.actor, req.role, req.params.pid, req.body || {}))));
 O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30) }));
 O.patch('/team/:mid', need('team'), (req, res) => res.json(orgs.setRole(oid(req), req.params.mid, req.body.role)));
 O.delete('/team/:mid', need('team'), (req, res) => res.json(orgs.removeMember(oid(req), req.params.mid)));

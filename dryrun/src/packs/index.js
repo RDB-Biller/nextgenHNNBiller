@@ -8,6 +8,7 @@ const ladder = require('../scenarios/adjudicationLadder');
 const settle = require('../scenarios/expeditedSettlement');
 const planOpts = require('../scenarios/planOptions');
 const campaign = require('../scenarios/campaign');
+const financing = require('../scenarios/financing');
 
 const SCENARIOS = {
   adjudication_ladder: {
@@ -43,6 +44,28 @@ const SCENARIOS = {
       months: ['Month 1: collect claims by hospital tier', 'Month 2: survey and interview members', 'Month 3: model options and adverse selection', 'Month 4: compliance review and any regulator filing', 'Month 5: move to Dry Run Live as a beta cohort'],
     },
   },
+  premium_financing: {
+    key: 'premium_financing', label: 'Instalment premium with automatic overdraft', engine: financing.premiumEngine,
+    summary: 'Customers pay the premium in instalments (for example quarterly) by auto-debit. When the wallet is short on the debit date, an overdraft is raised automatically so the cover does not lapse. Shows lapses avoided, extra customers reached, what it costs the customer and what it returns to you.',
+    inputs: [{ kind: 'finance_offer', required: true, syntheticOk: true }],
+    params: [{ key: 'members', label: 'Customers to simulate', default: 2000 }, { key: 'annualPremium', label: 'Annual premium for the cover', default: 840 }, { key: 'lowWageSharePct', label: 'Customers on lower wages, %', default: 55 }, { key: 'medianMonthlyIncome', label: 'Median monthly income', default: 1800 }, { key: 'repayRatePct', label: 'Overdrafts repaid on time, % (assumption)', default: 96 }, { key: 'costOfFundsPct', label: 'Your annual cost of funds, %', default: 24 }, { key: 'maxExtraCostPct', label: 'Most the customer should pay on top of the premium, %', default: 12 }],
+    pace: {
+      days: ['Enter the instalment plan and overdraft terms', 'Run and read lapses avoided and cost to the customer', 'Ask the Coach for a better fee and limit', 'Compare and pick a version to put to an insurer', 'Draft the proposal'],
+      weeks: ['Week 1: agree instalment count, loading and overdraft limit', 'Week 2: replace assumptions with real wallet data', 'Week 3: run, compare and use the Coach', 'Week 4: draft the proposal and share it with the insurer'],
+      months: ['Month 1: gather wallet and repayment data', 'Month 2: model terms by income band', 'Month 3: pilot with a small group', 'Month 4: review actuals and propose a launch'],
+    },
+  },
+  copay_cash: {
+    key: 'copay_cash', label: 'Cash for co-payments and uncovered services', engine: financing.coverEngine,
+    summary: 'Short cash advances when a customer has to pay a co-payment or a service the plan does not cover. Shows how many advances are taken, what it returns, the credit loss, and the extra services it makes possible for providers.',
+    inputs: [{ kind: 'finance_offer', required: true, syntheticOk: true }],
+    params: [{ key: 'members', label: 'Customers to simulate', default: 2000 }, { key: 'copayEventsPerYear', label: 'Co-payments a customer faces each year', default: 1.2 }, { key: 'avgCopay', label: 'Average co-payment', default: 25 }, { key: 'uncoveredEventsPerYear', label: 'Uncovered services wanted each year', default: 0.35 }, { key: 'avgUncovered', label: 'Average uncovered service cost', default: 350 }, { key: 'canPayNowPct', label: 'Customers who could pay from their own wallet, %', default: 40 }, { key: 'advanceUptakePct', label: 'Of those who cannot, share who take an advance, % (assumption)', default: 30 }, { key: 'repayRatePct', label: 'Advances repaid on time, % (assumption)', default: 92 }, { key: 'costOfFundsPct', label: 'Your annual cost of funds, %', default: 24 }],
+    pace: {
+      days: ['Enter the fee and maximum advance', 'Run and read take-up, return and loss', 'Ask the Coach for a better fee and limit', 'Compare', 'Add it to the proposal'],
+      weeks: ['Week 1: list the co-payments and uncovered services that matter', 'Week 2: survey customers on what they would borrow for', 'Week 3: run and compare', 'Week 4: add to the proposal'],
+      months: ['Month 1: gather co-payment and wallet data', 'Month 2: model by service type', 'Month 3: pilot', 'Month 4: review actuals'],
+    },
+  },
   campaign: {
     key: 'campaign', label: 'Marketing campaign', engine: campaign,
     summary: 'Pick an audience from your customer list, choose channels and an offer, and see responses, sign-ups, cost and first-year margin before you spend.',
@@ -62,7 +85,7 @@ const PACKS = {
   research_firm: { key: 'research_firm', label: 'Research firms and fieldwork partners', status: 'partner', vocab: { customer: 'respondent', transaction: 'survey', provider: 'fieldworker', product: 'study' }, scenarios: [], templates: [], note: 'A partner account. Clients engage you from the network to run surveys and fieldwork. You see only what each client allows.' },
   operator: { key: 'operator', label: 'White-label operators', status: 'partner', vocab: { customer: 'member', transaction: 'programme', provider: 'operator', product: 'programme' }, scenarios: [], templates: [], note: 'A partner account. Clients engage you to launch and monitor programmes. You see only the programmes each client allows.' },
   bank: shell('bank', 'Banks', { customer: 'customer', transaction: 'loan', provider: 'branch', product: 'loan product' }),
-  fintech: shell('fintech', 'Fintechs, credit scoring and payment providers', { customer: 'user', transaction: 'transaction', provider: 'partner', product: 'product' }),
+  fintech: { key: 'fintech', label: 'Fintechs, credit scoring and payment providers', status: 'ready', vocab: { customer: 'user', transaction: 'advance', provider: 'partner', product: 'facility' }, scenarios: ['premium_financing', 'copay_cash'], templates: [{ kind: 'finance_offer', name: 'Instalment premium with overdraft, and cover cash', fromSynthetic: true }], surveyTemplates: [], note: 'Design a facility, test it, then put it to an insurer as a proposal.' },
   mfi: shell('mfi', 'Microfinance institutions', { customer: 'client', transaction: 'loan', provider: 'field officer', product: 'loan product' }),
   telco: shell('telco', 'Telcos and mobile money', { customer: 'subscriber', transaction: 'transaction', provider: 'agent', product: 'bundle or service' }),
   hospital: shell('hospital', 'Hospitals and clinics', { customer: 'patient', transaction: 'bill', provider: 'department', product: 'service' }),

@@ -62,3 +62,10 @@ No packages are required. (`pg` is optional, only for Postgres storage.)
 - **General invite** (`/join?ref=<org>`): sent to other organisations. They ask for their own workspace and the platform owner decides. The inviting organisation is recorded as the introducer.
 - **Team invite** (`/join?team=<token>`): for colleagues of one organisation. They ask to join that team, and that organisation's admin approves, picks the role and sends sign-in details. Seat limits apply. Admins can copy, replace or switch off the link in the Team tab. These requests never reach the platform owner's queue.
 - Both appear in the credential SMS, team link first.
+
+## Fintech pack and proposals
+
+- **Fintech scenarios**: `premium_financing` (premium paid in instalments by auto-debit, with an overdraft raised automatically when the wallet is short, compared with and without it on the same customers) and `copay_cash` (short advances for co-payments and services the plan does not cover). The design is a `finance_offer` asset; the Coach searches fee, loading and limit within the customer-cost and credit-loss limits. Wallet and repayment behaviour are assumptions until pilot data replaces them. Output carries a consumer-credit caution.
+- **Proposals** (`/api/org/proposals`): a fintech drafts a proposal from its design and runs (the system writes the first draft), addresses it with the other side's partner code (Settings/Proposals shows yours) or leaves it for the platform to introduce. The recipient sees a snapshot of the terms and evidence, never data. Accepting (approver or admin) copies the design into the recipient's Library as a draft. Insurers can also post a request.
+- **Deals** (platform owner): introduce the parties, name a launch partner (none, the platform, or a partner organisation such as a research firm), and confirm the link fee and launch commission (defaults in Platform settings). Terms are recorded; nothing is collected automatically.
+- No brand names appear in the product; a test enforces this.
