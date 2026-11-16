@@ -76,7 +76,7 @@ P.get('/orgs', (req, res) => res.json(orgs.list()));
 P.post('/orgs', wrap(async (req, res) => {
   const r = orgs.create(req.body, packs);
   const delivery = await sendCreds(req, { orgId: r.org.id, member: { name: r.admin.name, email: r.admin.email, phone: req.body.adminPhone }, username: r.admin.username, password: r.admin.password, role: 'admin', deliver: req.body.deliver, adminAppointment: true });
-  res.status(201).json({ ...r, delivery, signInUrl: siteUrl(req) });
+  res.status(201).json({ ...r, delivery, signInUrl: `${siteUrl(req)}/app?u=${encodeURIComponent(r.admin.username)}` });
 }));
 P.get('/directory', (req, res) => res.json(orgs.directory()));
 P.get('/messaging', (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(null, 50) }));
@@ -94,7 +94,7 @@ P.post('/requests/:id/decline', (req, res) => res.json(requests.decline(req.para
 P.post('/requests/:id/approve', wrap(async (req, res) => {
   const { request, created } = requests.approve(req.params.id, req.body); const r = created;
   const delivery = await sendCreds(req, { orgId: r.org.id, member: { name: r.admin.name, email: r.admin.email, phone: request.phone }, username: r.admin.username, password: r.admin.password, role: 'admin', deliver: request.phone ? (req.body.deliver || { sms: true, whatsapp: true }) : {}, adminAppointment: true });
-  res.json({ ...r, delivery, signInUrl: `${siteUrl(req)}/app`, request });
+  res.json({ ...r, delivery, signInUrl: `${siteUrl(req)}/app?u=${encodeURIComponent(r.admin.username)}`, request });
 }));
 P.patch('/orgs/:id/domain', (req, res) => { const o = orgs.raw(req.params.id); o.domainRequest = { ...(o.domainRequest || {}), ...(req.body.status ? { status: req.body.status } : {}), ...(req.body.note !== undefined ? { note: String(req.body.note).slice(0, 300) } : {}) }; require('./registry').save(); res.json(o.domainRequest); });
 
