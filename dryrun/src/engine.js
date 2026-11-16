@@ -9,6 +9,9 @@ const assets = require('./assets');
 const audit = require('./audit');
 const packs = require('./packs');
 const synthetic = require('./scenarios/synthetic');
+const planOpts = require('./scenarios/planOptions');
+const campaignSc = require('./scenarios/campaign');
+const regulatory = require('./regulatory');
 const { err, iso, id, round } = require('./util');
 
 const adapter = (orgId) => audit.adapter(orgId);
@@ -26,20 +29,32 @@ async function resolve(orgId, ref, kind) {
 }
 /** Gather the inputs for a scenario. Anything not supplied is filled with synthetic data and labelled as such. */
 async function gather(orgId, scenario, inputs = {}, syntheticSpec = {}, seed) {
-  const used = {}; let syn = null; const ensure = () => (syn = syn || synthetic.build(Number(syntheticSpec.claims || 1500), seed));
+  const used = {}; const ref = (x) => ({ assetId: x.assetId, name: x.name, version: x.version });
+  if (scenario === 'plan_options') {
+    const pr = await resolve(orgId, inputs.product, 'product'); used.product = pr ? ref(pr) : { synthetic: true };
+    return { product: pr ? pr.data : planOpts.DEFAULT_PRODUCT(), used };
+  }
+  if (scenario === 'campaign') {
+    const cu = await resolve(orgId, inputs.customer_dataset, 'customer_dataset'); const cp = await resolve(orgId, inputs.campaign, 'campaign');
+    used.customer_dataset = cu ? ref(cu) : { synthetic: true }; used.campaign = cp ? ref(cp) : { synthetic: true };
+    return { customers: cu ? cu.data.customers : synthetic.customers(Number(syntheticSpec.customers || 3000), seed), campaign: cp ? cp.data : campaignSc.DEFAULT_CAMPAIGN(), used };
+  }
+  let syn = null; const ensure = () => (syn = syn || synthetic.build(Number(syntheticSpec.claims || 1500), seed));
   const claimsIn = await resolve(orgId, inputs.claims_dataset, 'claims_dataset');
-  const claims = claimsIn ? claimsIn.data.claims : ensure().claims; used.claims_dataset = claimsIn ? { assetId: claimsIn.assetId, name: claimsIn.name, version: claimsIn.version } : { synthetic: true, claims: claims.length };
+  const claims = claimsIn ? claimsIn.data.claims : ensure().claims; used.claims_dataset = claimsIn ? ref(claimsIn) : { synthetic: true, claims: claims.length };
   const out = { claims, used };
   if (scenario === 'adjudication_ladder') {
-    const rs = await resolve(orgId, inputs.rule_set, 'rule_set'); out.ruleSet = rs ? rs.data : synthetic.defaultRules(); used.rule_set = rs ? { assetId: rs.assetId, name: rs.name, version: rs.version } : { synthetic: true };
-    const pb = await resolve(orgId, inputs.price_book, 'price_book'); out.priceBook = pb ? pb.data.items : (claimsIn && !pb ? [] : ensure().priceBook); used.price_book = pb ? { assetId: pb.assetId, name: pb.name, version: pb.version } : (claimsIn ? { none: true } : { synthetic: true });
+    const rs = await resolve(orgId, inputs.rule_set, 'rule_set'); out.ruleSet = rs ? rs.data : synthetic.defaultRules(); used.rule_set = rs ? ref(rs) : { synthetic: true };
+    const pb = await resolve(orgId, inputs.price_book, 'price_book'); out.priceBook = pb ? pb.data.items : (claimsIn && !pb ? [] : ensure().priceBook); used.price_book = pb ? ref(pb) : (claimsIn ? { none: true } : { synthetic: true });
   } else {
-    const pp = await resolve(orgId, inputs.payment_plan, 'payment_plan'); out.plan = pp ? pp.data : DEFAULT_PLAN; used.payment_plan = pp ? { assetId: pp.assetId, name: pp.name, version: pp.version } : { synthetic: true };
+    const pp = await resolve(orgId, inputs.payment_plan, 'payment_plan'); out.plan = pp ? pp.data : DEFAULT_PLAN; used.payment_plan = pp ? ref(pp) : { synthetic: true };
   }
   return out;
 }
 function execute(scenario, g, params, seed) {
   const s = packs.scenario(scenario);
+  if (scenario === 'plan_options') return s.engine.run({ product: g.product, params, seed });
+  if (scenario === 'campaign') return s.engine.run({ customers: g.customers, campaign: g.campaign, params, seed });
   return scenario === 'adjudication_ladder' ? s.engine.run({ claims: g.claims, ruleSet: g.ruleSet, priceBook: g.priceBook, params, seed }) : s.engine.run({ claims: g.claims, plan: g.plan, params, seed });
 }
 async function monthRuns(orgId) { const m = iso().slice(0, 7); return (await adapter(orgId).list(orgId, 'runs')).filter((r) => r.at.startsWith(m)).length; }
@@ -101,11 +116,50 @@ function coachSettlement(g, params, seed, base) {
   return { suggestions: [{ title: 'Better early-pay tiers', changes: pick.tiers.map((t) => `Pay in ${t.days} days for ${t.discountPct}% off`), expected: { netBenefit: { from: base.netBenefit, to: pick.net }, uptakePct: { from: base.uptakePct, to: pick.uptake } },
     confidence: 'Based on assumed provider costs of funds. Confirm with real providers before offering.', draft: { kind: 'payment_plan', data: { baselineDays: bd, tiers: pick.tiers } } }], message: `Searched ${out.length + two.length} tier combinations up to ${maxD}% discount.` };
 }
+const LEVEL = { none: 0, notify: 1, regulator: 2 };
+function coachPlanOptions(g, params, seed, base, rules) {
+  const target = Number(params.targetLossRatioPct ?? 70); const fast = { ...params, members: Math.min(Number(params.members || 2000), 1500) }; const tiers = g.product.hospitalTiers.map((t) => t.name);
+  const score = (r) => (r.lossRatioPct <= target ? r.margin : -1e9 - r.lossRatioPct); const baseScore = score(base);
+  const search = (allowReg) => {
+    let cur = JSON.parse(JSON.stringify(g.product)); let curRes = planOpts.run({ product: cur, params: fast, seed }); let curScore = score(curRes);
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < cur.options.length; i++) {
+      const o0 = g.product.options[i]; let best = null;
+      for (let k = 1; k <= tiers.length; k++) for (const d of [-9, -6, -3, 0, 3, 6, 9]) {
+        const cand = JSON.parse(JSON.stringify(cur)); cand.options[i] = { ...o0, tiers: tiers.slice(0, k), premiumAdjPct: round((Number(o0.premiumAdjPct) || 0) + d, 1) };
+        if (new Set(cand.options.map((x) => x.tiers.join())).size < cand.options.length) continue;
+        const cls = regulatory.classify(g.product, cand, rules); if (!allowReg && LEVEL[cls.overall] > LEVEL.notify) continue;
+        const res = planOpts.run({ product: cand, params: fast, seed }); const sc = score(res); if (!best || sc > best.sc) best = { cand, res, sc, cls };
+      }
+      if (best && best.sc > curScore) { cur = best.cand; curRes = best.res; curScore = best.sc; }
+    }
+    return { cur, curRes, curScore, cls: regulatory.classify(g.product, cur, rules) };
+  };
+  const out = []; const describe = (cur) => cur.options.map((o, i) => { const b = g.product.options[i]; const ch = []; if (o.premiumAdjPct !== b.premiumAdjPct) ch.push(`premium ${b.premiumAdjPct}% → ${o.premiumAdjPct}%`); if (o.tiers.join() !== b.tiers.join()) ch.push(`hospitals ${b.tiers.join('+')} → ${o.tiers.join('+')}`); return ch.length ? `${o.name}: ${ch.join(', ')}` : null; }).filter(Boolean);
+  for (const allowReg of [false, true]) {
+    const r = search(allowReg); if (r.curScore <= baseScore) continue; const changes = describe(r.cur); if (!changes.length) continue;
+    if (out.length && JSON.stringify(out[0].draft.data) === JSON.stringify(r.cur)) continue;
+    out.push({ title: allowReg ? 'A better result, but it needs regulator approval' : 'Improve the result without needing regulator approval', changes, expected: { lossRatioPct: { from: base.lossRatioPct, to: r.curRes.lossRatioPct }, margin: { from: base.margin, to: r.curRes.margin } },
+      regulatory: { overall: r.cls.overall, summary: r.cls.summary }, confidence: 'Based on assumed choice and cost behaviour. Check with your survey and real claims by tier.', draft: { kind: 'product', data: r.cur } });
+  }
+  const msg = out.length ? 'Searched premium and hospital-tier combinations for every option. Each suggestion shows whether it needs the regulator.' : `No combination meets the ${target}% loss-ratio target better than the current setup, even with regulator-approval changes allowed.`;
+  return { suggestions: out, message: msg };
+}
+function coachCampaign(g, params, seed, base, rules) {
+  const c = g.campaign; const maxD = Math.min(Number(params.maxDiscountPct ?? regulatory.merge(rules).maxDiscountPct), 30); const chans = c.channels; let best = null; const evalIt = (camp) => campaignSc.run({ customers: g.customers, campaign: camp, params, seed });
+  const subsets = []; for (let m = 1; m < (1 << chans.length); m++) subsets.push(chans.filter((_, i) => m & (1 << i)));
+  for (const sub of subsets) for (let d = 0; d <= maxD; d++) { const camp = { ...c, channels: sub, offer: { ...(c.offer || {}), discountPct: d } }; const r = evalIt(camp); if (!best || r.margin > best.r.margin) best = { camp, r }; }
+  if (!best || best.r.margin <= base.margin) return { suggestions: [], message: 'No better channel mix or discount found within the limit you set.' };
+  const changes = []; if ((c.offer || {}).discountPct !== best.camp.offer.discountPct) changes.push(`Discount ${(c.offer || {}).discountPct || 0}% → ${best.camp.offer.discountPct}%`);
+  if (best.camp.channels.length !== chans.length) changes.push(`Use only ${best.camp.channels.map((x) => x.channel).join(' and ')} (it returns more per cedi than the one dropped)`);
+  return { suggestions: [{ title: 'Better offer and channel mix', changes: changes.length ? changes : ['Same offer and channels; spend is already well placed'], expected: { margin: { from: base.margin, to: best.r.margin }, roiPct: { from: base.roiPct, to: best.r.roiPct }, signups: { from: base.signups, to: best.r.signups } },
+    confidence: 'Based on assumed response rates. Run a small live test and put the real rates in.', draft: { kind: 'campaign', data: best.camp } }], message: `Searched ${subsets.length * (maxD + 1)} offer and channel combinations up to ${maxD}% discount.` };
+}
 async function coach(orgId, actor, role, runId, { maxDiscountPct } = {}) {
   const o = orgs.raw(orgId); if (!orgs.can(role, 'run')) throw err(403, 'Your role cannot ask the Coach.'); plans.assertWritable(o);
   const rec = await getRun(orgId, runId); const params = { ...rec.params, ...(maxDiscountPct ? { maxDiscountPct } : {}) };
   const g = await gather(orgId, rec.scenario, rec.inputRefs, rec.syntheticSpec, rec.seed);
-  const out = rec.scenario === 'adjudication_ladder' ? coachLadder(g, params, rec.seed, rec.result) : coachSettlement(g, params, rec.seed, rec.result);
+  const rules = o.regulatoryRules;
+  const out = rec.scenario === 'adjudication_ladder' ? coachLadder(g, params, rec.seed, rec.result) : rec.scenario === 'plan_options' ? coachPlanOptions(g, params, rec.seed, rec.result, rules) : rec.scenario === 'campaign' ? coachCampaign(g, params, rec.seed, rec.result, rules) : coachSettlement(g, params, rec.seed, rec.result);
   rec.coach = { at: iso(), by: actor ? actor.name : 'platform owner', ...out }; await adapter(orgId).put(orgId, 'runs', rec.id, rec);
   await audit.log(orgId, actor, 'coach.suggest', { runId, found: out.suggestions.length }); return rec.coach;
 }

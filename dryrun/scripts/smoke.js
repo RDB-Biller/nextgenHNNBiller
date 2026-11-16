@@ -15,6 +15,8 @@ async function main() {
     r.statusCode = 404; r.end('{}');
   }); await new Promise((r) => hnnStub.listen(0, r));
   process.env.HNN_BASE_URL = `http://127.0.0.1:${hnnStub.address().port}`; process.env.HNN_PLATFORM_KEY = 'stubkey';
+  const atCalls = []; const atStub = http.createServer((q, r) => { let b = ''; q.on('data', (c) => (b += c)); q.on('end', () => { atCalls.push({ url: q.url, headers: q.headers, body: b }); r.setHeader('Content-Type', 'application/json'); if (q.url.startsWith('/sms')) return r.end(JSON.stringify({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'm1' }] } })); r.end(JSON.stringify({ id: 'w1' })); }); }); await new Promise((r) => atStub.listen(0, r));
+  const AT = { AT_API_KEY: 'atkey', AT_USERNAME: 'sandbox', AT_WA_NUMBER: '+233200000000', AT_SMS_URL: `http://127.0.0.1:${atStub.address().port}/sms`, AT_WA_URL: `http://127.0.0.1:${atStub.address().port}/wa` }; Object.assign(process.env, AT);
   const srv = app.listen(0); await new Promise((r) => srv.on('listening', r)); const base = `http://127.0.0.1:${srv.address().port}`;
   const call = async (method, url, key, body, hdr = 'x-api-key', raw) => { const r = await fetch(base + url, { method, headers: { ...(raw ? { 'Content-Type': 'text/plain' } : { 'Content-Type': 'application/json' }), ...(key ? { [hdr]: key } : {}) }, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { s: r.status, j }; };
   const PK = 'test_platform_key'; const plat = (m, u, b) => call(m, '/api/platform' + u, PK, b, 'x-platform-key');
@@ -23,7 +25,7 @@ async function main() {
   ok((await call('POST', '/api/platform/orgs', 'wrong', {}, 'x-platform-key')).s === 401, 'bad platform key rejected');
   let r = await plat('POST', '/orgs', { name: 'Nationwide Medical Insurance', sector: 'insurer', adminName: 'Ama', adminEmail: 'ama@nationwide.test', pace: 'weeks' }); ok(r.s === 201 && r.j.admin.apiKey, 'org created with admin key');
   const orgId = r.j.org.id; const ADMIN = r.j.admin.apiKey; ok(r.j.org.plan === 'free_trial' && r.j.org.daysLeft > 50, 'starts on a free trial');
-  ok((await call('GET', '/api/org', ADMIN)).j.pack.scenarios.length === 2, 'insurer pack offers two scenarios');
+  ok((await call('GET', '/api/org', ADMIN)).j.pack.scenarios.length === 4, 'insurer pack offers four scenarios');
   ok((await plat('POST', '/orgs', { name: 'X', sector: 'nope', adminEmail: 'x@x.test' })).s === 422, 'unknown pack refused');
 
   section('Team, roles and limits');
@@ -79,6 +81,56 @@ async function main() {
   ok((await call('PUT', '/api/org/storage', BUILD, { kind: 'platform' })).s === 403, 'only admin changes storage');
   r = await call('PUT', '/api/org/storage', ADMIN, { kind: 'platform' }); ok(r.s === 200 && (await call('GET', '/api/org/assets', ADMIN)).j.length === before, 'and back to our system');
 
+
+  section('Credentials by SMS and WhatsApp, and the directory');
+  atCalls.length = 0;
+  r = await plat('POST', '/orgs', { name: 'Gamma Insurance', adminName: 'Yaw', adminEmail: 'yaw@gamma.test', adminPhone: '0244123456', plan: 'paid', deliver: { sms: true, whatsapp: true } });
+  ok(r.s === 201 && r.j.delivery.length === 2 && r.j.delivery.every((d) => d.ok), 'admin sign-in sent by SMS and WhatsApp'); const GAMMA = r.j.org.id, GADMIN = r.j.admin.apiKey;
+  ok(atCalls.length === 2 && atCalls.every((c) => c.body.includes(GADMIN) || c.body.includes(encodeURIComponent(GADMIN))), 'the message carries the sign-in key'); ok(atCalls.some((c) => c.body.includes('%2B233244123456') || c.body.includes('+233244123456')), 'local number turned into +233 form');
+  ok((await plat('POST', '/orgs', { name: 'Bad Phone', adminEmail: 'x@x.test', adminPhone: '12', plan: 'paid' })).s === 422, 'bad phone refused');
+  r = await call('POST', '/api/org/team', GADMIN, { name: 'Efua', email: 'efua@gamma.test', phone: '0201234567', role: 'builder' }); ok(r.s === 201 && r.j.delivery.length === 2 && r.j.delivery.every((d) => d.ok), 'team invites default to SMS and WhatsApp');
+  r = await call('POST', '/api/org/team', GADMIN, { name: 'Kojo', email: 'kojo@gamma.test', phone: '0201234568', role: 'viewer', deliver: { sms: true } }); ok(r.j.delivery.length === 1 && r.j.delivery[0].channel === 'sms', 'admin can pick SMS only'); const kojoId = r.j.id;
+  r = await call('POST', '/api/org/team', GADMIN, { name: 'No Phone', email: 'np@gamma.test', role: 'viewer' }); ok(r.s === 201 && r.j.delivery.length === 0 && r.j.apiKey, 'no phone: key shown on screen instead');
+  r = await plat('POST', `/orgs/${GAMMA}/members/${kojoId}/resend`, { deliver: { sms: true } }); ok(r.s === 200 && r.j.delivery[0].ok && r.j.apiKey, 'platform owner can re-send (issues a fresh key)');
+  const dirOrg = (await plat('GET', '/directory')).j.find((o) => o.id === GAMMA); ok(dirOrg.members.length === 4 && dirOrg.members.some((m) => m.name === 'Efua' && m.addedBy === 'Yaw' && m.phone.includes('•')), 'directory shows who added whom, with masked phones');
+  const msgs = (await plat('GET', '/messaging')).j; ok(msgs.configured.sms && msgs.recent.length >= 5 && !JSON.stringify(msgs.recent).includes(GADMIN), 'delivery log kept without keys');
+  for (const k of Object.keys(AT)) delete process.env[k]; r = await plat('POST', '/orgs', { name: 'Delta Insurance', adminEmail: 'd@d.test', adminPhone: '0244000111', plan: 'paid', deliver: { sms: true } }); ok(r.s === 201 && r.j.delivery[0].ok === false && r.j.admin.apiKey, 'if SMS is not set up the org is still created and the key is shown'); Object.assign(process.env, AT);
+
+  section('Product changes and the regulator');
+  const baseProduct = { name: 'Outpatient cover', currency: 'GHS', premium: 70, benefitCap: 1800, coPayPct: 0, waitingDays: 30, exclusions: ['Cosmetic surgery'], hospitalTiers: [{ name: 'T1', costMultiple: 1 }, { name: 'T2', costMultiple: 1.6 }, { name: 'T3', costMultiple: 2.4 }], options: [{ name: 'Essential', tiers: ['T1'], premiumAdjPct: -8 }, { name: 'Standard', tiers: ['T1'], premiumAdjPct: 0 }] };
+  const prod = (await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'Outpatient cover', data: baseProduct })).j; ok(prod.classification === 'baseline', 'first version is the baseline');
+  const widen = JSON.parse(JSON.stringify(baseProduct)); widen.options.push({ name: 'Choice', tiers: ['T1', 'T2'], premiumAdjPct: 0 }); widen.options[0].premiumAdjPct = -8;
+  r = await call('POST', `/api/org/assets/${prod.id}/versions`, BUILD, { data: widen, note: 'Add higher-tier choice' }); let pd = (await call('GET', `/api/org/assets/${prod.id}`, BUILD)).j; ok(pd.versionList[1].classification.overall === 'none', 'adding a higher-tier hospital choice at the same premium needs no regulator approval');
+  const dear = JSON.parse(JSON.stringify(widen)); dear.premium = 80; r = await call('POST', `/api/org/assets/${prod.id}/versions`, BUILD, { data: dear, note: 'Raise premium' }); pd = (await call('GET', `/api/org/assets/${prod.id}`, BUILD)).j; ok(pd.versionList[2].classification.overall === 'regulator', 'a premium increase needs the regulator');
+  const deeper = JSON.parse(JSON.stringify(widen)); deeper.premium = 60; r = await call('POST', `/api/org/assets/${prod.id}/versions`, BUILD, { data: deeper, note: 'Big cut' }); pd = (await call('GET', `/api/org/assets/${prod.id}`, BUILD)).j; ok(pd.versionList[3].classification.overall === 'regulator', 'a cut beyond the discount limit needs the regulator');
+  for (const to of ['dry_run', 'shadow']) await call('POST', `/api/org/assets/${prod.id}/promote`, BUILD, { version: 3, to }); r = await call('POST', `/api/org/assets/${prod.id}/promote`, APPR, { version: 3, to: 'approved' }); ok(r.s === 409, 'cannot approve a regulator-level version without the reference');
+  ok((await call('POST', `/api/org/assets/${prod.id}/regulator`, BUILD, { version: 3, reference: 'X' })).s === 403, 'builder cannot record a regulator reference'); ok((await call('POST', `/api/org/assets/${prod.id}/regulator`, APPR, { version: 3, reference: 'NIC/2027/001' })).s === 200, 'approver records the reference'); ok((await call('POST', `/api/org/assets/${prod.id}/promote`, APPR, { version: 3, to: 'approved' })).s === 200, 'then it can be approved');
+  r = await call('PUT', '/api/org/regulatory-rules', ADMIN, { maxDiscountPct: 5 }); ok(r.s === 200 && r.j.maxDiscountPct === 5, 'admin edits the rules'); ok((await call('PUT', '/api/org/regulatory-rules', BUILD, { maxDiscountPct: 50 })).s === 403, 'builder cannot edit rules'); await call('PUT', '/api/org/regulatory-rules', ADMIN, { maxDiscountPct: 10 });
+
+  section('Plan options, campaign and surveys');
+  const po = (await call('POST', '/api/org/runs', BUILD, { scenario: 'plan_options', name: 'tiers v1', inputs: { product: { assetId: prod.id, version: 3 } }, seed: 4 })).j; ok(po.result.options.length === 3 && po.headline.lossRatioPct > 0, 'plan options run on the uploaded product'); ok(po.result.options.some((o) => o.capReachedPct > 0), 'higher-tier members reach their cap');
+  const poc = (await call('POST', `/api/org/runs/${po.id}/coach`, BUILD, {})).j; ok(Array.isArray(poc.suggestions) && poc.suggestions.every((x) => x.regulatory && x.draft.kind === 'product'), 'Coach labels each suggestion with its regulator status');
+  const cm = (await call('POST', '/api/org/runs', BUILD, { scenario: 'campaign', name: 'win back', seed: 2 })).j; ok(cm.headline.signups > 0 && cm.result.byChannel.length === 2, 'campaign run'); const cmc = (await call('POST', `/api/org/runs/${cm.id}/coach`, BUILD, {})).j; ok(cmc.suggestions.length <= 1, 'campaign Coach');
+  const tpl = (await call('GET', '/api/org', ADMIN)).j.pack.surveyTemplates[0]; const sv = (await call('POST', '/api/org/surveys', BUILD, { title: tpl.title, purpose: tpl.purpose, questions: tpl.questions })).j; ok(sv.token && sv.questions.length === 5, 'survey created from the template');
+  const pubV = await call('GET', `/api/public/survey/${sv.token}`, null); ok(pubV.s === 200 && pubV.j.open && !JSON.stringify(pubV.j).includes('feeds'), 'public page needs no key and hides internals');
+  const q2 = sv.questions[1].id; for (let i = 0; i < 6; i++) r = await call('POST', `/api/public/survey/${sv.token}`, null, { answers: { [sv.questions[0].id]: 'Local clinic or health centre', [q2]: i < 3 ? 'Yes' : 'No', [sv.questions[2].id]: 20 + i, [sv.questions[4].id]: 'Call me on 0244123456 or mail a@b.com' } }); ok(r.s === 201, 'answers accepted');
+  ok((await call('POST', `/api/public/survey/${sv.token}`, null, { answers: { [q2]: 'Maybe' } })).s === 422, 'answer outside the options refused');
+  const res = (await call('GET', `/api/org/surveys/${sv.id}/results`, BUILD)).j; ok(res.feeds[0].param === 'desireHigherTierPct' && res.feeds[0].value === 50, 'survey result feeds the scenario setting (50% said yes)'); ok(!JSON.stringify(res).includes('0244123456') && !JSON.stringify(res).includes('a@b.com'), 'phone numbers and emails scrubbed from free text');
+  ok((await call('POST', `/api/public/survey/not.valid`, null, { answers: { x: 1 } })).s === 404, 'bad link'); await call('POST', `/api/org/surveys/${sv.id}/status`, BUILD, { status: 'closed' }); ok((await call('POST', `/api/public/survey/${sv.token}`, null, { answers: { [q2]: 'Yes' } })).s === 410, 'closed survey refuses answers');
+  await call('POST', `/api/org/surveys/${sv.id}/status`, BUILD, { status: 'open' }); atCalls.length = 0; r = await call('POST', `/api/org/surveys/${sv.id}/invite`, BUILD, { phones: ['0244000001', '0244000002'], channels: { sms: true } }); ok(r.j.sent === 2 && atCalls.every((c) => c.body.includes('s.html')), 'survey link sent by SMS');
+
+  section('Dry Run Live');
+  const lv0 = await call('POST', '/api/org/live', APPR, { name: 'Early', productAssetId: prod.id, version: 2, cohortCap: 100 }); ok(lv0.s === 409, 'only approved versions can go live');
+  r = await call('POST', '/api/org/live', BUILD, { name: 'x', productAssetId: prod.id, version: 3, cohortCap: 100 }); ok(r.s === 403, 'builder cannot start a live programme');
+  r = await call('POST', '/api/org/live', APPR, { name: 'Outpatient beta', productAssetId: prod.id, version: 3, cohortCap: 200, forecastRunId: po.id, managed: true }); ok(r.s === 201 && r.j.status === 'planned' && r.j.forecast.lossRatioPct > 0, 'programme created from the approved version with its forecast'); const LV = r.j.id;
+  ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'live' })).s === 422, 'must start as beta'); ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'beta' })).j.status === 'beta', 'beta started');
+  ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'live' })).s === 409, 'cannot go live before any actuals');
+  r = await call('POST', `/api/org/live/${LV}/actuals`, BUILD, { period: '2026-12', members: 150, premiumCollected: 10000, claimsPaid: 6000, capReachedMembers: 3 }); ok(r.s === 200 && r.j.totals.lossRatioPct === 60 && r.j.health === 'on track', 'actuals within guardrails: on track');
+  r = await call('POST', `/api/org/live/${LV}/actuals`, BUILD, { period: '2027-01', members: 160, premiumCollected: 10500, claimsPaid: 13000, capReachedMembers: 40 }); ok(r.j.health === 'breach' && r.j.alerts.length >= 1, 'loss ratio breach raises an alert');
+  ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'live' })).s === 409, 'cannot go live while a guardrail is breached'); ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'paused' })).s === 422, 'pausing needs a reason'); ok((await call('POST', `/api/org/live/${LV}/status`, APPR, { status: 'paused', note: 'Loss ratio above guardrail' })).j.status === 'paused', 'paused with a reason');
+  ok((await call('POST', `/api/org/live/${LV}/actuals`, BUILD, { period: 'Jan', members: 1, premiumCollected: 1, claimsPaid: 1 })).s === 422, 'bad period refused'); const lg2 = (await call('GET', `/api/org/live/${LV}`, BUILD)).j; ok(lg2.decisions.length >= 3, 'decisions are recorded');
+  const allLive = (await plat('GET', '/live')).j; ok(allLive.some((x) => x.id === LV && x.managed && x.health === 'breach'), 'platform owner sees programmes across organisations'); ok((await plat('PATCH', `/live/${orgId}/${LV}`, { serviceTerms: 'Managed beta, 12 months' })).j.serviceTerms.includes('Managed'), 'service terms set by the platform owner');
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');
@@ -89,6 +141,6 @@ async function main() {
   await plat('PATCH', '/config', { maxFreeOrgs: 1 }); r = await plat('POST', '/orgs', { name: 'Free A', adminEmail: 'a@a.test' }); ok(r.s === 201, 'one free org fits under the cap'); r = await plat('POST', '/orgs', { name: 'Free B', adminEmail: 'b@b.test' }); ok(r.s === 402, 'free-org cap enforced');
   ok((await plat('POST', '/orgs', { name: 'Paying C', adminEmail: 'c@c.test', plan: 'paid' })).s === 201, 'paid orgs ignore the free cap');
 
-  srv.close(); hnnStub.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
+  srv.close(); hnnStub.close(); atStub.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

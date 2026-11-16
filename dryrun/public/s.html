@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your views</title>
+<style>
+:root{--ink:#14222b;--ink2:#4b5b66;--paper:#f2f4f1;--line:#d6dcd8;--tally:#d9532b}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:620px;margin:0 auto;padding:1.4rem 1rem 4rem}h1{font:600 1.7rem/1.2 "Iowan Old Style",Georgia,serif;margin:.2rem 0 .4rem}
+.q{background:#fff;border:1px solid var(--line);border-radius:10px;padding:1rem;margin:.9rem 0}.q p{margin:0 0 .6rem;font-weight:600}
+label.o{display:flex;gap:.6rem;align-items:center;padding:.55rem .6rem;border:1px solid var(--line);border-radius:8px;margin:.35rem 0;cursor:pointer}
+input[type=number],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:.6rem;font:inherit}textarea{min-height:90px}
+.rate{display:flex;gap:.4rem}.rate label{flex:1;text-align:center;border:1px solid var(--line);border-radius:8px;padding:.6rem 0;cursor:pointer}
+button{background:var(--tally);color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font:inherit;cursor:pointer}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #2f6fa3;outline-offset:2px}
+.sm{color:var(--ink2);font-size:14px}.err{background:#fbeceb;color:#b3392c;padding:.6rem .8rem;border-radius:8px;margin:.6rem 0}
+</style></head><body><main id="m"><p class="sm">Loading…</p></main>
+<script>
+const m=document.getElementById('m'),tok=new URLSearchParams(location.search).get('t')||'';
+function h(t,a,...k){const e=document.createElement(t);for(const[n,v]of Object.entries(a||{})){if(n==='class')e.className=v;else if(n.startsWith('on'))e.addEventListener(n.slice(2),v);else if(v!==false&&v!=null)e.setAttribute(n,v)}for(const c of k.flat())if(c!=null&&c!==false)e.append(c.nodeType?c:document.createTextNode(c));return e}
+(async()=>{let s;try{const r=await fetch('/api/public/survey/'+encodeURIComponent(tok));s=await r.json();if(!r.ok)throw new Error(s.error)}catch(e){m.replaceChildren(h('h1',{},'This link is not valid'),h('p',{class:'sm'},'Please check the link you were sent.'));return}
+ document.title=s.title;if(!s.open){m.replaceChildren(h('h1',{},s.title),h('p',{},'This survey is closed. Thank you for your interest.'));return}
+ const ans={};const err=h('div',{class:'err',hidden:true,role:'alert'});
+ const qs=s.questions.map(q=>{let c;if(q.type==='choice')c=q.options.map(o=>h('label',{class:'o'},h('input',{type:'radio',name:q.id,onchange:()=>ans[q.id]=o}),o));
+  else if(q.type==='rating')c=h('div',{},h('div',{class:'rate'},[1,2,3,4,5].map(n=>h('label',{},h('input',{type:'radio',name:q.id,style:'display:none',onchange:e=>{ans[q.id]=n;e.target.parentNode.parentNode.querySelectorAll('label').forEach(l=>l.style.background='');e.target.parentNode.style.background='#e6eef5'}}),String(n)))),h('div',{class:'sm',style:'display:flex;justify-content:space-between'},h('span',{},'1 = not at all'),h('span',{},'5 = very')));
+  else if(q.type==='number')c=h('input',{type:'number',min:0,inputmode:'decimal',oninput:e=>ans[q.id]=e.target.value});else c=h('textarea',{oninput:e=>ans[q.id]=e.target.value});
+  return h('div',{class:'q'},h('p',{},q.prompt),c)});
+ m.replaceChildren(h('p',{class:'sm'},s.organisation),h('h1',{},s.title),s.purpose&&h('p',{class:'sm'},s.purpose),h('p',{class:'sm'},'Takes about two minutes. We do not ask for your name or number.'),...qs,err,h('button',{onclick:async e=>{e.target.disabled=true;err.hidden=true;try{const r=await fetch('/api/public/survey/'+encodeURIComponent(tok),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answers:ans})});const j=await r.json();if(!r.ok)throw new Error(j.error);m.replaceChildren(h('h1',{},'Thank you'),h('p',{},'Your answers have been sent to '+s.organisation+'.'))}catch(x){err.textContent=x.message;err.hidden=false;e.target.disabled=false}}},'Send my answers'))})();
+</script></body></html>

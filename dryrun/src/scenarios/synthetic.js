@@ -33,4 +33,9 @@ function build(n, seed) {
   return { claims, priceBook: Object.entries(priceBook).map(([code, price]) => ({ code, name: code, price })), note: 'Synthetic claims with labelled issues (overpriced, ineligible, over limit, duplicate). Illustrative only.' };
 }
 const defaultRules = () => ({ rules: DX.filter((d) => ['B50.9', 'J06.9', 'A09', 'I10', 'N39.0'].includes(d.icd)).map((d) => ({ name: `${d.name}: routine outpatient`, icdPrefixes: [d.icd], maxAmount: 42 })), settings: { tariffTolerancePct: 20, outlierMultiple: 2.5, duplicateWindowDays: 7, autonomyTargetPct: 30, maxMissRatePct: 0.5 } });
-module.exports = { build, defaultRules, DX };
+function customers(n, seed) {
+  const r = rng(seed + 991); const regions = ['Greater Accra', 'Ashanti', 'Northern', 'Western', 'Volta']; const out = [];
+  for (let i = 0; i < n; i++) { const age = 18 + Math.floor(r() * 50); const x = r(); out.push({ pid: `P${String(i + 1).padStart(6, '0')}`, age, region: regions[Math.floor(r() * regions.length)], segment: x < 0.7 ? 'prospect' : x < 0.9 ? 'member' : 'lapsed', tenure_months: Math.floor(r() * 36) }); }
+  return out;
+}
+module.exports = { build, defaultRules, DX, customers };

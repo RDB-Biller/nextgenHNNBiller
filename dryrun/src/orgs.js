@@ -18,12 +18,13 @@ function publicOrg(o) {
   const { members, salt, ...rest } = o;
   return { ...rest, storage: store.describe(o.storage), memberCount: Object.keys(members).length, status: plans.statusOf(o), daysLeft: plans.daysLeft(o), limits: plans.limitsFor(o), planLabel: plans.PLANS[o.plan].label };
 }
-const publicMember = (m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, createdAt: m.createdAt });
+const publicMember = (m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, phone: m.phone ? require('./messaging').mask(m.phone) : '', addedBy: m.addedBy || null, createdAt: m.createdAt, lastSeenAt: m.lastSeenAt || null });
 const freeCount = () => Object.values(reg.load().orgs).filter((o) => plans.isFree(o) && !o.suspended).length;
 function assertFreeRoom() { const cap = reg.load().config.caps.maxFreeOrgs; if (cap !== null && cap !== undefined && freeCount() >= cap) throw err(402, `The platform is capped at ${cap} free organisations. Raise the cap or switch one to paid first.`); }
 
-function create({ name, sector = 'insurer', pack, pace = 'weeks', plan = 'free_trial', adminName, adminEmail, trialDays, storage } = {}, packs) {
+function create({ name, sector = 'insurer', pack, pace = 'weeks', plan = 'free_trial', adminName, adminEmail, adminPhone, trialDays, storage } = {}, packs) {
   if (!name || !adminEmail) throw err(422, 'name and adminEmail are required.');
+  if (adminPhone && !require('./messaging').validPhone(adminPhone)) throw err(422, 'The admin phone number does not look right. Use 024… or +233….');
   if (!plans.PLANS[plan]) throw err(422, `plan must be one of ${Object.keys(plans.PLANS).join(', ')}.`);
   if (!['days', 'weeks', 'months'].includes(pace)) throw err(422, 'pace must be days, weeks or months.');
   const packKey = pack || sector; if (!packs.get(packKey)) throw err(422, `Unknown pack "${packKey}".`);
@@ -33,7 +34,7 @@ function create({ name, sector = 'insurer', pack, pace = 'weeks', plan = 'free_t
   const d = reg.load().config.defaults;
   const o = { id: orgId, name, sector, pack: packKey, pace, plan, createdAt: iso(), graceDays: d.graceDays, trialEndsAt: plan === 'paid' ? null : new Date(Date.now() + (trialDays || d.trialDays) * plans.DAY).toISOString(),
     suspended: false, storage: storage ? store.toConfig(storage) : { kind: 'platform' }, limitOverrides: {}, checklist: {}, salt: newKey('salt'),
-    members: { [adminId]: { id: adminId, name: adminName || 'Admin', email: adminEmail, role: 'admin', keyHash: sha(key), createdAt: iso() } } };
+    members: { [adminId]: { id: adminId, name: adminName || 'Admin', email: adminEmail, phone: adminPhone || '', role: 'admin', addedBy: 'platform owner', keyHash: sha(key), createdAt: iso() } } };
   r.orgs[orgId] = o; reg.save();
   return { org: publicOrg(o), admin: { ...publicMember(o.members[adminId]), apiKey: key, note: 'Shown once. Store it safely.' } };
 }
@@ -46,21 +47,24 @@ function authenticate(req) {
   if (pk) { if (pk === (process.env.PLATFORM_ADMIN_KEY || 'platform_demo_key_123')) return { platform: true }; throw err(401, 'Invalid platform key.'); }
   const k = req.get('x-api-key'); if (!k) throw err(401, 'Send your key in x-api-key.');
   const h = sha(k);
-  for (const o of Object.values(reg.load().orgs)) for (const m of Object.values(o.members)) if (m.keyHash === h) return { org: o, member: m };
+  for (const o of Object.values(reg.load().orgs)) for (const m of Object.values(o.members)) if (m.keyHash === h) { if (!m.lastSeenAt || Date.now() - Date.parse(m.lastSeenAt) > 600000) { m.lastSeenAt = iso(); reg.save(); } return { org: o, member: m }; }
   throw err(401, 'Invalid key.');
 }
 
 // ---- team ----------------------------------------------------------------------------------------------------------------
-function addMember(orgId, { name, email, role = 'builder' } = {}) {
+function addMember(orgId, { name, email, phone, role = 'builder' } = {}, addedBy) {
   const o = raw(orgId); plans.assertWritable(o);
   if (!ROLES.includes(role)) throw err(422, `role must be one of ${ROLES.join(', ')}.`);
   if (!name || !email) throw err(422, 'name and email are required.');
+  if (phone && !require('./messaging').validPhone(phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….');
   if (Object.values(o.members).some((m) => m.email.toLowerCase() === String(email).toLowerCase())) throw err(409, 'That email is already on the team.');
   plans.assertRoom(o, 'members', Object.keys(o.members).length);
   const mid = id('mem'), key = newKey('dr');
-  o.members[mid] = { id: mid, name, email, role, keyHash: sha(key), createdAt: iso() }; reg.save();
+  o.members[mid] = { id: mid, name, email, phone: phone || '', role, addedBy: addedBy || 'platform owner', keyHash: sha(key), createdAt: iso() }; reg.save();
   return { ...publicMember(o.members[mid]), apiKey: key, note: 'Shown once. Store it safely.' };
 }
+const memberRaw = (orgId, memberId) => { const m = raw(orgId).members[memberId]; if (!m) throw err(404, 'Unknown member.'); return m; };
+function directory() { return Object.values(reg.load().orgs).map((o) => ({ id: o.id, name: o.name, pack: o.pack, plan: o.plan, status: plans.statusOf(o), members: Object.values(o.members).map(publicMember) })); }
 function members(orgId) { return Object.values(raw(orgId).members).map(publicMember); }
 function setRole(orgId, memberId, role) {
   const o = raw(orgId); plans.assertWritable(o); const m = o.members[memberId]; if (!m) throw err(404, 'Unknown member.');
@@ -81,6 +85,11 @@ function settings(orgId, { name, pace } = {}) {
   if (name) o.name = String(name);
   if (pace) { if (!['days', 'weeks', 'months'].includes(pace)) throw err(422, 'pace must be days, weeks or months.'); o.pace = pace; }
   reg.save(); return publicOrg(o);
+}
+function setRegulatoryRules(orgId, { maxDiscountPct, levels } = {}) {
+  const o = raw(orgId); plans.assertWritable(o); const cur = o.regulatoryRules || {}; const L = require('./regulatory').DEFAULTS.levels;
+  if (levels) for (const [k, v] of Object.entries(levels)) { if (!(k in L)) throw err(422, `Unknown rule "${k}".`); if (!['none', 'notify', 'regulator'].includes(v)) throw err(422, 'Each rule must be none, notify or regulator.'); }
+  o.regulatoryRules = { maxDiscountPct: maxDiscountPct != null ? Number(maxDiscountPct) : cur.maxDiscountPct, levels: { ...(cur.levels || {}), ...(levels || {}) } }; reg.save(); return require('./regulatory').merge(o.regulatoryRules);
 }
 function setPlan(orgId, { plan, trialDays, extendDays, limitOverrides, suspended, graceDays } = {}) {
   const o = raw(orgId);
@@ -117,4 +126,4 @@ async function setStorage(orgId, input) {
 }
 function tickChecklist(orgId, scenario, step, done) { const o = raw(orgId); o.checklist[scenario] = o.checklist[scenario] || {}; o.checklist[scenario][step] = !!done; reg.save(); return o.checklist[scenario]; }
 const raws = raw;
-module.exports = { ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };
+module.exports = { setRegulatoryRules, memberRaw, directory, ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };

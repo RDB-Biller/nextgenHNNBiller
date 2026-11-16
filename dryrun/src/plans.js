@@ -5,9 +5,9 @@
  */
 const { err } = require('./util');
 const PLANS = {
-  free_trial:     { label: 'Free trial',     limits: { members: 3,  assets: 60,   runsPerMonth: 100,  datasetRows: 20000 } },
-  extended_trial: { label: 'Extended trial', limits: { members: 6,  assets: 150,  runsPerMonth: 300,  datasetRows: 50000 } },
-  paid:           { label: 'Paid',           limits: { members: 50, assets: 2000, runsPerMonth: 5000, datasetRows: 500000 } },
+  free_trial:     { label: 'Free trial',     limits: { members: 3,  assets: 60,   runsPerMonth: 100,  datasetRows: 20000, surveyResponses: 500 } },
+  extended_trial: { label: 'Extended trial', limits: { members: 6,  assets: 150,  runsPerMonth: 300,  datasetRows: 50000, surveyResponses: 2000 } },
+  paid:           { label: 'Paid',           limits: { members: 50, assets: 2000, runsPerMonth: 5000, datasetRows: 500000, surveyResponses: 50000 } },
 };
 const isFree = (org) => org.plan !== 'paid';
 const limitsFor = (org) => ({ ...(PLANS[org.plan] || PLANS.free_trial).limits, ...(org.limitOverrides || {}) });
