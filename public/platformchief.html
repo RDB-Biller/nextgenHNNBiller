@@ -398,6 +398,10 @@
           <div class="field"><label>Penalty when score ≤</label><input id="pd_penalty_max" type="number" value="40"/></div>
           <div class="field"><label>Penalty amount (GHS)</label><input id="pd_penalty_amt" type="number" value="200"/></div>
         </div>
+        <div class="row">
+          <div class="field"><label>Take back per complication (GHS)</label><input id="pd_claw_amt" type="number" value="0" min="0"/></div>
+          <p class="muted" style="font-size:12px;margin:22px 0 0;flex:3">Optional. Every complication among a provider's own patients in the period is taken back as a penalty, so more complications never pay more. Set a penalty amount of 0 and a take-back of 0 to reward only, with no fines.</p>
+        </div>
         <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500">
           <input type="checkbox" id="pd_cashback_on" style="width:auto"/> Also pay the patient directly when THEIR OWN reading hits target
         </label>
@@ -1257,6 +1261,8 @@ async function createProduct(){
       {kind:'bonus',minScore:parseFloat($('pd_bonus_min').value)||0,amount:parseFloat($('pd_bonus_amt').value)||0,currency:'GHS'},
       {kind:'penalty',maxScore:parseFloat($('pd_penalty_max').value)||0,amount:parseFloat($('pd_penalty_amt').value)||0,currency:'GHS'},
     ];
+    const clawAmt=parseFloat($('pd_claw_amt').value);
+    if(clawAmt>0)config.complicationClawback={amountPerComplication:clawAmt,currency:'GHS'};
     if($('pd_cashback_on').checked){
       config.patientCashback={minScore:parseFloat($('pd_cashback_min').value)||0,amount:parseFloat($('pd_cashback_amt').value)||0,currency:'GHS'};
     }
@@ -1315,7 +1321,7 @@ function pdRenderResults(r){
   const money=(a,c)=>`${esc(c||'GHS')} ${Number(a||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   const provRows=(r.providers||[]).map(p=>`<tr><td>${esc(p.tenantId)}</td><td>${p.score!=null?p.score:'—'}</td>
     <td>${p.kind?`<span class="pill ${p.kind==='bonus'?'settled':'rejected'}">${esc(p.kind)}</span> ${money(p.amount,p.currency)}`:'<span class="muted">no tier hit</span>'}</td>
-    <td class="muted" style="font-size:12px">${esc(p.reason||(p.completions!=null?(p.completions+' completion(s)'):''))}</td></tr>`).join('');
+    <td class="muted" style="font-size:12px">${esc(p.reason||(p.completions!=null?(p.completions+' completion(s)'):''))}${p.clawback?`<br><span class="pill rejected">take-back</span> ${money(p.clawback.amount,p.clawback.currency)} for ${p.clawback.count} complication(s)`:''}</td></tr>`).join('');
   const patRows=(r.patients||[]).map(p=>`<tr><td>${esc(p.memberId)}</td><td>${p.score!=null?p.score:(p.actionCount!=null?p.actionCount+' actions':'—')}</td>
     <td>${money(p.amount,p.currency)}</td><td class="muted" style="font-size:12px">${esc(p.reason||'')}</td></tr>`).join('');
   $('pd_measure_results').innerHTML=`

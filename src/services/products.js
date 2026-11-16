@@ -82,6 +82,10 @@ function validateConfig(type, input = {}, existing = {}) {
       metrics: normaliseMetrics(input.metrics, condition),
       metricParams: input.metricParams || {},
       providerTiers: normaliseTiers(input.providerTiers),
+      // Optional: take back a fixed amount for every complication a provider's patients had in the period, so a complication never pays more.
+      complicationClawback: input.complicationClawback && Number(input.complicationClawback.amountPerComplication) > 0
+        ? { amountPerComplication: Number(input.complicationClawback.amountPerComplication), currency: input.complicationClawback.currency || 'GHS' }
+        : null,
       patientCashback: input.patientCashback && Number(input.patientCashback.amount) > 0
         ? {
           minScore: Number(input.patientCashback.minScore) || 0,

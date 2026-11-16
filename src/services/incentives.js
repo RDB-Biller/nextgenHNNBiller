@@ -97,8 +97,13 @@ async function computeVbc(product, period) {
     const enrolledCount = metricsLibrary.distinctMemberCount(obs);
     const { score, breakdown } = weightedScore(product.config.metrics, { observations: obs, enrolledCount, params });
     const tier = score != null ? tierFor(score, product.config.providerTiers) : null;
+    // Complication take-back: fee-for-service pays more when patients have complications; this removes that reward.
+    const cb = product.config.complicationClawback;
+    const complications = obs.filter((o) => o.type === 'complication').length;
+    const clawback = cb && complications > 0 ? { count: complications, amount: round2(complications * cb.amountPerComplication), currency: cb.currency, kind: 'penalty',
+      reason: `${product.name}: ${complications} complication(s), billing taken back` } : null;
     providers.push({
-      tenantId, score, breakdown, enrolledCount,
+      tenantId, score, breakdown, enrolledCount, complications, ...(clawback ? { clawback } : {}),
       ...(tier ? { amount: tier.amount, currency: tier.currency, kind: tier.kind,
         reason: `${product.name}: outcome score ${score}/100` } : {}),
     });
@@ -188,6 +193,17 @@ async function accrue(product, period, actorId) {
       id: `acc_${rand()}`, productId: product.id, productName: product.name, productType: product.type,
       payerId: product.payerId, beneficiaryType: 'provider', beneficiaryId: p.tenantId,
       amount: p.amount, currency: p.currency, kind: p.kind, reason: p.reason,
+      score: p.score ?? null, period, computedAt: new Date().toISOString(), computedBy: actorId || null,
+    };
+    await store.accruals.insert(row);
+    written.push(row);
+  }
+  for (const p of results.providers) {
+    if (!p.clawback || !p.clawback.amount) continue;
+    const row = {
+      id: `acc_${rand()}`, productId: product.id, productName: product.name, productType: product.type,
+      payerId: product.payerId, beneficiaryType: 'provider', beneficiaryId: p.tenantId,
+      amount: p.clawback.amount, currency: p.clawback.currency, kind: 'penalty', reason: p.clawback.reason,
       score: p.score ?? null, period, computedAt: new Date().toISOString(), computedBy: actorId || null,
     };
     await store.accruals.insert(row);

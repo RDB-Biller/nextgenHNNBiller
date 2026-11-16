@@ -96,6 +96,7 @@ async function vbcChecks() {
         { kind: 'penalty', maxScore: 40, amount: 200, currency: 'GHS' },
       ],
       patientCashback: { minScore: 80, amount: 20, currency: 'GHS' },
+      complicationClawback: { amountPerComplication: 100, currency: 'GHS' },
     },
   }, 'pm@insurer');
   ok(program.status === 'draft' && program.config.metrics.length === 3, 'create() builds a VBC program in draft status with 3 weighted metrics');
@@ -140,6 +141,7 @@ async function vbcChecks() {
 
   ok(good.score > bad.score, `the better-performing provider scores higher (good=${good.score}, bad=${bad.score})`);
   ok(good.kind === 'bonus' && good.amount === 500, 'the good provider lands in the bonus tier at the configured amount');
+  ok(bad.clawback && bad.clawback.count === 3 && bad.clawback.amount === 300 && !good.clawback, 'complications are taken back per event, only for the provider whose patients had them');
   ok(bad.kind === 'penalty' && bad.amount === 200, 'the struggling provider lands in the penalty tier at the configured amount');
 
   // Patient cashback: g1/g2/g3 are at BP target (the program's first metric) -> qualify; g4 and all of ten_bad's members are not.
@@ -150,6 +152,7 @@ async function vbcChecks() {
   const { accrued } = await incentives.accrue(live, period, 'pm@insurer');
   ok(accrued.some((r) => r.beneficiaryType === 'provider' && r.beneficiaryId === 'ten_good' && r.amount === 500), 'accrue() writes the provider bonus row');
   ok(accrued.some((r) => r.beneficiaryType === 'provider' && r.beneficiaryId === 'ten_bad' && r.amount === 200 && r.kind === 'penalty'), 'accrue() writes the provider penalty row');
+  ok(accrued.some((r) => r.beneficiaryId === 'ten_bad' && r.amount === 300 && r.kind === 'penalty' && /billing taken back/.test(r.reason)), 'accrue() writes the complication take-back as its own penalty row');
   ok(accrued.some((r) => r.beneficiaryType === 'patient' && r.beneficiaryId === 'g1' && r.amount === 20), 'accrue() writes a patient cashback row');
   ok(accrued.every((r) => r.productType === 'vbc' && r.productId === live.id), 'every accrual is tagged back to this exact product');
 

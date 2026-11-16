@@ -71,6 +71,8 @@ smoke:pde` (observation ingestion, product validation, and all three product
 types' scoring/reward math, including the null-vs-zero metric distinction and
 period-window clipping — see **Product Development Environment** below), and `npm
 run smoke:clinical-entry` (manual hospital entry, the OTP phone-link lifecycle,
+
+> **Complications never pay more.** A VBC product can set an optional *take back per complication* amount. Each complication recorded among a provider's own patients in the period is accrued as a separate penalty row, so more complications can never raise a provider's income. Good scores still earn tier bonuses; the tier penalty stays optional.
 every SMS/WhatsApp reading keyword and its condition auto-tagging, lockout/expiry,
 STOP/HELP, and the lost-token re-request flow — see **Product Development
 Environment** below).
