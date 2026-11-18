@@ -161,3 +161,10 @@ Workroom, **Connected sites** (and the label on any web link posted in a room).
 - **General surveys** can also be created from the Workroom, using the same templates and custom questions as the main Surveys tab.
 - **Design considerations.** "Use in design considerations" saves the results as an insight, posts a Coach note in General, and adds a "Customer feedback" option in the test bench next to regulatory, best practice, market and web.
 - The live DRI link opens the owner's real site, so respondents' actions there are real.
+
+## Working model and the DRI signing kit
+
+- Entering a site address and choosing "Read public pages and build a working model" reads only what any visitor can see (robots.txt is respected) and builds an editable working model: pages, menu, forms, assumed features. It is not a copy and holds none of the site's code or images.
+- **Market research** the team is allowed to use (own studies, licensed reports, public statistics) can be pasted or loaded as text, Markdown or CSV. Email addresses and phone numbers are removed. It is added to the model.
+- Any member who can iterate can save **iterations on the model** (add, change or remove something). Voting and customer surveys need live pages, so they need DRI signing.
+- Under every working model there is a footnote: "Get more done with DRI signing. If you have genuine access to the web application, install the following and get better control of the iterative process." It lists a download link per stack and **Everything as one text file** (`dri-signing-kit.txt`): settings, setup for each stack, links, and the full source of every connector file. Save it, or upload it to your build assistant to integrate into your own products. It contains the site secret, so admins and builders only.
