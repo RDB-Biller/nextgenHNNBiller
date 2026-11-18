@@ -198,4 +198,4 @@ function probe(url) {
 async function setLiveUrl(orgId, assetId, url) { const rec = await store(orgId, assetId); rec.liveUrl = url; await save(orgId, rec); }
 async function history(orgId, assetId) { await needProduct(orgId, assetId); return (await ad(orgId).list(orgId, 'wr_bench')).filter((b) => b.assetId === assetId).sort((x, y) => y.at.localeCompare(x.at)).slice(0, 10); }
 
-module.exports = { probe, setLiveUrl, constraints, addRule, removeRule, addSheet, removeSheet, plan, run, history, isPrivate, expandVariants, METRICS };
+module.exports = { probe, setLiveUrl, constraints, addRule, removeRule, addSheet, removeSheet, plan, run, history, isPrivate, guardedLookup, expandVariants, METRICS };

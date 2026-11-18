@@ -376,6 +376,20 @@ O.get('/workroom/files/:fid', need('read'), wrap(async (req, res) => {
   const { rec, buf } = await wr.getFile(oid(req), req.params.fid); res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Disposition', `attachment; filename="${rec.name.replace(/[^\w.\- ()]/g, '_')}"`); res.setHeader('Content-Length', buf.length); res.end(buf);
 }));
 O.delete('/workroom/files/:fid', need('read'), wrap(async (req, res) => res.json(await wr.removeFile(oid(req), req.actor, req.role, req.params.fid))));
+// ---- connected sites (Dry Run signed and inferred) ------------------------------------------------------------------------------
+const connect = require('./connect');
+const pubOf = (req) => siteUrl(req);
+O.get('/workroom/sites', need('read'), wrap(async (req, res) => res.json({ sites: await connect.list(oid(req)) })));
+O.post('/workroom/sites', need('read'), wrap(async (req, res) => res.status(201).json(await connect.create(oid(req), req.actor, req.role, { url: (req.body || {}).url, publicUrl: pubOf(req) }))));
+O.post('/workroom/sites/read', need('read'), wrap(async (req, res) => res.json(await connect.read(oid(req), req.actor, req.role, { url: (req.body || {}).url }))));
+O.get('/workroom/sites/label', need('read'), wrap(async (req, res) => res.json(await connect.labelFor(oid(req), String(req.query.url || '')))));
+O.get('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json(await connect.details(oid(req), req.role, req.params.sid, pubOf(req)))));
+O.post('/workroom/sites/:sid/verify', need('read'), wrap(async (req, res) => res.json(await connect.verify(oid(req), req.actor, req.role, req.params.sid))));
+O.post('/workroom/sites/:sid/capture', need('read'), wrap(async (req, res) => res.json({ site: await connect.capture(oid(req), req.actor, req.role, req.params.sid) })));
+O.delete('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json(await connect.revoke(oid(req), req.actor, req.role, req.params.sid))));
+O.post('/workroom/sites/:sid/iterations', need('read'), wrap(async (req, res) => res.status(201).json(await connect.addIteration(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
+O.delete('/workroom/sites/:sid/iterations/:iid', need('read'), wrap(async (req, res) => res.json({ site: await connect.removeIteration(oid(req), req.role, req.params.sid, req.params.iid) })));
+O.get('/workroom/sites/:sid/iterations/:iid/pack', need('read'), wrap(async (req, res) => { const p = await connect.pack(oid(req), req.actor, req.role, req.params.sid, req.params.iid, pubOf(req)); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', 'attachment; filename="dryrun-pack.json"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.end(JSON.stringify(p, null, 2)); }));
 // ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
 O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
 O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));

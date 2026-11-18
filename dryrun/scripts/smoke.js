@@ -414,6 +414,99 @@ async function main() {
     ok((await call('POST', '/api/org/workroom/rooms/rm_general/messages', BUILD, { text: 'json still works after the binary change' })).s === 201, 'normal messages are unaffected');
   }
 
+  section('Connected sites: signed and inferred');
+  { process.env.DRYRUN_ALLOW_PRIVATE_TESTS = '1'; const { spawn } = require('child_process'); const net = require('net'); const crypto = require('crypto'); const connector = require('../public/connector/dryrun-connector.js');
+    const freePort = () => new Promise((rs) => { const s = net.createServer(); s.listen(0, () => { const p = s.address().port; s.close(() => rs(p)); }); });
+    const listen = (handler) => new Promise((rs) => { const s = http.createServer(handler); s.listen(0, '127.0.0.1', () => rs(s)); });
+    const S = (m, u, k, b) => call(m, '/api/org/workroom/sites' + u, k, b);
+    // not installed yet
+    const P0 = await freePort(); let r = await S('POST', '', ADMIN, { url: `http://127.0.0.1:${P0}` }); const site = r.j.site, ins = r.j.install;
+    ok(r.s === 201 && site.level === 'inferred' && site.status === 'pending' && /^drt_/.test(ins.token) && /^drs_/.test(ins.secret) && ins.manifestPath === '/.well-known/dryrun.json' && ins.node.includes('dryrun-connector') && ins.python.includes('DryRun(') && ins.php.includes('dryrun_connector') && ins.script.includes('/dryrun/dryrun.js'), 'connecting a site gives a token, a secret and install snippets for Node, Python, PHP and the page');
+    ok(ins.files.some((f) => f.name === 'dryrun.js') && (await fetch(`${base}/connector/dryrun.js`)).status === 200 && (await fetch(`${base}/connector/dryrun-connector.js`)).status === 200 && (await fetch(`${base}/connector/dryrun_connector.py`)).status === 200 && (await fetch(`${base}/connector/dryrun-connector.php`)).status === 200, 'the connector files can be downloaded');
+    ok((await S('POST', '', APPR, { url: 'https://example.com' })).s === 403 && (await S('POST', '', ADMIN, { url: 'ftp://x.test' })).s === 422 && (await S('POST', '', ADMIN, { url: 'https://u:p@x.test' })).s === 422, 'approvers cannot connect sites, and bad or password-bearing addresses are refused');
+    ok((await S('POST', '', ADMIN, { url: `http://127.0.0.1:${P0}` })).j.site.id === site.id, 'connecting the same site twice gives the same record');
+    r = await S('POST', `/${site.id}/verify`, ADMIN); ok(r.j.ok === false && /reach|answered/.test(r.j.problem), 'checking before installing says what is missing');
+    // install the Node connector
+    const fakeApp = { _router: { stack: [{ route: { path: '/quote', methods: { get: true } } }, { route: { path: '/policy/:id', methods: { get: true, put: true } } }, { route: { path: '/dryrun/capture', methods: { get: true } } }] } };
+    const mw = connector({ app: fakeApp, name: 'Cover quote', token: ins.token, secret: ins.secret, origins: [ins.dryrunOrigin], settings: { currency: 'GHS', stripeApiKey: 'sk_live_zzz', nested: { password: 'p', ok: 1 } }, forms: [{ path: '/quote', fields: ['age', 'sex'] }], api: { '/quote': { post: 'returns premium' } }, sample: () => [{ age: 30 }] });
+    const siteSrv = await listen((q, s) => mw(q, s, () => { s.setHeader('content-type', 'text/html'); s.end('<h1>Hello</h1>'); })); const PS = siteSrv.address().port;
+    const s1 = (await S('POST', '', ADMIN, { url: `http://127.0.0.1:${PS}` })).j; const ins1 = s1.install;
+    const mw1 = connector({ app: fakeApp, name: 'Cover quote', token: ins1.token, secret: ins1.secret, origins: [ins1.dryrunOrigin], settings: { currency: 'GHS', stripeApiKey: 'sk_live_zzz', nested: { password: 'p', ok: 1 } }, forms: [{ path: '/quote', fields: ['age', 'sex'] }], api: { '/quote': { post: 'returns premium' } }, sample: () => [{ age: 30 }] });
+    siteSrv.removeAllListeners('request'); siteSrv.on('request', (q, s) => mw1(q, s, () => { s.setHeader('content-type', 'text/html'); s.end('<h1>Hello</h1>'); }));
+    r = await S('POST', `/${s1.site.id}/verify`, ADMIN); ok(r.j.ok === true && r.j.site.level === 'signed' && r.j.site.capabilities.capture === true && r.j.site.capabilities.overlay === true, 'a site running the connector becomes Dry Run signed, with capture and overlay');
+    const cap = r.j.site.capture; ok(cap.routes.some((x) => x.path === '/quote') && cap.routes.some((x) => x.method === 'PUT') && !cap.routes.some((x) => /dryrun/.test(x.path)), 'capture lists the real routes and leaves out Dry Run\'s own');
+    ok(cap.settings.currency === 'GHS' && cap.settings.stripeApiKey === '[hidden]' && cap.settings.nested.password === '[hidden]' && cap.settings.nested.ok === 1 && cap.forms[0].fields.length === 2 && cap.api['/quote'], 'capture keeps settings, forms and API shapes but hides anything that looks secret');
+    ok(cap.sample === null, 'sample data is not captured unless the owner allows it');
+    ok(r.j.site.extras.length === 3 && r.j.site.extras.some((x) => /Exact structure/.test(x)) && r.j.site.extras.some((x) => /Live preview/.test(x)) && r.j.site.extras.some((x) => /pack/.test(x)), 'the signed label lists the extra features available');
+    const cp = '/dryrun/capture'; const get = (u, h) => fetch(`http://127.0.0.1:${PS}${u}`, { headers: h || {} });
+    ok((await get(cp)).status === 401, 'an unsigned capture request is refused');
+    const sg = (ts, secret = ins1.secret) => ({ 'x-dryrun-ts': String(ts), 'x-dryrun-sig': crypto.createHmac('sha256', secret).update(`${ts}.GET.${cp}`).digest('hex') });
+    ok((await get(cp, sg(Date.now() - 10 * 60 * 1000))).status === 401 && (await get(cp, sg(Date.now(), 'drs_wrong'))).status === 401 && (await get(cp, sg(Date.now()))).status === 200, 'capture requests must be fresh and signed with the secret');
+    const mf = await (await get('/.well-known/dryrun.json')).json(); ok(mf.token === ins1.token && !JSON.stringify(mf).includes(ins1.secret), 'the public manifest carries the token but never the secret');
+    ok(/frame-ancestors 'self' /.test((await get('/')).headers.get('content-security-policy') || ''), 'pages can be framed by Dry Run and nobody else');
+    ok((await get('/dryrun/dryrun.js')).status === 404 || (await get('/dryrun/dryrun.js')).status === 200, 'the page script address answers');
+    // wrong secret, wrong token
+    const bad = (await S('POST', '', ADMIN, { url: `http://localhost:${PS}` })).j; const mwBad = connector({ token: bad.install.token, secret: 'drs_not_the_one', origins: [] });
+    const badSrv = await listen((q, s) => mwBad(q, s, () => { s.end('x'); })); const PB = badSrv.address().port; const bad2 = (await S('POST', '', ADMIN, { url: `http://localhost:${PB}` })).j; mwBad.handle; badSrv.removeAllListeners('request'); const mwBad2 = connector({ token: bad2.install.token, secret: 'drs_not_the_one', origins: [] }); badSrv.on('request', (q, s) => mwBad2(q, s, () => s.end('x')));
+    r = await S('POST', `/${bad2.site.id}/verify`, ADMIN); ok(r.j.ok === true && r.j.site.level === 'signed' && r.j.site.capabilities.capture === false && /secret/i.test(r.j.problem), 'the right token with the wrong secret is verified as yours but not captured, and says why');
+    const mwTok = connector({ token: 'drt_other', secret: ins1.secret, origins: [] }); const tokSrv = await listen((q, s) => mwTok(q, s, () => s.end('x'))); const PT = tokSrv.address().port; const tk = (await S('POST', '', ADMIN, { url: `http://127.0.0.1:${PT}` })).j;
+    r = await S('POST', `/${tk.site.id}/verify`, ADMIN); ok(r.j.ok === false && /token does not match/.test(r.j.problem) && r.j.site.level === 'inferred', 'a manifest with someone else\'s token does not sign the site');
+    // iterations
+    const I = (sid, b, k = ADMIN) => S('POST', `/${sid}/iterations`, k, b);
+    ok((await I(tk.site.id, { title: 't', patches: [{ type: 'hide', selector: '.x' }] })).s === 422, 'iterations need a signed site');
+    ok((await I(s1.site.id, { title: 'x', patches: [{ type: 'style', selector: '.hero', css: 'background:url(http://evil/x.png)' }] })).s === 422 && (await I(s1.site.id, { title: 'x', patches: [{ type: 'style', selector: '.hero', css: 'color:red} body{display:none' }] })).s === 422, 'style changes with links or braces are refused');
+    ok((await I(s1.site.id, { title: 'x', patches: [{ type: 'text', selector: 'h1<script>', value: 'a' }] })).s === 422 && (await I(s1.site.id, { title: 'x', patches: [{ type: 'attr', selector: 'a', name: 'href', value: 'javascript:alert(1)' }] })).s === 422 && (await I(s1.site.id, { title: 'x', patches: [{ type: 'attr', selector: 'a', name: 'onclick', value: 'x' }] })).s === 422, 'bad selectors, unsafe links and event attributes are refused');
+    ok((await I(s1.site.id, { title: '', patches: [{ type: 'hide', selector: '.x' }] })).s === 422 && (await I(s1.site.id, { title: 'x', patches: [] })).s === 422, 'an iteration needs a name and at least one change');
+    r = await I(s1.site.id, { title: 'Shorter hero', note: 'try a plainer headline', patches: [{ type: 'text', selector: 'h1', value: 'Cover in two minutes' }, { type: 'style', selector: '.btn', css: 'background:#0a7; color:#fff' }, { type: 'hide', selector: '.banner' }, { type: 'attr', selector: 'a.cta', name: 'href', value: '/quote' }, { type: 'setting', key: 'quote.maxAge', value: 60 }] });
+    ok(r.s === 201 && r.j.iteration.patches.length === 5, 'a signed site can hold an iteration'); const itId = r.j.iteration.id;
+    ok((await I(s1.site.id, { title: 'v', patches: [{ type: 'hide', selector: '.x' }] }, APPR)).s === 403, 'only roles that can write add iterations');
+    let pk = await call('GET', `/api/org/workroom/sites/${s1.site.id}/iterations/${itId}/pack`, ADMIN); ok(pk.s === 200 && pk.j.dryrunPack === 1 && pk.j.site === `http://127.0.0.1:${PS}` && pk.j.patches.length === 4 && pk.j.settings['quote.maxAge'] === 60 && /^[0-9a-f]{32}$/.test(pk.j.digest) && pk.j.howToInstall.length >= 3, 'the pack holds the changes, the settings kept apart, a digest and how to install it');
+    const pkRaw = await fetch(`${base}/api/org/workroom/sites/${s1.site.id}/iterations/${itId}/pack`, { headers: { 'x-api-key': ADMIN } }); ok(/attachment/.test(pkRaw.headers.get('content-disposition')), 'the pack downloads as a file');
+    ok((await call('GET', `/api/org/workroom/sites/${s1.site.id}/iterations/${itId}/pack`, APPR)).s === 403, 'approvers cannot export packs');
+    // the connector applies an approved pack only when switched on
+    const packPath = path.join(os.tmpdir(), 'dryrun-pack-' + Date.now() + '.json'); fs.writeFileSync(packPath, JSON.stringify(pk.j));
+    const mwOff = connector({ token: 't', secret: 's', packFile: packPath }); const mwOn = connector({ token: 't', secret: 's', packFile: packPath, applyPack: true });
+    const asReq = (m, u) => new Promise((rs) => { const out = { code: 0, body: '' }; const res = { statusCode: 0, setHeader() {}, getHeader() {}, end(b) { out.code = res.statusCode; out.body = b || ''; rs(out); } }; m({ method: 'GET', url: u, headers: {} }, res, () => rs({ code: 'next' })); });
+    ok((await asReq(mwOff, '/dryrun/pack.json')).code === 404 && (await asReq(mwOn, '/dryrun/pack.json')).code === 200 && mwOn.setting('quote.maxAge', 1) === 60 && mwOff.setting('quote.maxAge', 1) === 1, 'a pack is only served and read when the owner switches it on');
+    r = await S('DELETE', `/${s1.site.id}/iterations/${itId}`, ADMIN); ok(r.j.site.iterations.length === 0, 'an iteration can be removed');
+    // Python and PHP connectors
+    const run = (cmd, args, env) => spawn(cmd, args, { env: { ...process.env, ...env }, stdio: 'ignore', cwd: path.join(__dirname, '..', 'public', 'connector') });
+    const waitUp = async (p) => { for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${p}/.well-known/dryrun.json`); return true; } catch { await new Promise((x) => setTimeout(x, 150)); } } return false; };
+    const procs = [];
+    const PP = await freePort(); const py = (await S('POST', '', ADMIN, { url: `http://127.0.0.1:${PP}` })).j;
+    procs.push(run('python3', ['-c', `from wsgiref.simple_server import make_server\nfrom dryrun_connector import DryRun\ndef app(e,s):\n s('200 OK',[('Content-Type','text/html')]); return [b'hi']\nmake_server('127.0.0.1',${PP},DryRun(app,token='${py.install.token}',secret='${py.install.secret}',origins=['${py.install.dryrunOrigin}'],name='Py product',settings={'currency':'GHS','api_key':'x'},routes=[{'method':'GET','path':'/py'}])).serve_forever()`], {}));
+    ok(await waitUp(PP), 'the Python connector starts'); r = await S('POST', `/${py.site.id}/verify`, ADMIN); ok(r.j.ok === true && r.j.site.capabilities.capture && r.j.site.capture.name === 'Py product' && r.j.site.capture.routes[0].path === '/py' && r.j.site.capture.settings.api_key === '[hidden]', 'the Python connector signs a site and hides secrets');
+    const PH = await freePort(); const ph = (await S('POST', '', ADMIN, { url: `http://127.0.0.1:${PH}` })).j; const phpDir = path.join(os.tmpdir(), 'dr-php-' + Date.now()); fs.mkdirSync(phpDir); fs.copyFileSync(path.join(__dirname, '..', 'public', 'connector', 'dryrun-connector.php'), path.join(phpDir, 'dryrun-connector.php'));
+    fs.writeFileSync(path.join(phpDir, 'index.php'), `<?php require __DIR__.'/dryrun-connector.php'; dryrun_connector(['name'=>'Php product','token'=>'${ph.install.token}','secret'=>'${ph.install.secret}','origins'=>['${ph.install.dryrunOrigin}'],'settings'=>['currency'=>'GHS','db_password'=>'x'],'routes'=>[['method'=>'GET','path'=>'/php']]]); echo 'hi';`);
+    procs.push(spawn('php', ['-S', `127.0.0.1:${PH}`, '-t', phpDir, path.join(phpDir, 'index.php')], { stdio: 'ignore' }));
+    if (await waitUp(PH)) { r = await S('POST', `/${ph.site.id}/verify`, ADMIN); ok(r.j.ok === true && r.j.site.capabilities.capture && r.j.site.capture.name === 'Php product' && r.j.site.capture.settings.db_password === '[hidden]', 'the PHP connector signs a site and hides secrets'); } else ok(false, 'the PHP connector starts');
+    for (const p of procs) p.kill();
+    // inferred reader
+    const pages = { '/': '<html lang="en"><head><title>Shop Ghana</title><meta name="description" content="Buy things"><meta name="viewport" content="width=device-width"></head><body><nav><a href="/login">Log in</a> <a href="/pricing">Pricing</a> <a href="/contact">Contact</a> <a href="/private/area">Secret</a></nav><h1>Welcome</h1><form action="/search"><input type="search" name="q"></form><script src="/_next/static/x.js"></script> Pay with Paystack or mobile money</body></html>', '/login': '<html><body><form action="/session" method="post"><input name="email" type="email"><input name="pw" type="password"></form></body></html>', '/pricing': '<html><body><h2>Plans</h2></body></html>', '/contact': '<html><body><form><input name="email" type="email"><textarea name="msg"></textarea></form></body></html>', '/private/area': '<html><body>should not be read</body></html>' };
+    const hits = []; const pubSrv = await listen((q, s) => { hits.push(q.url); if (q.url === '/robots.txt') { s.setHeader('content-type', 'text/plain'); return s.end('User-agent: *\nDisallow: /private\n'); } const pg = pages[q.url.split('?')[0]]; if (!pg) { s.statusCode = 404; return s.end('no'); } s.setHeader('content-type', 'text/html'); s.end(pg); }); const PU = pubSrv.address().port;
+    r = await S('POST', '/read', ADMIN, { url: `http://127.0.0.1:${PU}/` }); const inf = r.j.site.inferred; const fn = (n) => inf.features.find((x) => x.name === n);
+    ok(r.s === 200 && r.j.site.level === 'inferred' && inf.title === 'Shop Ghana' && inf.pagesRead >= 3 && inf.stack.includes('Next.js'), 'an unsigned site is read and labelled inferred');
+    ok(fn('Sign-in') && fn('Sign-in').confidence === 'high' && fn('Search') && fn('Contact or enquiry form') && fn('Online payments or checkout') && fn('Pricing or quotes'), 'features are inferred from forms, links and words, each with a confidence');
+    ok(!hits.includes('/private/area') && hits.includes('/robots.txt'), 'robots.txt is read and its disallowed pages are not visited');
+    ok(inf.notes.some((x) => /cannot see/.test(x)) && r.j.site.extras.length === 0 && r.j.site.capabilities.capture === false, 'the inferred label is honest about its limits and offers no signed extras');
+    ok((await I(r.j.site.id, { title: 'x', patches: [{ type: 'hide', selector: '.a' }] })).s === 422, 'an inferred site cannot take iterations');
+    const blocked = await listen((q, s) => { if (q.url === '/robots.txt') return s.end('User-agent: *\nDisallow: /\n'); s.end('<html></html>'); }); r = await S('POST', '/read', ADMIN, { url: `http://127.0.0.1:${blocked.address().port}/` }); ok(r.s === 200 && r.j.site.inferred.blocked === true, 'a site that disallows readers is not read');
+    r = await S('POST', '/read', ADMIN, { url: `http://127.0.0.1:${PS}/` }); ok(r.j.skipped && r.j.site.level === 'signed', 'reading a signed site does not downgrade it');
+    delete process.env.DRYRUN_ALLOW_PRIVATE_TESTS; ok((await S('POST', '/read', ADMIN, { url: 'https://10.0.0.5/' })).s === 422, 'private addresses are never read');
+    process.env.DRYRUN_ALLOW_PRIVATE_TESTS = '1';
+    // labels in the Workroom
+    const lk = async (u) => { const m = (await call('POST', '/api/org/workroom/rooms/rm_general/links', BUILD, { url: u, check: false })).j.message; const th = (await call('GET', '/api/org/workroom/rooms/rm_general', BUILD)).j; return th.messages.find((x) => x.id === m.id).link.trust; };
+    let t = await lk(`http://127.0.0.1:${PS}/page`); ok(t.level === 'signed' && t.extras.length >= 2 && t.siteId === s1.site.id, 'a link to a signed site is labelled Dry Run signed in the Workroom');
+    t = await lk(`http://127.0.0.1:${PU}/x`); ok(t.level === 'inferred' && t.features >= 4, 'a link to a read site is labelled inferred');
+    t = await lk('https://unknown.example.com/'); ok(t.level === 'unknown', 'a link to a site Dry Run has not met has no label yet');
+    ok((await S('GET', '', BUILD)).j.sites.length >= 6 && (await S('GET', `/${s1.site.id}`, APPR)).j.install === null && (await S('GET', `/${s1.site.id}`, ADMIN)).j.install.secret === ins1.secret, 'sites are listed, and only writers see the install secret');
+    r = await S('POST', `/${s1.site.id}/capture`, ADMIN); ok(r.s === 200 && r.j.site.capture.routes.length >= 2, 'a signed site can be captured again');
+    siteSrv.close(); r = await S('POST', `/${s1.site.id}/capture`, ADMIN); ok(r.s === 422, 'capture says so when the site is down');
+    ok((await S('DELETE', `/${s1.site.id}`, APPR)).s === 403 && (await S('DELETE', `/${s1.site.id}`, ADMIN)).s === 200 && (await S('GET', `/${s1.site.id}`, ADMIN)).s === 404, 'disconnecting removes the site and everything captured');
+    [badSrv, tokSrv, pubSrv, blocked].forEach((x) => x.close()); try { fs.unlinkSync(packPath); } catch {}
+    delete process.env.DRYRUN_ALLOW_PRIVATE_TESTS;
+  }
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');

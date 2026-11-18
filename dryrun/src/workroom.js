@@ -68,6 +68,7 @@ async function thread(orgId, me, roomId, { guestEid = null } = {}) {
   const room = await getRoom(orgId, roomId);
   if (guestEid && !(room.kind === 'guest' && (room.engagementIds || []).includes(guestEid))) throw err(403, 'This room has not been shared with you.');
   const msgs = (await allMsgs(orgId)).filter((m) => m.roomId === roomId).slice(-300);
+  if (!guestEid) { const cn = require('./connect'); for (let i = 0; i < msgs.length; i++) { const m = msgs[i]; if (m.kind === 'link' && m.link && m.link.type === 'web') msgs[i] = { ...m, link: { ...m.link, trust: await cn.labelFor(orgId, m.link.url) } }; } }
   const tasks = (await allTasks(orgId)).filter((t) => t.roomId === roomId);
   let pinned = null;
   if (room.assetId && !guestEid) { try { const d = await assets.detail(orgId, room.assetId, { withData: true }); const last = d.versionList[d.versionList.length - 1]; const data = last.data || {}; const src = data.generatedFrom || data;
