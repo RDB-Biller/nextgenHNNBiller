@@ -122,7 +122,7 @@ async function find(orgId, siteId) { const s = await ad(orgId).get(orgId, COL, s
 function extrasOf(s) { const c = s.capabilities || {}, p = (s.manifest || {}).permissions || {}; const o = []; if (c.capture) o.push(SIGNED_EXTRAS[0]); if (c.overlay) o.push(SIGNED_EXTRAS[1]); if (c.capture && p.sampleData) o.push(SIGNED_EXTRAS[2]); if (c.overlay && p.iterate) o.push(SIGNED_EXTRAS[3]); return o; }
 function view(s) {
   const level = s.level === 'signed' ? 'signed' : 'inferred';
-  return { id: s.id, url: s.href, origin: s.origin, name: s.name, level, status: s.level, createdAt: s.createdAt, createdBy: s.createdBy, verifiedAt: s.verifiedAt || null, capabilities: s.capabilities || { capture: false, overlay: false }, permissions: s.manifest ? s.manifest.permissions : null, extras: level === 'signed' ? extrasOf(s) : [], capture: s.capture || null, inferred: s.inferred || null, lastCheckError: s.lastCheckError || null, iterations: (s.iterations || []).map((x) => ({ id: x.id, title: x.title, note: x.note, by: x.by, at: x.at, patches: x.patches })) };
+  return { id: s.id, url: s.href, origin: s.origin, name: s.name, level, status: s.level, createdAt: s.createdAt, createdBy: s.createdBy, verifiedAt: s.verifiedAt || null, capabilities: s.capabilities || { capture: false, overlay: false }, permissions: s.manifest ? s.manifest.permissions : null, extras: level === 'signed' ? extrasOf(s) : [], capture: s.capture || null, inferred: s.inferred || null, lastCheckError: s.lastCheckError || null, checks: s.checks || null, iterations: (s.iterations || []).map((x) => ({ id: x.id, title: x.title, note: x.note, by: x.by, at: x.at, patches: x.patches, shares: (s.shares || []).filter((h) => h.iid === x.id && new Date(h.exp) > new Date()).map((h) => ({ id: h.id, exp: h.exp, by: h.by })) })) };
 }
 function installFor(s, orgId, publicUrl) {
   const secret = secretFor(s, orgId); const origin = publicUrl || 'https://dryrun.hnnworld.com';
@@ -130,10 +130,12 @@ function installFor(s, orgId, publicUrl) {
   return {
     token: s.token, secret, manifest, manifestPath: '/.well-known/dryrun.json', dryrunOrigin: origin,
     env: `DRYRUN_TOKEN=${s.token}\nDRYRUN_SECRET=${secret}\nDRYRUN_ORIGIN=${origin}`,
-    files: [{ name: 'dryrun-connector.js', url: origin + '/connector/dryrun-connector.js', for: 'Node' }, { name: 'dryrun_connector.py', url: origin + '/connector/dryrun_connector.py', for: 'Python' }, { name: 'dryrun-connector.php', url: origin + '/connector/dryrun-connector.php', for: 'PHP' }, { name: 'dryrun.js', url: origin + '/connector/dryrun.js', for: 'Page script (all)' }],
+    files: [{ name: 'dryrun-connector.js', url: origin + '/connector/dryrun-connector.js', for: 'Node' }, { name: 'dryrun_connector.py', url: origin + '/connector/dryrun_connector.py', for: 'Python' }, { name: 'dryrun-connector.php', url: origin + '/connector/dryrun-connector.php', for: 'PHP' }, { name: 'dryrun_django.py', url: origin + '/connector/dryrun_django.py', for: 'Django' }, { name: 'DryRunMiddleware.php', url: origin + '/connector/DryRunMiddleware.php', for: 'Laravel' }, { name: 'dryrun.js', url: origin + '/connector/dryrun.js', for: 'Page script (all)' }],
     node: `// Save dryrun-connector.js and dryrun.js side by side in your project.\nconst dryrun = require('./dryrun-connector');\napp.use(dryrun({ app,            // lets it list your routes\n  name: 'Your product',\n  token: process.env.DRYRUN_TOKEN, secret: process.env.DRYRUN_SECRET, origins: [process.env.DRYRUN_ORIGIN],\n  settings: { /* non-secret settings you want Dry Run to see */ },\n  permissions: { structure: true, iterate: true, sampleData: false } }));`,
     python: `# Save dryrun_connector.py and dryrun.js side by side.\nfrom dryrun_connector import DryRun\napp.wsgi_app = DryRun(app.wsgi_app, name="Your product", token=os.environ["DRYRUN_TOKEN"], secret=os.environ["DRYRUN_SECRET"], origins=[os.environ["DRYRUN_ORIGIN"]])`,
     php: `<?php // top of index.php. Save dryrun-connector.php and dryrun.js side by side.\nrequire __DIR__ . '/dryrun-connector.php';\ndryrun_connector(['name' => 'Your product', 'token' => getenv('DRYRUN_TOKEN'), 'secret' => getenv('DRYRUN_SECRET'), 'origins' => [getenv('DRYRUN_ORIGIN')]]);`,
+    django: `# Save dryrun_django.py and dryrun.js next to manage.py. In settings.py:\nMIDDLEWARE = ["dryrun_django.DryRunMiddleware", *MIDDLEWARE]   # first in the list\nDRYRUN = {"token": os.environ["DRYRUN_TOKEN"], "secret": os.environ["DRYRUN_SECRET"], "origins": [os.environ["DRYRUN_ORIGIN"]], "name": "Your product"}`,
+    laravel: `// Copy DryRunMiddleware.php to app/Http/Middleware/ and dryrun.js to public/dryrun/dryrun.js.\n// Put the three values in .env, then register it first (Laravel 11+, bootstrap/app.php):\n->withMiddleware(function (Middleware $middleware) {\n    $middleware->prepend(\\App\\Http\\Middleware\\DryRunMiddleware::class);\n})\n// Laravel 10 and older: add it at the top of $middleware in app/Http/Kernel.php.`,
     script: `<script src="/dryrun/dryrun.js" data-dryrun-origin="${origin}" defer></script>`,
     staticNote: 'No server add-on? Save the manifest above at /.well-known/dryrun.json, save dryrun.js on your site, and add the script tag to your pages. You will get the live preview, but not the exact server-side capture. Host dryrun.js yourself: it runs on your pages, so you should control it.'
   };
@@ -169,7 +171,8 @@ async function verify(orgId, actor, role, siteId) {
   const perms = { structure: !(m.permissions && m.permissions.structure === false), iterate: !(m.permissions && m.permissions.iterate === false), sampleData: !!(m.permissions && m.permissions.sampleData) };
   s.manifest = { capture: m.capture ? clip(m.capture, 100) : null, overlay: m.overlay !== false, permissions: perms, allowedOrigins: Array.isArray(m.allowedOrigins) ? m.allowedOrigins.map((x) => clip(x, 200)).slice(0, 5) : [] };
   s.level = 'signed'; s.verifiedAt = iso(); s.lastCheckError = null; s.capabilities = { capture: false, overlay: s.manifest.overlay };
-  let note = null; if (m.capture && perms.structure) { const h = await handshake(s, orgId, m); if (h.capture) { s.capture = h.capture; s.capabilities.capture = true; if (!perms.sampleData) s.capture.sample = null; } else note = h.error; }
+  const home = await get(s.origin + '/', { maxBytes: 200000 }); s.checks = { manifest: true, capture: false, script: !home.error && home.status < 400 ? /dryrun\.js/.test(home.body) : null };
+  let note = null; if (m.capture && perms.structure) { const h = await handshake(s, orgId, m); if (h.capture) { s.capture = h.capture; s.capabilities.capture = true; s.checks.capture = true; if (!perms.sampleData) s.capture.sample = null; } else note = h.error; }
   if (note) s.lastCheckError = `Verified as yours, but the server add-on is not connected yet: ${note}`;
   await save(orgId, s); await audit.log(orgId, actor, 'site.verify', { origin: s.origin, capture: s.capabilities.capture });
   return { site: view(s), ok: true, problem: note };
@@ -178,7 +181,7 @@ async function capture(orgId, actor, role, siteId) {
   if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot capture sites.'); const s = await find(orgId, siteId); if (s.level !== 'signed' || !s.manifest) throw err(422, 'Check the site first. Capture only works for a signed site.');
   if (!s.manifest.permissions.structure) throw err(403, 'The owner has not allowed structure capture in the manifest.'); if (!s.manifest.capture) throw err(422, 'This site has the manifest but not the server add-on.');
   const h = await handshake(s, orgId, { capture: s.manifest.capture }); if (h.error) { s.lastCheckError = h.error; await save(orgId, s); throw err(422, h.error); }
-  s.capture = h.capture; if (!s.manifest.permissions.sampleData) s.capture.sample = null; s.capabilities.capture = true; s.lastCheckError = null; await save(orgId, s); return view(s);
+  s.capture = h.capture; if (!s.manifest.permissions.sampleData) s.capture.sample = null; s.capabilities.capture = true; s.checks = { ...(s.checks || { manifest: true, script: null }), capture: true }; s.lastCheckError = null; await save(orgId, s); return view(s);
 }
 async function read(orgId, actor, role, { url } = {}) {
   const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Reading a site'); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot read sites.'); const n = normalise(url);
@@ -209,4 +212,23 @@ async function pack(orgId, actor, role, siteId, iid, publicUrl) {
   await audit.log(orgId, actor, 'site.pack', { origin: s.origin, iteration: it.id }); return body;
 }
 
-module.exports = { create, details, verify, capture, read, revoke, list, labelFor, addIteration, removeIteration, pack, readSite, readPage, inferFeatures, robotsAllows, cleanPatch, sign, secretFor, normalise, SIGNED_EXTRAS };
+// ---- Dry Run Iteration (DRI): the owner's own site, opened with an iteration applied and a watermark ------------------------------
+const hashTok = (t) => crypto.createHash('sha256').update(t).digest('hex');
+async function shareIteration(orgId, actor, role, siteId, iid, { days } = {}) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot share iterations.'); const s = await find(orgId, siteId);
+  if (s.level !== 'signed' || !s.manifest.permissions.iterate) throw err(422, 'Opening an iteration live needs a Dry Run signed site that allows iterations.'); const it = (s.iterations || []).find((x) => x.id === iid); if (!it) throw err(404, 'That iteration is not here.');
+  const d = Math.min(30, Math.max(1, Math.round(Number(days) || 7))); s.shares = (s.shares || []).filter((x) => new Date(x.exp) > new Date()); if (s.shares.length >= 20) throw err(422, 'That site has the most open links it can hold. Revoke one first.');
+  const token = `dri.${orgId}.${s.id}.${crypto.randomBytes(18).toString('hex')}`; const exp = new Date(Date.now() + d * 86400000).toISOString(); const sh = { id: id('shr'), iid, h: hashTok(token), exp, by: actor.name, at: iso() }; s.shares.push(sh); await save(orgId, s); await audit.log(orgId, actor, 'site.share', { origin: s.origin, iteration: iid, days: d });
+  return { link: `${s.origin}/?dri=${token}`, token, expiresAt: exp, site: view(s) };
+}
+async function revokeShares(orgId, role, siteId, iid) { if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot revoke links.'); const s = await find(orgId, siteId); s.shares = (s.shares || []).filter((x) => x.iid !== iid); await save(orgId, s); return view(s); }
+/** What the page script on the owner's site fetches. Only the site the token was made for may read it. */
+async function publicIteration(token, origin) {
+  const dead = () => err(404, 'This link is not active.'); const parts = String(token || '').split('.'); if (parts.length !== 4 || parts[0] !== 'dri') throw dead();
+  let s; try { orgs.raw(parts[1]); s = await ad(parts[1]).get(parts[1], COL, parts[2]); } catch { throw dead(); } if (!s || s.level !== 'signed' || !s.manifest || !s.manifest.permissions.iterate || !origin || origin !== s.origin) throw dead();
+  const h = hashTok(token); const sh = (s.shares || []).find((x) => same(x.h, h)); if (!sh || new Date(sh.exp) < new Date()) throw dead(); const it = (s.iterations || []).find((x) => x.id === sh.iid); if (!it) throw dead();
+  const settings = {}; for (const p of it.patches) if (p.type === 'setting') settings[p.key] = p.value;
+  return { dryrunIteration: 1, label: 'Dry Run Iteration (DRI)', title: it.title, by: it.by, expiresAt: sh.exp, patches: it.patches.filter((p) => p.type !== 'setting'), settings, origin: s.origin };
+}
+
+module.exports = { shareIteration, revokeShares, publicIteration, create, details, verify, capture, read, revoke, list, labelFor, addIteration, removeIteration, pack, readSite, readPage, inferFeatures, robotsAllows, cleanPatch, sign, secretFor, normalise, SIGNED_EXTRAS };

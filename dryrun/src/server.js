@@ -390,6 +390,12 @@ O.delete('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json
 O.post('/workroom/sites/:sid/iterations', need('read'), wrap(async (req, res) => res.status(201).json(await connect.addIteration(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
 O.delete('/workroom/sites/:sid/iterations/:iid', need('read'), wrap(async (req, res) => res.json({ site: await connect.removeIteration(oid(req), req.role, req.params.sid, req.params.iid) })));
 O.get('/workroom/sites/:sid/iterations/:iid/pack', need('read'), wrap(async (req, res) => { const p = await connect.pack(oid(req), req.actor, req.role, req.params.sid, req.params.iid, pubOf(req)); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', 'attachment; filename="dryrun-pack.json"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.end(JSON.stringify(p, null, 2)); }));
+O.post('/workroom/sites/:sid/iterations/:iid/share', need('read'), wrap(async (req, res) => res.status(201).json(await connect.shareIteration(oid(req), req.actor, req.role, req.params.sid, req.params.iid, req.body || {}))));
+O.delete('/workroom/sites/:sid/iterations/:iid/share', need('read'), wrap(async (req, res) => res.json({ site: await connect.revokeShares(oid(req), req.role, req.params.sid, req.params.iid) })));
+app.get('/api/public/dri/:token', wrap(async (req, res) => {
+  const origin = req.get('origin') || ''; const out = await connect.publicIteration(req.params.token, origin);
+  res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.json(out);
+}));
 // ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
 O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
 O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));

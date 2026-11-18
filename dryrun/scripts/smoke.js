@@ -507,6 +507,76 @@ async function main() {
     delete process.env.DRYRUN_ALLOW_PRIVATE_TESTS;
   }
 
+  section('Dry Run Iteration, Quick Start checks, Django and Laravel connectors (framework stand-ins)');
+  { process.env.DRYRUN_ALLOW_PRIVATE_TESTS = '1'; const { spawnSync } = require('child_process'); const connector = require('../public/connector/dryrun-connector.js'); const crypto = require('crypto');
+    const listen = (handler) => new Promise((rs) => { const s = http.createServer(handler); s.listen(0, '127.0.0.1', () => rs(s)); });
+    const S = (m, u, k, b) => call(m, '/api/org/workroom/sites' + u, k, b);
+    const jsSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'connector', 'dryrun.js'), 'utf8'); const page = (t) => `<html><body><h1>${t}</h1><script src="/dryrun/dryrun.js" data-dryrun-origin="x" defer></script></body></html>`;
+    const hold = { mw: null }; const srv = await listen((q, s) => hold.mw(q, s, () => { s.setHeader('content-type', 'text/html'); s.end(page('Hi')); })); const PD = srv.address().port;
+    let r = await S('POST', '', ADMIN, { url: `http://127.0.0.1:${PD}` }); const site = r.j.site, ins = r.j.install;
+    ok(ins.django.includes('DryRunMiddleware') && ins.laravel.includes('prepend') && ins.files.some((f) => f.name === 'dryrun_django.py') && ins.files.some((f) => f.name === 'DryRunMiddleware.php') && (await fetch(`${base}/connector/dryrun_django.py`)).status === 200 && (await fetch(`${base}/connector/DryRunMiddleware.php`)).status === 200, 'install help and downloads cover Django and Laravel');
+    hold.mw = connector({ token: ins.token, secret: ins.secret, origins: [ins.dryrunOrigin], name: 'Shop', settings: { currency: 'GHS' }, routes: [{ method: 'GET', path: '/' }] });
+    r = await S('POST', `/${site.id}/verify`, ADMIN); ok(r.j.ok && r.j.site.checks.manifest === true && r.j.site.checks.capture === true && r.j.site.checks.script === true, 'the Quick Start checklist sees the manifest, the server add-on and the page script');
+    const bare = await listen((q, s) => hold.mw2(q, s, () => s.end('<html><body>no script</body></html>'))); const r2 = (await S('POST', '', ADMIN, { url: `http://127.0.0.1:${bare.address().port}` })).j; hold.mw2 = connector({ token: r2.install.token, secret: r2.install.secret, origins: [] });
+    r = await S('POST', `/${r2.site.id}/verify`, ADMIN); ok(r.j.ok && r.j.site.checks.script === false, 'it also notices when the page script is missing from the home page'); bare.close();
+    // iteration, share, public endpoint
+    const it = (await S('POST', `/${site.id}/iterations`, ADMIN, { title: 'Plain', patches: [{ type: 'text', selector: 'h1', value: 'Shorter' }, { type: 'setting', key: 'max', value: 5 }] })).j.iteration;
+    ok((await S('POST', `/${site.id}/iterations/${it.id}/share`, APPR, { days: 3 })).s === 403, 'only writers can open an iteration live');
+    r = await S('POST', `/${site.id}/iterations/${it.id}/share`, ADMIN, { days: 3 }); const tok = r.j.token; ok(r.s === 201 && r.j.link === `http://127.0.0.1:${PD}/?dri=${tok}` && /^dri\.[\w\-]+\.[\w\-]+\.[0-9a-f]{36}$/.test(tok) && Math.abs(new Date(r.j.expiresAt) - Date.now() - 3 * 86400000) < 60000, 'sharing an iteration gives a link on the owner\'s own site that expires');
+    const pub = (t, origin) => new Promise((rs) => { const q = http.request(`${base}/api/public/dri/${t}`, { headers: origin ? { origin } : {} }, (res) => { let b = ''; res.on('data', (c) => (b += c)); res.on('end', () => rs({ s: res.statusCode, h: res.headers, j: (() => { try { return JSON.parse(b); } catch { return null; } })() })); }); q.end(); });
+    let pr = await pub(tok, `http://127.0.0.1:${PD}`); ok(pr.s === 200 && pr.j.label === 'Dry Run Iteration (DRI)' && pr.j.patches.length === 1 && pr.j.settings.max === 5 && pr.h['access-control-allow-origin'] === `http://127.0.0.1:${PD}` && !JSON.stringify(pr.j).includes(ins.secret), 'the page script gets the changes and the label, only for its own site, with no secrets');
+    ok((await pub(tok, 'http://evil.example')).s === 404 && (await pub(tok)).s === 404 && (await pub(tok.slice(0, -2) + 'zz', `http://127.0.0.1:${PD}`)).s === 404 && (await pub('nonsense', `http://127.0.0.1:${PD}`)).s === 404, 'other origins, missing origins and guessed tokens get nothing');
+    ok((await S('GET', '', ADMIN)).j.sites.find((x) => x.id === site.id).iterations[0].shares.length === 1 && !JSON.stringify((await S('GET', '', ADMIN)).j).includes(tok), 'the list shows open links but never the token itself');
+    await S('DELETE', `/${site.id}/iterations/${it.id}/share`, ADMIN); ok((await pub(tok, `http://127.0.0.1:${PD}`)).s === 404, 'revoking the links turns them off at once');
+    r = await S('POST', `/${site.id}/iterations/${it.id}/share`, ADMIN, { days: 1 }); const sites = await orgs.raw(orgId); void sites; ok(r.s === 201 && (await pub(r.j.token, `http://127.0.0.1:${PD}`)).s === 200, 'a new link works');
+    await S('DELETE', `/${site.id}/iterations/${it.id}`, ADMIN); ok((await pub(r.j.token, `http://127.0.0.1:${PD}`)).s === 404, 'deleting the iteration also kills its links');
+    ok((await S('POST', `/${r2.site.id}/iterations/nope/share`, ADMIN, {})).s === 404, 'sharing an iteration that does not exist is refused'); srv.close();
+    // Django and Laravel connectors against framework stand-ins (the real frameworks cannot be installed here)
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-fw-')); const cdir = path.join(__dirname, '..', 'public', 'connector'); const SEC = 'drs_secret_for_stub_test'; const mkSig = (ts) => crypto.createHmac('sha256', SEC).update(`${ts}.GET./dryrun/capture`).digest('hex');
+    for (const f of ['django', 'django/conf', 'django/http', 'django/urls']) fs.mkdirSync(path.join(root, f), { recursive: true });
+    fs.writeFileSync(path.join(root, 'django/__init__.py'), ''); fs.writeFileSync(path.join(root, 'django/conf/__init__.py'), 'class S: pass\nsettings = S()\n');
+    fs.writeFileSync(path.join(root, 'django/http/__init__.py'), 'import json\nclass HttpResponse:\n    def __init__(self, content="", status=200, content_type="text/html"):\n        self.content, self.status_code, self._h = content, status, {"Content-Type": content_type}\n    def has_header(self, k): return k in self._h\n    def __setitem__(self, k, v): self._h[k] = v\n    def __getitem__(self, k): return self._h[k]\n');
+    fs.writeFileSync(path.join(root, 'django/urls/__init__.py'), 'class P:\n    def __init__(s, r): s.r = r\n    def __str__(s): return s.r\nclass URLPattern:\n    def __init__(s, r): s.pattern = P(r)\nclass URLResolver:\n    def __init__(s, r, kids): s.pattern, s.url_patterns = P(r), kids\ndef get_resolver():\n    class R: url_patterns = [URLPattern("^quote/$"), URLResolver("^api/", [URLPattern("^policy/(?P<pk>[0-9]+)/$")]), URLPattern("^dryrun/capture$")]\n    return R()\n');
+    fs.copyFileSync(path.join(cdir, 'dryrun_django.py'), path.join(root, 'dryrun_django.py')); fs.copyFileSync(path.join(cdir, 'dryrun.js'), path.join(root, 'dryrun.js'));
+    fs.writeFileSync(path.join(root, 'drive.py'), `import json, time, hmac, hashlib\nfrom django.conf import settings\nfrom django.http import HttpResponse\nsettings.DRYRUN = {"token": "drt_t", "secret": "${SEC}", "origins": ["https://dry.example"], "name": "Dj", "settings": {"currency": "GHS", "db_password": "x"}}\nimport dryrun_django\nmw = dryrun_django.DryRunMiddleware(lambda r: HttpResponse("page"))\nclass Rq:\n    def __init__(s, path, hdr=None, method="GET"): s.path_info, s.method, s.META = path, method, hdr or {}\nts = str(int(time.time() * 1000))\nsig = hmac.new(b"${SEC}", (ts + ".GET./dryrun/capture").encode(), hashlib.sha256).hexdigest()\nout = {}\nout["manifest"] = json.loads(mw(Rq("/.well-known/dryrun.json")).content)\nout["unsigned"] = mw(Rq("/dryrun/capture")).status_code\nr = mw(Rq("/dryrun/capture", {"HTTP_X_DRYRUN_TS": ts, "HTTP_X_DRYRUN_SIG": sig}))\nout["capture"] = json.loads(r.content); out["capStatus"] = r.status_code\nout["csp"] = mw(Rq("/anything"))["Content-Security-Policy"]\nout["js"] = mw(Rq("/dryrun/dryrun.js")).status_code\nout["pack"] = mw(Rq("/dryrun/pack.json")).status_code\nprint(json.dumps(out))\n`);
+    let o = spawnSync('python3', ['-I', '-c', `import sys; sys.path.insert(0, ${JSON.stringify(root)}); exec(open(${JSON.stringify(path.join(root, 'drive.py'))}).read())`], { encoding: 'utf8' }); let dj = null; try { dj = JSON.parse(o.stdout); } catch { console.log(o.stderr.slice(0, 400)); }
+    ok(dj && dj.manifest.token === 'drt_t' && !JSON.stringify(dj.manifest).includes(SEC) && dj.unsigned === 401 && dj.capStatus === 200 && dj.capture.framework === 'Django' && dj.capture.routes.some((x) => x.path === '/api/policy/{pk}/') && !dj.capture.routes.some((x) => /dryrun/.test(x.path)) && dj.capture.settings.db_password === '[hidden]' && /frame-ancestors 'self' https:\/\/dry.example/.test(dj.csp) && dj.js === 200 && dj.pack === 404, 'the Django connector signs, lists routes, hides secrets and allows framing by Dry Run only (Django stand-in, not the real framework)');
+    // Laravel
+    const lroot = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-lv-')); fs.copyFileSync(path.join(cdir, 'DryRunMiddleware.php'), path.join(lroot, 'DryRunMiddleware.php'));
+    fs.writeFileSync(path.join(lroot, 'drive.php'), `<?php
+namespace Illuminate\\Http { class Request { public $p, $m, $h; function __construct($p, $h = [], $m = 'GET') { $this->p = $p; $this->h = $h; $this->m = $m; } function path() { return ltrim($this->p, '/'); } function isMethod($x) { return $this->m === $x; } function header($k, $d = null) { return $this->h[strtolower($k)] ?? $d; } } }
+namespace {
+ class Hdr { public $a = []; function has($k) { return isset($this->a[$k]); } function set($k, $v) { $this->a[$k] = $v; } }
+ class Resp { public $headers, $status, $body; function __construct($b, $s, $h) { $this->body = $b; $this->status = $s; $this->headers = new Hdr; foreach ($h as $k => $v) $this->headers->set($k, $v); } }
+ function response($b = '', $s = 200, $h = []) { return new Resp($b, $s, $h); }
+ function config($k, $d = null) { $c = ['dryrun.name' => 'Lv', 'dryrun.settings' => ['currency' => 'GHS', 'api_secret' => 'x']]; return $c[$k] ?? $d; }
+ function base_path($p = '') { return __DIR__ . '/' . $p; }
+ class Rt { function uri() { return $this->u; } function methods() { return $this->m; } function __construct($u, $m) { $this->u = $u; $this->m = $m; } }
+ class RC { function getRoutes() { return [new Rt('quote', ['GET', 'HEAD']), new Rt('api/policy/{id}', ['GET', 'PUT']), new Rt('dryrun/capture', ['GET'])]; } }
+ class RR { function getRoutes() { return new RC; } }
+ class AppX { function version() { return '11.0'; } }
+ function app($x = null) { return $x === 'router' ? new RR : new AppX; }
+ Illuminate\\Http\\Response::class;
+}
+namespace Illuminate\\Http { class Response {} }
+namespace { }
+`);
+    // the stub must be loaded before the middleware; response()->json is needed, so extend Resp with json() through a tiny wrapper
+    fs.writeFileSync(path.join(lroot, 'drive.php'), fs.readFileSync(path.join(lroot, 'drive.php'), 'utf8').replace("function response($b = '', $s = 200, $h = []) { return new Resp($b, $s, $h); }", "class RespF { function json($b, $s = 200, $h = []) { return new Resp(json_encode($b), $s, $h); } function __invoke($b = '', $s = 200, $h = []) { return new Resp($b, $s, $h); } }\n function response($b = null, $s = 200, $h = []) { return $b === null ? new RespF : new Resp($b, $s, $h); }") + `
+namespace { putenv('DRYRUN_TOKEN=drt_t'); putenv('DRYRUN_SECRET=${SEC}'); putenv('DRYRUN_ORIGIN=https://dry.example'); function env($k, $d = null) { $v = getenv($k); return $v === false ? $d : $v; }
+ require __DIR__ . '/DryRunMiddleware.php'; $mw = new App\\Http\\Middleware\\DryRunMiddleware; $ts = (string) (int) (microtime(true) * 1000); $sig = hash_hmac('sha256', $ts . '.GET./dryrun/capture', '${SEC}');
+ $nx = function ($r) { return new Resp('page', 200, []); }; $out = [];
+ $out['manifest'] = json_decode($mw->handle(new Illuminate\\Http\\Request('/.well-known/dryrun.json'), $nx)->body, true);
+ $out['unsigned'] = $mw->handle(new Illuminate\\Http\\Request('/dryrun/capture'), $nx)->status;
+ $c = $mw->handle(new Illuminate\\Http\\Request('/dryrun/capture', ['x-dryrun-ts' => $ts, 'x-dryrun-sig' => $sig]), $nx); $out['capStatus'] = $c->status; $out['capture'] = json_decode($c->body, true);
+ $out['csp'] = $mw->handle(new Illuminate\\Http\\Request('/anything'), $nx)->headers->a['Content-Security-Policy']; $out['pack'] = $mw->handle(new Illuminate\\Http\\Request('/dryrun/pack.json'), $nx)->status;
+ echo json_encode($out); }
+`);
+    o = spawnSync('php', [path.join(lroot, 'drive.php')], { encoding: 'utf8' }); let lv = null; try { lv = JSON.parse(o.stdout); } catch { console.log((o.stdout + o.stderr).slice(0, 500)); }
+    ok(lv && lv.manifest.token === 'drt_t' && !JSON.stringify(lv.manifest).includes(SEC) && lv.unsigned === 401 && lv.capStatus === 200 && /Laravel/.test(lv.capture.framework) && lv.capture.routes.some((x) => x.path === '/api/policy/{id}' && x.method === 'PUT') && !lv.capture.routes.some((x) => /dryrun/.test(x.path)) && lv.capture.settings.api_secret === '[hidden]' && /frame-ancestors 'self' https:\/\/dry.example/.test(lv.csp) && lv.pack === 404, 'the Laravel connector signs, lists routes, hides secrets and allows framing by Dry Run only (Laravel stand-in, not the real framework)');
+    delete process.env.DRYRUN_ALLOW_PRIVATE_TESTS;
+  }
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');

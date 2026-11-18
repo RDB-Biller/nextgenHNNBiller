@@ -2,6 +2,7 @@
  *   <script src="/dryrun/dryrun.js" data-dryrun-origin="https://your-dry-run-address" defer></script>
  * Inside the Dry Run Workroom preview it lets Dry Run show your iterations as overlays. It only answers the origins you list.
  * On a normal visit it does nothing, unless you add data-pack="/dryrun/pack.json" to apply a pack you approved.
+ * A share link from the Workroom (?dri=...) opens your real site with one iteration applied and a "Dry Run Iteration (DRI)" watermark.
  * It never reads cookies, storage or form values, and it changes nothing on your server. */
 (function () {
   'use strict';
@@ -45,6 +46,44 @@
     function click(e) { e.preventDefault(); e.stopPropagation(); var el = e.target; stop(); reply({ type: 'dryrun:picked', selector: selectorOf(el), tag: el.tagName.toLowerCase(), text: String(el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80) }); }
     document.addEventListener('mouseover', over, true); document.addEventListener('click', click, true);
   }
+  /* Dry Run Iteration (DRI): opened from a share link (?dri=...), the real site runs as normal with the iteration applied and a watermark on top.
+   * The link is fetched from Dry Run, which only answers this site's own address. Changes live in this browser tab only. */
+  function startDRI(token) {
+    var api = allowed[0]; if (!api) return;
+    fetch(api + '/api/public/dri/' + encodeURIComponent(token), { credentials: 'omit', mode: 'cors' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d || d.dryrunIteration !== 1) { try { sessionStorage.removeItem('dryrun.dri'); } catch (e) {} return; }
+      try { sessionStorage.setItem('dryrun.dri', token); } catch (e) {}
+      var rules = [], flagged = 0;
+      function once() {
+        (d.patches || []).forEach(function (p) {
+          var sel = String(p.selector || ''); if (!SEL.test(sel)) return; var els = q(sel);
+          if (p.type === 'text') els.forEach(function (el) { var v = String(p.value == null ? '' : p.value).slice(0, 1000); if (el.textContent !== v) el.textContent = v; });
+          else if (p.type === 'attr' && ATTRS.indexOf(p.name) >= 0) { var v2 = String(p.value == null ? '' : p.value).slice(0, 500); if (p.name === 'href' && !/^(https?:\/\/|\/|#|mailto:|tel:)/i.test(v2)) return; els.forEach(function (el) { if (el.getAttribute(p.name) !== v2) el.setAttribute(p.name, v2); }); }
+        });
+      }
+      (d.patches || []).forEach(function (p) { var sel = String(p.selector || ''); if (!SEL.test(sel)) return; if (p.type === 'hide') rules.push(sel + '{display:none !important}'); else if (p.type === 'style' && !BAD.test(String(p.css || ''))) rules.push(sel + '{' + String(p.css).slice(0, 500) + '}'); });
+      if (rules.length) { var st = document.createElement('style'); st.setAttribute('data-dryrun', ''); st.textContent = rules.join('\n'); document.head.appendChild(st); }
+      window.DryRun.settings = d.settings || {}; try { document.dispatchEvent(new CustomEvent('dryrun:settings', { detail: d.settings || {} })); } catch (e) {}
+      var timer = null, mo = new MutationObserver(function () { if (timer) return; timer = setTimeout(function () { timer = null; mo.disconnect(); once(); watch(); }, 250); });
+      function watch() { mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true }); }
+      once(); watch();
+      var base = document.title.replace(/^\[DRI\] /, ''); document.title = '[DRI] ' + base;
+      // the watermark lives in a closed shadow root so the page's own styles and the iteration's changes cannot touch it
+      var host = document.createElement('div'); host.setAttribute('data-dryrun-dri', ''); var root = host.attachShadow({ mode: 'closed' });
+      var tile = "<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'><text x='20' y='120' font-family='Arial,sans-serif' font-size='22' font-weight='700' fill='#d9480f' fill-opacity='0.13' transform='rotate(-24 180 110)'>Dry Run Iteration (DRI)</text></svg>";
+      var until = new Date(d.expiresAt).toLocaleDateString();
+      root.innerHTML = '<style>:host{all:initial}.w{position:fixed;inset:0;pointer-events:none;z-index:2147483646;background-image:url("data:image/svg+xml,' + encodeURIComponent(tile) + '")}.b{position:fixed;left:12px;bottom:12px;z-index:2147483647;font:600 13px/1.3 Arial,sans-serif;color:#fff;background:#d9480f;border-radius:8px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:min(92vw,420px)}.b small{display:block;font-weight:400;opacity:.92;margin-top:2px}.b a{color:#fff;text-decoration:underline;cursor:pointer;margin-left:8px;font-weight:400}</style><div class="w"></div><div class="b" role="status">Dry Run Iteration (DRI)<small></small></div>';
+      var small = root.querySelector('small'); small.textContent = 'Iteration: ' + d.title + ' · link valid until ' + until + ' · actions on this site are real';
+      var ex = document.createElement('a'); ex.textContent = 'Exit'; ex.onclick = function () { try { sessionStorage.removeItem('dryrun.dri'); } catch (e) {} var u = new URL(location.href); u.searchParams.delete('dri'); location.replace(u.toString()); }; small.appendChild(ex);
+      document.documentElement.appendChild(host);
+      new MutationObserver(function () { if (!host.isConnected) document.documentElement.appendChild(host); }).observe(document.documentElement, { childList: true });
+    }).catch(function () {});
+  }
+  if (window.parent === window) {
+    var tok = null; try { tok = new URL(location.href).searchParams.get('dri'); } catch (e) {} if (!tok) { try { tok = sessionStorage.getItem('dryrun.dri'); } catch (e) {} }
+    if (tok && /^dri\.[\w\-]+\.[\w\-]+\.[0-9a-f]{20,}$/.test(tok)) startDRI(tok);
+  }
+
   if (window.parent !== window) {
     window.addEventListener('message', function (e) {
       if (allowed.indexOf(e.origin) < 0 || e.source !== window.parent || !e.data || typeof e.data !== 'object') return;
