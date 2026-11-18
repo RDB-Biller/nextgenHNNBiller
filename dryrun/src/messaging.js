@@ -54,8 +54,8 @@ async function deliver({ phone, channels, text, orgId, orgName, who, purpose }) 
 const history = (orgId, limit = 100) => (reg.load().messages || []).filter((m) => !orgId || m.orgId === orgId).slice(0, limit);
 const first = (n) => String(n || '').trim().split(/\s+/)[0] || 'there';
 const tail = (inviteUrl, teamUrl) => `
-Invite your colleagues to apply to join your team: ${teamUrl}
-Invite other organisations to try Dry Run: ${inviteUrl}`;
+Welcome aboard! Bring your colleagues in too. Share this link and they can ask to join your team: ${teamUrl}
+Know another organisation that would love Dry Run? Invite them to try it free: ${inviteUrl}`;
 /** Welcome message for an admin the platform owner appoints. */
 const adminText = ({ name, org, username, password, url, adminUrl }) =>
   `Welcome to Dry Run, ${first(name)}. You are now admin of Dry Run for ${org}.\nUsername: ${username}\nPassword: ${password} (change it when you sign in)\nInterface: ${url}\nAdmin console: ${adminUrl}. You can add team mates by clicking on Team when you sign in and enter their mobile phone number and optionally email.`;
@@ -71,6 +71,6 @@ const teamTexts = {
   addedLead: ({ org, name, role, actor, url }) => `Dry Run: ${actor} added ${name} to the ${org} team as ${role}. Their sign-in details were sent. Manage your team: ${url}`,
   declinedLead: ({ org, name, actor, url }) => `Dry Run: ${actor} declined ${name}'s request to join the ${org} team. See all requests: ${url}`,
   declinedApplicant: ({ name, org, reason, url }) => `Hi ${first(name)}, your request to join the ${org} team on Dry Run was not approved${reason ? `: ${reason}` : ''}. Please speak to your team admin if you think this is a mistake. Dry Run: ${url}`,
-  addedInviter: ({ name, invitee, org, url }) => `Good news ${first(name)}: ${invitee}, who you invited, has been added to the ${org} team on Dry Run. Open the platform: ${url}`,
+  addedInviter: ({ name, invitee, org, url, teamUrl }) => `Good news ${first(name)}: ${invitee}, who you invited, has been added to the ${org} team on Dry Run. Open the platform: ${url}${teamUrl ? `\nKeep the momentum. Invite more colleagues with your link: ${teamUrl}` : ''}`,
 };
 module.exports = { teamTexts, surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };

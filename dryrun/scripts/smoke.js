@@ -213,6 +213,7 @@ async function main() {
     atCalls.length = 0; r = await call('POST', `/api/org/team-requests/${kq.id}/approve`, ADMIN, { role: 'viewer', deliver: { sms: true } }); const ap = txt();
     ok(r.s === 200 && atCalls.length === 3, 'approving texts the person, the team lead and the inviter');
     ok(ap.some((t) => /Username/.test(t) && /\/app\?u=/.test(t)) && ap.some((t) => /added Kojo Asare to the/.test(t) && t.includes('/app?go=admin')) && ap.some((t) => /who you invited/.test(t) && /\/app/.test(t)), 'each text is right and carries a link to the platform');
+    ok(ap.some((t) => /Welcome aboard/.test(t) && /join\?team=tm_\w+&by=mem_/.test(t) && /try it free/.test(t)) && ap.some((t) => /Keep the momentum/.test(t) && /&by=/.test(t)), 'welcome and accepted texts invite the person to bring colleagues, with their own tracked link');
     atCalls.length = 0; r = await call('POST', `/api/org/team-requests/${yq.id}/decline`, ADMIN, { reason: 'Not on this team' }); const dc = txt();
     ok(r.s === 200 && atCalls.length === 2 && dc.some((t) => /not approved: Not on this team/.test(t) && /\/join/.test(t)) && dc.some((t) => /declined Yaa Pee/.test(t) && t.includes('/app?go=admin')), 'declining texts the person and the team lead, each with a link');
   }

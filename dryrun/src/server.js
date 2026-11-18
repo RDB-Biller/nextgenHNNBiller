@@ -47,10 +47,10 @@ const joinUrl = (req, orgId) => `${siteUrl(req)}/join${orgId ? '?ref=' + orgs.re
 async function sendCreds(req, { orgId, member, username, password, role, by, deliver, adminAppointment }) {
   const channels = { sms: !!(deliver && deliver.sms), whatsapp: !!(deliver && deliver.whatsapp) };
   if (!channels.sms && !channels.whatsapp) return [];
-  const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const base = `${siteUrl(req)}/app`; const url = `${base}?u=${encodeURIComponent(username)}`;
+  const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Sending messages'); const mid = member.id || (Object.values(o.members).find((x) => x.username === username) || {}).id; const base = `${siteUrl(req)}/app`; const url = `${base}?u=${encodeURIComponent(username)}`;
   const text = adminAppointment
-    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}&go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) })
-    : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId) });
+    ? messaging.adminText({ name: member.name, org: o.name, username, password, url, adminUrl: `${url}&go=admin`, subdomain: require('./creds').subdomainHint(member.email), inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId, mid) })
+    : messaging.memberText({ name: member.name, by, org: o.name, role, username, password, url, inviteUrl: joinUrl(req, orgId), teamUrl: teamUrl(req, orgId, mid) });
   return messaging.deliver({ phone: member.phone, channels, text, orgId, orgName: o.name, who: role, purpose: adminAppointment ? 'admin appointment' : 'team invite' });
 }
 /** What a message would look like, with the password hidden. */
@@ -212,7 +212,7 @@ O.post('/team-requests/:rid/approve', need('team'), wrap(async (req, res) => {
   const o = orgs.raw(oid(req)); const url = `${siteUrl(req)}/app?go=admin`;
   await smsTo(o, leadsOf(o), messaging.teamTexts.addedLead({ org: o.name, name: member.name, role: member.role, actor: req.actor.name, url }), 'team request approved (lead)');
   const inv = request.invitedBy && o.members[request.invitedBy.id];
-  if (inv && !leadsOf(o).some((l) => l.id === inv.id)) await smsTo(o, [inv], messaging.teamTexts.addedInviter({ name: inv.name, invitee: member.name, org: o.name, url: `${siteUrl(req)}/app` }), 'team invite accepted');
+  if (inv && !leadsOf(o).some((l) => l.id === inv.id)) await smsTo(o, [inv], messaging.teamTexts.addedInviter({ name: inv.name, invitee: member.name, org: o.name, url: `${siteUrl(req)}/app`, teamUrl: teamUrl(req, oid(req), inv.id) }), 'team invite accepted');
   res.json({ ...member, delivery });
 }));
 O.get('/partner-code', need('read'), (req, res) => res.json({ code: orgs.refCode(oid(req)) }));
