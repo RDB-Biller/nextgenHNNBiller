@@ -48,7 +48,8 @@ function submitTeam(body, ip) {
   if (body.phone && !messaging.validPhone(body.phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….');
   if (Object.values(o.members).some((m) => m.email.toLowerCase() === email)) throw err(409, 'That email is already on this team. Sign in instead.');
   if (Object.values(store()).some((r) => r.type === 'team' && r.orgId === o.id && r.status === 'new' && r.email === email)) throw err(409, 'You have already asked to join. Your admin will be in touch.');
-  const r = { id: id('req'), type: 'team', createdAt: iso(), status: 'new', orgId: o.id, organisation: o.name, contactName: name, email, phone: body.phone ? String(body.phone).trim() : '', jobTitle: String(body.jobTitle || '').slice(0, 100), note: String(body.interest || '').slice(0, 400) };
+  let invitedBy = null; if (body.by) { const im = o.members[String(body.by)]; if (im) invitedBy = { id: im.id, name: im.name }; }
+  const r = { id: id('req'), type: 'team', createdAt: iso(), status: 'new', invitedBy, orgId: o.id, organisation: o.name, contactName: name, email, phone: body.phone ? String(body.phone).trim() : '', jobTitle: String(body.jobTitle || '').slice(0, 100), note: String(body.interest || '').slice(0, 400) };
   store()[r.id] = r; reg.save(); return { received: true, request: r, org: o.name };
 }
 const teamList = (orgId) => Object.values(store()).filter((r) => r.type === 'team' && r.orgId === orgId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -65,4 +65,12 @@ const memberText = ({ name, by, org, role, username, password, url, inviteUrl, t
 const surveyText = ({ org, url, inviteUrl }) => `${org} would like your views (2 minutes): ${url}\nGet Dry Run for your organisation: ${inviteUrl}`;
 /** Short SMS that carries only the team-invite link; the person taps it and fills in their details to apply. */
 const quickInviteText = ({ by, org, url }) => `${by} invites you to join the ${org} team on Dry Run. Tap to accept — you will enter a few details to join: ${url}`;
-module.exports = { surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };
+/** Team notifications. Every text carries a link back onto the platform. */
+const teamTexts = {
+  pending: ({ org, name, job, by, url }) => `Dry Run: ${name}${job ? ` (${job})` : ''} asked to join the ${org} team${by ? `, invited by ${by}` : ''}. Review and decide: ${url}`,
+  addedLead: ({ org, name, role, actor, url }) => `Dry Run: ${actor} added ${name} to the ${org} team as ${role}. Their sign-in details were sent. Manage your team: ${url}`,
+  declinedLead: ({ org, name, actor, url }) => `Dry Run: ${actor} declined ${name}'s request to join the ${org} team. See all requests: ${url}`,
+  declinedApplicant: ({ name, org, reason, url }) => `Hi ${first(name)}, your request to join the ${org} team on Dry Run was not approved${reason ? `: ${reason}` : ''}. Please speak to your team admin if you think this is a mistake. Dry Run: ${url}`,
+  addedInviter: ({ name, invitee, org, url }) => `Good news ${first(name)}: ${invitee}, who you invited, has been added to the ${org} team on Dry Run. Open the platform: ${url}`,
+};
+module.exports = { teamTexts, surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };

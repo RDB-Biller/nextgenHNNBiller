@@ -33,7 +33,14 @@ app.get('/api/packs/:key', (req, res) => res.json(packs.detail(req.params.key)))
 
 
 const siteUrl = (req) => (process.env.DRYRUN_PUBLIC_URL || `${req.get('x-forwarded-proto') || 'http'}://${req.get('host')}`).replace(/\/$/, '');
-const teamUrl = (req, orgId) => `${siteUrl(req)}/join?team=${require('./requests').teamToken(orgId).token}`;
+const teamUrl = (req, orgId, byMemberId) => `${siteUrl(req)}/join?team=${require('./requests').teamToken(orgId).token}${byMemberId ? `&by=${encodeURIComponent(byMemberId)}` : ''}`;
+/** SMS to people in an organisation. Never throws, never blocks the action that triggered it. Skips demos and people without a number. */
+async function smsTo(o, members, text, purpose) {
+  if (o.plan === 'demo') return;
+  const seen = new Set();
+  for (const m of members) { if (!m || !m.phone || seen.has(m.id)) continue; seen.add(m.id); try { await messaging.deliver({ phone: m.phone, channels: { sms: true }, text, orgId: o.id, orgName: o.name, who: m.role, purpose }); } catch { /* logged inside deliver */ } }
+}
+const leadsOf = (o) => Object.values(o.members).filter((m) => m.role === 'admin');
 const joinUrl = (req, orgId) => `${siteUrl(req)}/join${orgId ? '?ref=' + orgs.refCode(orgId) : ''}`;
 /** Send sign-in details on the chosen channels. Never throws; the username and password are still returned so nothing is lost if a send fails. */
 async function sendCreds(req, { orgId, member, username, password, role, by, deliver, adminAppointment }) {
@@ -71,7 +78,7 @@ app.post('/api/public/request-account', wrap(async (req, res) => {
 app.get('/api/public/team-invite/:token', wrap(async (req, res) => { const o = requests.orgFromTeamToken(req.params.token); if (!o) throw err(404, 'This invite link is no longer active.'); res.json({ org: o.name }); }));
 app.post('/api/public/request-team', wrap(async (req, res) => {
   const r = requests.submitTeam(req.body || {}, clientIp(req));
-  if (r.request) { const o = orgs.raw(r.request.orgId); for (const m of Object.values(o.members)) if (m.role === 'admin' && m.phone) messaging.deliver({ phone: m.phone, channels: { sms: true }, text: `Dry Run: ${r.request.contactName} asked to join the ${o.name} team. Review: ${siteUrl(req)}/app?go=admin`, orgId: o.id, orgName: o.name, who: 'admin', purpose: 'team request' }).catch(() => {}); }
+  if (r.request) { const o = orgs.raw(r.request.orgId); await smsTo(o, leadsOf(o), messaging.teamTexts.pending({ org: o.name, name: r.request.contactName, job: r.request.jobTitle, by: r.request.invitedBy && r.request.invitedBy.name, url: `${siteUrl(req)}/app?go=admin` }), 'team request pending'); }
   res.status(201).json({ received: true, org: r.org });
 }));
 app.post('/api/public/demo', wrap(async (req, res) => res.status(201).json(await demo.create(clientIp(req)))));
@@ -169,13 +176,17 @@ O.post('/team-invite/rotate', need('team'), (req, res) => { plans.assertNotDemo(
 O.post('/team-invite/off', need('team'), (req, res) => { requests.teamInviteOff(oid(req)); res.json({ on: false }); });
 O.post('/team-invite/on', need('team'), (req, res) => { requests.teamInviteOn(oid(req)); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
 // Quick Invite: text the team-invite link to up to 5 mobile numbers by SMS, so an admin can forward it without copy-paste.
-O.post('/team-invite/send', need('team'), wrap(async (req, res) => {
+const qiCount = new Map();
+O.post('/team-invite/send', need('write'), wrap(async (req, res) => {
   const o = orgs.raw(oid(req)); plans.assertNotDemo(o, 'Quick Invite'); plans.assertWritable(o);
   const t = requests.teamToken(oid(req)); if (!t.on) throw err(422, 'Turn the team link on first, then send.');
-  const url = teamUrl(req, oid(req));
+  const url = teamUrl(req, oid(req), req.actor.id);
+  const day = new Date().toISOString().slice(0, 10); const used = (qiCount.get(req.actor.id + day) || 0);
   let phones = req.body && req.body.phones; if (typeof phones === 'string') phones = phones.split(/[\n,;]+/);
   phones = [...new Set((phones || []).map((p) => String(p || '').trim()).filter(Boolean))].slice(0, 5);
   if (!phones.length) throw err(422, 'Add at least one mobile number.');
+  if (used + phones.length > 25) throw err(429, 'You have reached today\'s limit of 25 invitations. Try again tomorrow.');
+  qiCount.set(req.actor.id + day, used + phones.length);
   const text = messaging.quickInviteText({ by: req.actor.name, org: o.name, url });
   const results = [];
   for (const phone of phones) {
@@ -187,11 +198,20 @@ O.post('/team-invite/send', need('team'), wrap(async (req, res) => {
   res.json({ sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results });
 }));
 O.get('/team-requests', need('team'), (req, res) => res.json(requests.teamList(oid(req))));
-O.post('/team-requests/:rid/decline', need('team'), (req, res) => res.json(requests.teamDecline(oid(req), req.params.rid, req.body && req.body.reason, req.actor.name)));
+O.post('/team-requests/:rid/decline', need('team'), wrap(async (req, res) => {
+  const r = requests.teamDecline(oid(req), req.params.rid, req.body && req.body.reason, req.actor.name); const o = orgs.raw(oid(req)); const url = `${siteUrl(req)}/app?go=admin`;
+  if (r.phone) await smsTo(o, [{ id: 'applicant', phone: r.phone, role: 'applicant' }], messaging.teamTexts.declinedApplicant({ name: r.contactName, org: o.name, reason: r.reason, url: `${siteUrl(req)}/join` }), 'team request declined');
+  await smsTo(o, leadsOf(o), messaging.teamTexts.declinedLead({ org: o.name, name: r.contactName, actor: req.actor.name, url }), 'team request declined (lead)');
+  res.json(r);
+}));
 O.post('/team-requests/:rid/approve', need('team'), wrap(async (req, res) => {
   const { request, member } = requests.teamApprove(oid(req), req.params.rid, req.body && req.body.role, req.actor.name);
   const deliver = request.phone ? ((req.body && req.body.deliver) || { sms: true, whatsapp: true }) : {};
   const delivery = request.phone ? await sendCreds(req, { orgId: oid(req), member: { name: member.name, email: member.email, phone: request.phone }, username: member.username, password: member.password, role: member.role, by: req.actor.name, deliver }) : [];
+  const o = orgs.raw(oid(req)); const url = `${siteUrl(req)}/app?go=admin`;
+  await smsTo(o, leadsOf(o), messaging.teamTexts.addedLead({ org: o.name, name: member.name, role: member.role, actor: req.actor.name, url }), 'team request approved (lead)');
+  const inv = request.invitedBy && o.members[request.invitedBy.id];
+  if (inv && !leadsOf(o).some((l) => l.id === inv.id)) await smsTo(o, [inv], messaging.teamTexts.addedInviter({ name: inv.name, invitee: member.name, org: o.name, url: `${siteUrl(req)}/app` }), 'team invite accepted');
   res.json({ ...member, delivery });
 }));
 O.get('/partner-code', need('read'), (req, res) => res.json({ code: orgs.refCode(oid(req)) }));
