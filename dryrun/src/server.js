@@ -18,6 +18,7 @@ const proposals = require('./proposals');
 const lab = require('./lab');
 const labcoach = require('./labcoach');
 const demo = require('./demo');
+const wr = require('./workroom');
 const { err, wrap } = require('./util');
 
 const app = express();
@@ -262,7 +263,7 @@ O.post('/assets/:id/promote', need('promote'), wrap(async (req, res) => res.json
 O.get('/assets/:id/export', need('read'), wrap(async (req, res) => res.json(await assets.exportApproved(oid(req), req.actor, req.params.id))));
 O.post('/upload', need('write'), wrap(async (req, res) => res.status(201).json(await assets.upload(oid(req), req.actor, req.body))));
 
-O.post('/runs', need('run'), wrap(async (req, res) => res.status(201).json(await engine.run(oid(req), req.actor, req.role, req.body))));
+O.post('/runs', need('run'), wrap(async (req, res) => { const run = await engine.run(oid(req), req.actor, req.role, req.body); const pa = req.body && req.body.inputs && req.body.inputs.product && req.body.inputs.product.assetId; if (pa) await wr.postRun(oid(req), run, pa); res.status(201).json(run); }));
 O.get('/runs', need('read'), wrap(async (req, res) => res.json(await engine.listRuns(oid(req), req.query.scenario))));
 O.get('/runs/:id', need('read'), wrap(async (req, res) => res.json(await engine.getRun(oid(req), req.params.id))));
 O.post('/compare', need('read'), wrap(async (req, res) => res.json(await engine.compare(oid(req), req.body.runIds))));
@@ -317,6 +318,51 @@ O.post('/engagements/:eid/work/live/:id/actuals', W('operator', true), wrap(asyn
 O.post('/engagements/:eid/work/live/:id/notes', W('operator', true), wrap(async (req, res) => res.json(await live.addNote(req.work.clientId, req.work.actor, 'builder', lv(req), req.body.note))));
 O.post('/engagements/:eid/work/live/:id/status', W('operator', true), wrap(async (req, res) => { if (req.body.status !== 'paused') throw err(403, 'Operators can pause a programme. Starting or going live is the client\'s decision.'); res.json(await live.setStatus(req.work.clientId, req.work.actor, 'approver', lv(req), 'paused', req.body.note)); }));
 
+// guests: a partner sees only the rooms a client opened for it
+O.get('/engagements/:eid/work/rooms', need('read'), W(), wrap(async (req, res) => res.json(await wr.guestRooms(req.work.clientId, req.params.eid))));
+O.get('/engagements/:eid/work/rooms/:rid', need('read'), W(), wrap(async (req, res) => res.json(await wr.thread(req.work.clientId, req.work.actor, req.params.rid, { guestEid: req.params.eid }))));
+O.post('/engagements/:eid/work/rooms/:rid/messages', W(undefined, true), wrap(async (req, res) => { const r = await wr.post(req.work.clientId, req.work.actor, 'builder', req.params.rid, { text: (req.body || {}).text, guestEid: req.params.eid }); res.status(201).json(r.message); }));
+// ---- Workroom ----------------------------------------------------------------------------------------------------------------------
+const roomUrl = (req, roomId) => `${siteUrl(req)}/app?room=${encodeURIComponent(roomId)}`;
+const memberOf = (req, id) => req.org.members[id];
+const snip = (t, n = 90) => { const s2 = String(t || '').replace(/\s+/g, ' ').trim(); return s2.length > n ? s2.slice(0, n - 1) + '…' : s2; };
+O.get('/workroom/rooms', need('read'), wrap(async (req, res) => res.json(await wr.rooms(oid(req), req.actor))));
+O.get('/workroom/mine', need('read'), wrap(async (req, res) => res.json({ ...(await wr.mine(oid(req), req.actor, req.role)), digest: !!(memberOf(req, req.actor.id) || {}).digest })));
+O.patch('/workroom/me', need('read'), (req, res) => { const m = memberOf(req, req.actor.id); m.digest = !!(req.body && req.body.digest); require('./registry').save(); res.json({ digest: m.digest }); });
+O.post('/workroom/digest/now', need('read'), wrap(async (req, res) => {
+  plans.assertNotDemo(req.org, 'Sending messages'); const m = memberOf(req, req.actor.id); if (!m.phone) throw err(422, 'Add your phone number first (ask an admin to save it for you).');
+  const d = await wr.digestFor(oid(req), m); if (!d) return res.json({ sent: false, message: 'Nothing is waiting for you.' });
+  await smsTo(req.org, [m], `Dry Run: you have ${d}. Open the Workroom: ${siteUrl(req)}/app?room=${wr.GENERAL}`, 'workroom digest'); res.json({ sent: true, message: d });
+}));
+O.get('/workroom/decisions', need('read'), wrap(async (req, res) => res.json(await wr.decisions(oid(req), req.query.q))));
+O.get('/workroom/rooms/:rid', need('read'), wrap(async (req, res) => res.json(await wr.thread(oid(req), req.actor, req.params.rid))));
+O.post('/workroom/rooms/:rid/messages', need('read'), wrap(async (req, res) => {
+  const r = await wr.post(oid(req), req.actor, req.role, req.params.rid, req.body || {});
+  await smsTo(req.org, r.mentioned.filter((i) => i !== req.actor.id).map((i) => memberOf(req, i)), `Dry Run: ${req.actor.name} mentioned you in ${r.room.name}: "${snip(r.message.text)}" Open: ${roomUrl(req, r.room.id)}`, 'workroom mention');
+  let coach = null; if (r.coach) coach = await wr.coachReply(oid(req), req.actor, req.role, req.params.rid, { text: r.message.text, pack: packs.detail(req.org.pack) });
+  res.status(201).json({ message: r.message, coach });
+}));
+O.post('/workroom/rooms/:rid/approvals', need('promote'), wrap(async (req, res) => {
+  const r = await wr.requestApproval(oid(req), req.actor, req.role, req.params.rid, req.body || {}); const a = r.message.approval;
+  await smsTo(req.org, r.approvers, `Dry Run: ${req.actor.name} asks you to approve "${a.assetName}" v${a.version} to ${a.to.replace('_', ' ')}. Decide: ${roomUrl(req, r.room.id)}`, 'approval requested'); res.status(201).json(r.message);
+}));
+O.post('/workroom/approvals/:mid/decide', need('approve'), wrap(async (req, res) => {
+  const r = await wr.decideApproval(oid(req), req.actor, req.role, req.params.mid, req.body || {}); const a = r.message.approval;
+  if (r.requester && r.requester.id !== req.actor.id) await smsTo(req.org, [r.requester], a.status === 'approved' ? `Dry Run: ${req.actor.name} approved "${a.assetName}" v${a.version} to ${a.to.replace('_', ' ')}. Open: ${roomUrl(req, r.roomId)}` : `Dry Run: ${req.actor.name} sent "${a.assetName}" v${a.version} back: "${snip(a.decisionNote)}" Open: ${roomUrl(req, r.roomId)}`, 'approval decided');
+  res.json(r.message);
+}));
+O.post('/workroom/rooms/:rid/decisions', need('read'), wrap(async (req, res) => res.status(201).json(await wr.addDecision(oid(req), req.actor, req.role, req.params.rid, req.body || {}))));
+O.post('/workroom/rooms/:rid/tasks', need('read'), wrap(async (req, res) => {
+  const r = await wr.addTask(oid(req), req.actor, req.role, req.params.rid, req.body || {});
+  if (r.assignee.id !== req.actor.id) await smsTo(req.org, [r.assignee], `Dry Run: ${req.actor.name} gave you a task: "${snip(r.task.text)}"${r.task.due ? ` (due ${r.task.due})` : ''}. Open: ${roomUrl(req, r.room.id)}`, 'task assigned');
+  res.status(201).json(r.task);
+}));
+O.post('/workroom/tasks/:tid', need('read'), wrap(async (req, res) => {
+  const r = await wr.setTask(oid(req), req.actor, req.role, req.params.tid, !(req.body && req.body.done === false));
+  if (r.task.status === 'done' && r.creator && r.creator.id !== req.actor.id) await smsTo(req.org, [r.creator], `Dry Run: ${req.actor.name} finished "${snip(r.task.text)}". Open: ${roomUrl(req, r.task.roomId)}`, 'task done');
+  res.json(r.task);
+}));
+O.post('/workroom/guest-rooms', need('settings'), wrap(async (req, res) => res.status(201).json(await wr.createGuestRoom(oid(req), req.actor, req.role, req.body || {}))));
 // The one door to HNN Biller. Read-only.
 O.get('/hnn/price-books', need('read'), wrap(async (req, res) => res.json(await hnn.listPriceBooks())));
 O.post('/hnn/import', need('write'), wrap(async (req, res) => {
@@ -332,4 +378,13 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 app.use((e, req, res, next) => { const s = e.status || 500; if (s === 500) console.error(e); res.status(s).json({ error: s === 500 ? 'Something went wrong on our side.' : e.message, ...(e.code ? { code: e.code } : {}) }); });
 
 module.exports = app;
-if (require.main === module) { const port = process.env.PORT || 4100; app.listen(port, () => console.log(`Dry Run listening on ${port}`)); setInterval(() => demo.sweep().catch(() => {}), 15 * 60 * 1000).unref(); }
+/** Once a day, around DRYRUN_DIGEST_HOUR (UTC, default 7), text each member who turned the digest on what is waiting for them. */
+async function sendDigests() {
+  const now = new Date(); if (now.getUTCHours() !== Number(process.env.DRYRUN_DIGEST_HOUR || 7)) return; const day = now.toISOString().slice(0, 10); const reg2 = require('./registry');
+  const site = (process.env.DRYRUN_PUBLIC_URL || '').replace(/\/$/, ''); if (!site) return;
+  for (const o of Object.values(reg2.load().orgs)) {
+    if (o.plan === 'demo' || o.suspended || o.workroomDigestDay === day) continue; o.workroomDigestDay = day; reg2.save();
+    for (const m of Object.values(o.members)) { if (!m.digest || !m.phone) continue; const d = await wr.digestFor(o.id, m).catch(() => null); if (d) await smsTo(o, [m], `Dry Run: good morning ${String(m.name).split(' ')[0]}, you have ${d}. Open the Workroom: ${site}/app?room=${wr.GENERAL}`, 'workroom digest'); }
+  }
+}
+if (require.main === module) { const port = process.env.PORT || 4100; app.listen(port, () => console.log(`Dry Run listening on ${port}`)); setInterval(() => demo.sweep().catch(() => {}), 15 * 60 * 1000).unref(); if (!process.env.DRYRUN_MEMORY) setInterval(() => sendDigests().catch(() => {}), 30 * 60 * 1000).unref(); }

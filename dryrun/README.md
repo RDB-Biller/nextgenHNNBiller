@@ -85,3 +85,14 @@ On the Organisations tab, **People and messages** opens each organisation's memb
 ### Team request texts
 
 All by SMS, each with a link onto the platform. A request to join → the team lead(s) get a "pending" text (saying who invited the person, if anyone). Added → the person gets their sign-in details, the team leads are told, and the colleague who invited them is told. Declined → the person and the team leads are told. Any member who can write can Quick Invite colleagues (up to 25 invitations a day each); the link carries who invited, so they are told when the person is added.
+
+### Workroom
+
+A team working space inside the Product Lab Library, opened from the teal **Workroom** tab (or the "Open the Workroom" button at the top of the Product Lab Library, or "Room" beside any product). Left: rooms (General, one per product or programme, and guest rooms), plus **Needs me** and the **Decision log**. Middle: the thread. Right: the pinned product, its parameters and open tasks.
+
+- **Comments on specifics:** tap a parameter on the right to comment on that number and version.
+- **Approvals:** a builder asks for an approval in the room; an approver approves (the version really moves a gate) or sends it back with a reason, inside the thread. Both are logged as decisions and texted to the requester.
+- **Decision log:** searchable record of what was decided and why. Add your own with "Log a decision".
+- **Tasks, mentions and digest:** assign a task (with a due date), mention people with `@username` or `@firstname`, and each gets an SMS with a link to the room. Members can switch on a morning digest text (set `DRYRUN_DIGEST_HOUR`, UTC, default 7; needs `DRYRUN_PUBLIC_URL`).
+- **Coach:** `@coach <question>` answers in the room. In a product room, `@coach what if the premium goes down 5%?` saves a draft variation, compares it with the current version and reports the difference. Nothing is approved. Finishing a run in a product's room is posted there too.
+- **Guest rooms:** an admin opens a room for chosen partners (from active engagements). The partner sees only that room, under **Rooms** in their engagement, and none of the rest of the workspace.

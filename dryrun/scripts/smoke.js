@@ -284,6 +284,56 @@ async function main() {
   ok((await call('POST', '/api/org/assets', ADMIN, { kind: 'outcomes_programme', name: 'bad', data: { condition: 'x' } })).s === 422, 'a programme without bands is refused');
   ok((await call('POST', '/api/org/runs', FIN, { scenario: 'outcomes_based_care', params: {} })).s === 422, 'fintechs do not run it');
 
+  section('Workroom');
+  { const tm = (await call('GET', '/api/org/team', ADMIN)).j; const lead = tm.find((m) => m.role === 'admin'), bld = tm.find((m) => m.role === 'builder'), apr = tm.find((m) => m.role === 'approver');
+    await plat('PATCH', `/orgs/${orgId}/members/${apr.id}`, { phone: '0244900010' }); const txt = () => atCalls.map((c) => dec(c));
+    const wp = (await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'Room test cover', data: baseProduct })).j; const RM = 'rm_' + wp.id;
+    let rr = await call('GET', '/api/org/workroom/rooms', BUILD); ok(rr.s === 200 && rr.j[0].id === 'rm_general' && rr.j.some((x) => x.id === RM && x.assetId === wp.id), 'General plus a room for every product');
+    atCalls.length = 0; r = await call('POST', `/api/org/workroom/rooms/${RM}/messages`, BUILD, { text: `@${lead.username} can you look at the premium?`, anchor: { param: 'premium', version: 1 } });
+    ok(r.s === 201 && r.j.message.anchor.param === 'premium' && r.j.message.mentions.includes(lead.id), 'a comment can point at one parameter and mention a colleague');
+    ok(atCalls.length === 1 && txt()[0].includes('mentioned you') && txt()[0].includes('/app?room=' + RM), 'the mentioned colleague is texted with a link to the room');
+    r = await call('GET', `/api/org/workroom/rooms/${RM}`, ADMIN); ok(r.s === 200 && r.j.messages.length === 1 && r.j.pinned && r.j.pinned.version === 1 && r.j.pinned.params.length > 0, 'the room shows the thread and the pinned version with its parameters');
+    ok((await call('POST', `/api/org/workroom/rooms/${RM}/messages`, null, { text: 'hi' })).s === 401, 'sign-in needed');
+    r = await call('POST', `/api/org/workroom/rooms/rm_general/messages`, BUILD, { text: '@coach how do I build a product?' }); ok(r.s === 201 && r.j.coach && r.j.coach.kind === 'coach' && /product/i.test(r.j.coach.text), 'the Coach answers when mentioned');
+    const before = (await call('GET', '/api/org/assets', BUILD)).j.length; r = await call('POST', `/api/org/workroom/rooms/${RM}/messages`, BUILD, { text: '@coach what if the co-pay goes to 20%?' });
+    ok(r.j.coach && /I tried it/.test(r.j.coach.text) && /co-pay 20/.test(r.j.coach.text) && (await call('GET', '/api/org/assets', BUILD)).j.length === before + 1, 'the Coach tries a what-if as a saved draft and reports the difference');
+    ok(require('../src/workroom').parseWhatIf('what if we lower the premium by 5%').premiumPct === -5, 'what-if reads lower/raise and percentages');
+    // approvals and the decision log
+    atCalls.length = 0; r = await call('POST', `/api/org/workroom/rooms/${RM}/approvals`, BUILD, { note: 'Ready for the dry run' }); const ap1 = r.j;
+    ok(r.s === 201 && ap1.approval.from === 'draft' && ap1.approval.to === 'dry_run' && txt().some((t) => /asks you to approve/.test(t) && t.includes('/app?room=' + RM)), 'asking for an approval texts the approvers with a link');
+    ok((await call('POST', `/api/org/workroom/rooms/${RM}/approvals`, BUILD, {})).s === 409, 'one open request per version');
+    ok((await call('POST', `/api/org/workroom/approvals/${ap1.id}/decide`, BUILD, { action: 'approve' })).s === 403, 'a builder cannot settle it');
+    atCalls.length = 0; r = await call('POST', `/api/org/workroom/approvals/${ap1.id}/decide`, APPR, { action: 'approve', note: 'Looks sound' }); ok(r.s === 200 && r.j.approval.status === 'approved', 'an approver approves inside the thread');
+    ok(txt().some((t) => /approved "Room test cover"/.test(t) && t.includes('/app?room=')), 'the requester is texted the result with a link');
+    ok((await call('GET', `/api/org/assets/${wp.id}`, BUILD)).j.versionList[0].gate === 'dry_run', 'the version really moved a gate');
+    ok((await call('POST', `/api/org/workroom/approvals/${ap1.id}/decide`, APPR, { action: 'approve' })).s === 409, 'cannot settle twice');
+    r = await call('POST', `/api/org/workroom/rooms/${RM}/approvals`, BUILD, {}); const ap2 = r.j; ok((await call('POST', `/api/org/workroom/approvals/${ap2.id}/decide`, APPR, { action: 'send_back' })).s === 422, 'sending back needs a reason');
+    r = await call('POST', `/api/org/workroom/approvals/${ap2.id}/decide`, APPR, { action: 'send_back', note: 'Run it on more members first' }); ok(r.s === 200 && r.j.approval.status === 'sent_back', 'an approver sends it back with a reason');
+    await call('POST', `/api/org/workroom/rooms/${RM}/decisions`, BUILD, { what: 'Keep the co-pay at zero', why: 'Members told us it matters' });
+    r = await call('GET', '/api/org/workroom/decisions', ADMIN); ok(r.j.length >= 3 && r.j.some((d) => /Keep the co-pay/.test(d.what)) && r.j.some((d) => d.source === 'approval'), 'the decision log holds manual and approval decisions');
+    ok((await call('GET', '/api/org/workroom/decisions?q=co-pay', ADMIN)).j.every((d) => /co-pay/i.test(d.what + d.why)), 'and can be searched');
+    // tasks
+    atCalls.length = 0; r = await call('POST', `/api/org/workroom/rooms/${RM}/tasks`, BUILD, { text: 'Check the waiting period', assigneeId: lead.id, due: '2020-01-01' }); const tk = r.j;
+    ok(r.s === 201 && txt()[0].includes('gave you a task') && txt()[0].includes('/app?room=' + RM), 'a task texts the person it is for with a link');
+    r = await call('GET', '/api/org/workroom/mine', ADMIN); ok(r.j.tasks.length === 1 && r.j.tasks[0].overdue && r.j.badge >= 1, 'it shows up under what needs me, marked overdue');
+    ok((await call('POST', `/api/org/workroom/tasks/${tk.id}`, APPR, {})).s === 403, 'someone not involved cannot close it');
+    atCalls.length = 0; r = await call('POST', `/api/org/workroom/tasks/${tk.id}`, ADMIN, {}); ok(r.j.status === 'done' && txt().some((t) => /finished/.test(t)), 'finishing it texts the person who set it');
+    ok((await call('GET', '/api/org/workroom/mine', ADMIN)).j.tasks.length === 0, 'and it leaves their list');
+    r = await call('GET', '/api/org/workroom/mine', APPR); ok(Array.isArray(r.j.approvals), 'approvers see approvals waiting for them');
+    ok((await call('PATCH', '/api/org/workroom/me', BUILD, { digest: true })).j.digest === true, 'a member can switch the daily digest on');
+    await call('POST', `/api/org/workroom/rooms/${RM}/tasks`, BUILD, { text: 'One more', assigneeId: bld.id }); atCalls.length = 0; r = await call('POST', '/api/org/workroom/digest/now', BUILD, {}); ok(r.j.sent && txt()[0].includes('1 task') && txt()[0].includes('/app?room='), 'the digest text lists what is waiting and links in');
+    ok((await call('GET', `/api/org/workroom/rooms/${RM}`, ADMIN)).j.room.unread === undefined && (await call('GET', '/api/org/workroom/rooms', ADMIN)).j.find((x) => x.id === RM).unread === 0, 'opening a room marks it read');
+    // guest rooms
+    r = await call('POST', '/api/org/engagements', ADMIN, { partnerOrgId: RES, scope: { surveyIds: 'all' }, fee: { oneOff: 0, fixedPerMonth: 0, commissionPct: 0 } }); const ENG2 = r.j.id; await call('POST', `/api/org/engagements/${ENG2}/accept`, RKEY);
+    r = await call('POST', '/api/org/workroom/guest-rooms', BUILD, { name: 'x', engagementIds: [ENG2] }); ok(r.s === 403, 'only an admin opens a guest room');
+    r = await call('POST', '/api/org/workroom/guest-rooms', ADMIN, { name: 'Fieldwork with the research firm', engagementIds: [ENG2] }); const GR = r.j.id; ok(r.s === 201, 'an admin opens a guest room for a partner');
+    r = await call('GET', `/api/org/engagements/${ENG2}/work/rooms`, RKEY); ok(r.s === 200 && r.j.length === 1 && r.j[0].id === GR, 'the partner sees that room only');
+    ok((await call('GET', `/api/org/engagements/${ENG2}/work/rooms/${RM}`, RKEY)).s === 403 && (await call('GET', `/api/org/engagements/${ENG2}/work/rooms/rm_general`, RKEY)).s === 403, 'and none of the team\'s own rooms');
+    r = await call('POST', `/api/org/engagements/${ENG2}/work/rooms/${GR}/messages`, RKEY, { text: 'Fieldwork starts Monday' }); ok(r.s === 201 && /\(/.test(r.j.by), 'the partner can post in it, named with their organisation');
+    r = await call('GET', `/api/org/workroom/rooms/${GR}`, ADMIN); ok(r.j.messages.some((m) => m.text === 'Fieldwork starts Monday'), 'the client team sees what the partner wrote');
+    ok((await call('GET', `/api/org/engagements/${ENG2}/work/rooms/${GR}`, RKEY)).j.pinned === null, 'a guest gets no product details');
+  }
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');
