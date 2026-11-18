@@ -178,7 +178,7 @@ O.post('/team-invite/off', need('team'), (req, res) => { requests.teamInviteOff(
 O.post('/team-invite/on', need('team'), (req, res) => { requests.teamInviteOn(oid(req)); res.json({ on: true, url: teamUrl(req, oid(req)) }); });
 // Quick Invite: text the team-invite link to up to 5 mobile numbers by SMS, so an admin can forward it without copy-paste.
 const qiCount = new Map();
-O.post('/team-invite/send', need('write'), wrap(async (req, res) => {
+O.post('/team-invite/send', need('read'), wrap(async (req, res) => {
   const o = orgs.raw(oid(req)); plans.assertNotDemo(o, 'Quick Invite'); plans.assertWritable(o);
   const t = requests.teamToken(oid(req)); if (!t.on) throw err(422, 'Turn the team link on first, then send.');
   const url = teamUrl(req, oid(req), req.actor.id);

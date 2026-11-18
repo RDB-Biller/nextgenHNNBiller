@@ -84,7 +84,7 @@ On the Organisations tab, **People and messages** opens each organisation's memb
 
 ### Team request texts
 
-All by SMS, each with a link onto the platform. A request to join → the team lead(s) get a "pending" text (saying who invited the person, if anyone). Added → the person gets their sign-in details, the team leads are told, and the colleague who invited them is told. Declined → the person and the team leads are told. Any member who can write can Quick Invite colleagues (up to 25 invitations a day each); the link carries who invited, so they are told when the person is added.
+All by SMS, each with a link onto the platform. A request to join → the team lead(s) get a "pending" text (saying who invited the person, if anyone). Added → the person gets their sign-in details, the team leads are told, and the colleague who invited them is told. Declined → the person and the team leads are told. Every team member, from admin to viewer, can Quick Invite colleagues (up to 25 invitations a day each); the link carries who invited, so they are told when the person is added.
 
 ### Workroom
 
