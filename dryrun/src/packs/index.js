@@ -10,6 +10,7 @@ const planOpts = require('../scenarios/planOptions');
 const campaign = require('../scenarios/campaign');
 const financing = require('../scenarios/financing');
 const outcomesSc = require('../scenarios/outcomes');
+const hardware = require('../scenarios/hardware');
 
 const SCENARIOS = {
   adjudication_ladder: {
@@ -78,6 +79,28 @@ const SCENARIOS = {
       months: ['Month 1: baseline and data quality', 'Month 2: design bands with providers', 'Month 3: shadow scoring on live data without paying', 'Month 4: pilot payments with a few providers', 'Month 5: review and widen'],
     },
   },
+  print_run: {
+    key: 'print_run', label: 'Print run: time, material and cost', engine: hardware.printRun,
+    summary: 'What does it take to print this design? Works out filament, hours, cost per unit, how many days a batch takes on your printers, which parts do not fit and what may go wrong in printing.',
+    inputs: [{ kind: 'hardware_design', required: true, syntheticOk: true }],
+    params: [{ key: 'quantity', label: 'Units to build', default: 10 }, { key: 'printers', label: 'Printers you can use', default: 1 }, { key: 'machineRatePerHour', label: 'Machine cost per hour (wear and your time, assumption)', default: 1.5 }, { key: 'electricityPerHour', label: 'Electricity per hour (assumption)', default: 0.12 }, { key: 'failurePct', label: 'Prints that fail and are redone, %', default: 5 }],
+    pace: {
+      days: ['Open the starter design or build your own parts in the Design studio', 'Pick material, printer and settings', 'Run and read the cost, hours and warnings', 'Fix what does not fit; run again and compare', 'Print one part to check the estimate'],
+      weeks: ['Week 1: design the parts and set the bought parts list', 'Week 2: print the first parts and measure the real hours and weight', 'Week 3: replace the assumptions with real numbers and run again', 'Week 4: freeze the design and plan a small batch'],
+      months: ['Month 1: design and prototype', 'Month 2: test strength and fit with real prints', 'Month 3: small batch and measure failure rates', 'Month 4: decide between printing and moulding'],
+    },
+  },
+  build_economics: {
+    key: 'build_economics', label: 'Build economics: printing against moulding', engine: hardware.economics,
+    summary: 'Unit cost from one unit to thousands, with printing against injection moulding. Shows the volume where moulding starts to win, the margin at your price and what drives the cost.',
+    inputs: [{ kind: 'hardware_design', required: true, syntheticOk: true }],
+    params: [{ key: 'price', label: 'Selling price per unit (leave 0 to use the design price)', default: 0 }, { key: 'assemblyMinutes', label: 'Assembly time per unit, minutes', default: 30 }, { key: 'labourPerHour', label: 'Labour cost per hour', default: 6 }, { key: 'toolingPerPart', label: 'Mould cost for each different part (assumption)', default: 4000 }, { key: 'mouldedMaterialFactor', label: 'Moulded material cost compared with printed (assumption)', default: 0.6 }, { key: 'mouldedCyclePerPart', label: 'Moulding cost per part moulded (assumption)', default: 0.35 }, { key: 'targetMarginPct', label: 'Margin you want, %', default: 40 }],
+    pace: {
+      days: ['Open the starter design', 'Add the parts you buy (motors, boards, screws) with their prices', 'Run and read unit cost and margin', 'Ask the Coach for a price', 'Decide what to test with buyers'],
+      weeks: ['Week 1: list every bought part with a real quote', 'Week 2: time an assembly and set labour', 'Week 3: run, compare and set a price', 'Week 4: ask a moulder for a quote and replace the assumption'],
+      months: ['Month 1: first quotes', 'Month 2: pilot batch cost against the model', 'Month 3: choose the method for the first thousand', 'Month 4: tooling decision'],
+    },
+  },
   campaign: {
     key: 'campaign', label: 'Marketing campaign', engine: campaign,
     summary: 'Pick an audience from your customer list, choose channels and an offer, and see responses, sign-ups, cost and first-year margin before you spend.',
@@ -102,6 +125,9 @@ const PACKS = {
   telco: shell('telco', 'Telcos and mobile money', { customer: 'subscriber', transaction: 'transaction', provider: 'agent', product: 'bundle or service' }),
   hospital: shell('hospital', 'Hospitals and clinics', { customer: 'patient', transaction: 'bill', provider: 'department', product: 'service' }),
   pharmacy: shell('pharmacy', 'Pharmacies', { customer: 'customer', transaction: 'sale', provider: 'branch', product: 'medicine or service' }),
+  hardware: { key: 'hardware', label: 'Hardware developers: robots, machines and automobile parts', status: 'ready', vocab: { customer: 'buyer', transaction: 'build', provider: 'maker', product: 'design' }, scenarios: ['print_run', 'build_economics'], surveyTemplates: [],
+    templates: [{ kind: 'hardware_design', name: 'Starter: robot arm kit', data: hardware.DEFAULT_DESIGN() }],
+    note: 'Design parts in the Design studio (robot parts, machine parts, car parts), check them for printing, export STL, OBJ or G-code, and cost a batch.' },
   school: shell('school', 'Schools', { customer: 'parent or student', transaction: 'fee payment', provider: 'campus', product: 'fee plan' }),
 };
 const get = (k) => PACKS[k] || null;

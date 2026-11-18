@@ -396,6 +396,34 @@ app.get('/api/public/dri/:token', wrap(async (req, res) => {
   const origin = req.get('origin') || ''; const out = await connect.publicIteration(req.params.token, origin);
   res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.json(out);
 }));
+// ---- design studio (Hardware Developer pack) ------------------------------------------------------------------------------------
+const cad = require('./cad'); const hardware = require('./scenarios/hardware');
+const studioOnly = (req, res, next) => { if (req.org.pack !== 'hardware') throw err(403, 'The Design studio is part of the Hardware Developer pack.'); next(); };
+const partList = (b) => { const ps = (b || {}).parts; if (!Array.isArray(ps) || !ps.length) throw err(422, 'Add at least one part.'); if (ps.length > 60) throw err(422, 'Up to 60 parts at a time.'); return ps; };
+const meshJson = (m) => ({ v: m.v.map((x) => Math.round(x * 100) / 100), f: m.f });
+O.get('/studio/catalog', need('read'), studioOnly, wrap(async (req, res) => res.json({ parts: cad.types(), materials: Object.entries(cad.MATERIALS).map(([key, m]) => ({ key, label: m.label, density: m.density, costPerKg: m.costPerKg })), printers: Object.entries(cad.PRINTERS).map(([key, p]) => ({ key, label: p.label, bed: p.bed })), defaults: cad.DEFAULT_SETTINGS, starter: hardware.DEFAULT_DESIGN() })));
+O.post('/studio/mesh', need('read'), studioOnly, wrap(async (req, res) => {
+  const out = partList(req.body).map((p) => { try { const part = cad.buildPart(p.type, p.params); return { id: p.id, ok: true, mesh: meshJson(part.mesh), stats: cad.stats(part.mesh), note: part.note, minFeature: Math.round(part.minFeature * 100) / 100 }; } catch (e) { return { id: p.id, ok: false, error: e.message }; } });
+  res.json({ parts: out });
+}));
+O.post('/studio/check', need('read'), studioOnly, wrap(async (req, res) => {
+  const st = cad.cleanSettings((req.body || {}).settings || {}); const out = partList(req.body).map((p) => { try { const part = cad.buildPart(p.type, p.params); return { id: p.id, ok: true, ...cad.printCheck(part, st) }; } catch (e) { return { id: p.id, ok: false, error: e.message, warnings: [e.message] }; } });
+  res.json({ settings: st, parts: out, totals: { grams: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.grams * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 10) / 10, hours: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.hours * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 100) / 100, cost: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.materialCost * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 100) / 100 } });
+}));
+O.post('/studio/export', need('read'), studioOnly, wrap(async (req, res) => {
+  const b = req.body || {}; const st = cad.cleanSettings(b.settings || {}); const fmt = b.format === 'obj' ? 'obj' : 'stl'; const ps = partList(b); const orient = (m) => (b.orient === 'design' ? m : cad.bestOrientation(m).mesh);
+  let name = 'design', file;
+  if (b.scope === 'part') { const p = ps.find((x) => x.id === b.partId); if (!p) throw err(404, 'That part is not in the design.'); const part = cad.buildPart(p.type, p.params); const m = orient(part.mesh); name = p.name; file = fmt === 'obj' ? Buffer.from(cad.toOBJ([{ name: p.name, mesh: m }])) : cad.toSTL(m, p.name); }
+  else { const items = []; for (const p of ps) { const part = cad.buildPart(p.type, p.params); const m = orient(part.mesh); const q = Math.min(50, Math.max(1, Math.round(Number(p.qty) || 1))); for (let i = 0; i < q; i++) items.push({ name: q > 1 ? `${p.name} ${i + 1}` : p.name, mesh: m }); }
+    const pl = cad.plates(items, st); const idx = Math.max(0, Math.round(Number(b.plate) || 0)); const plate = pl.plates[idx]; if (!plate) throw err(404, 'There is no such plate.'); name = `plate-${idx + 1}`; res.setHeader('X-Dryrun-Plates', String(pl.plates.length)); res.setHeader('X-Dryrun-Skipped', encodeURIComponent(pl.skipped.join(', ')));
+    file = fmt === 'obj' ? Buffer.from(cad.toOBJ([{ name, mesh: plate.mesh }])) : cad.toSTL(plate.mesh, name); }
+  res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Disposition', `attachment; filename="${String(name).replace(/[^\w.\- ]/g, '_')}.${fmt}"`); res.setHeader('Content-Length', file.length); res.end(file);
+}));
+O.post('/studio/slice', need('read'), studioOnly, wrap(async (req, res) => {
+  const b = req.body || {}; const st = cad.cleanSettings(b.settings || {}); const p = b.part; if (!p) throw err(422, 'Choose a part to slice.'); const part = cad.buildPart(p.type, p.params); const oriented = cad.bestOrientation(part.mesh);
+  const r = cad.gcode(oriented.mesh, st); if (r.gcode.length > 40 * 1048576) throw err(422, 'The G-code is too large to send. Use a taller layer height or slice it in your own slicer.');
+  res.json({ orientation: oriented.name, ...r, name: p.name });
+}));
 // ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
 O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
 O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));

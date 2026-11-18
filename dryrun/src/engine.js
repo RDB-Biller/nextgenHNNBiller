@@ -14,6 +14,7 @@ const campaignSc = require('./scenarios/campaign');
 const regulatory = require('./regulatory');
 const fin = require('./scenarios/financing');
 const outcomes = require('./scenarios/outcomes');
+const hardwareSc = require('./scenarios/hardware');
 const { err, iso, id, round } = require('./util');
 
 const adapter = (orgId) => audit.adapter(orgId);
@@ -35,6 +36,10 @@ async function gather(orgId, scenario, inputs = {}, syntheticSpec = {}, seed) {
   if (scenario === 'plan_options') {
     const pr = await resolve(orgId, inputs.product, 'product'); used.product = pr ? ref(pr) : { synthetic: true };
     return { product: pr ? pr.data : planOpts.DEFAULT_PRODUCT(), used };
+  }
+  if (scenario === 'print_run' || scenario === 'build_economics') {
+    const hd = await resolve(orgId, inputs.hardware_design, 'hardware_design'); used.hardware_design = hd ? ref(hd) : { synthetic: true };
+    return { design: hd ? hd.data : hardwareSc.DEFAULT_DESIGN(), used };
   }
   if (scenario === 'outcomes_based_care') {
     const op = await resolve(orgId, inputs.outcomes_programme, 'outcomes_programme'); used.outcomes_programme = op ? ref(op) : { synthetic: true };
@@ -64,6 +69,7 @@ async function gather(orgId, scenario, inputs = {}, syntheticSpec = {}, seed) {
 function execute(scenario, g, params, seed) {
   const s = packs.scenario(scenario);
   if (scenario === 'plan_options') return s.engine.run({ product: g.product, params, seed });
+  if (scenario === 'print_run' || scenario === 'build_economics') return s.engine.run({ design: g.design, params, seed });
   if (scenario === 'outcomes_based_care') return s.engine.run({ programme: g.programme, params, seed });
   if (scenario === 'premium_financing' || scenario === 'copay_cash') return s.engine.run({ offer: g.offer, params, seed });
   if (scenario === 'campaign') return s.engine.run({ customers: g.customers, campaign: g.campaign, params, seed });
@@ -171,7 +177,7 @@ async function coach(orgId, actor, role, runId, { maxDiscountPct } = {}) {
   const rec = await getRun(orgId, runId); const params = { ...rec.params, ...(maxDiscountPct ? { maxDiscountPct } : {}) };
   const g = await gather(orgId, rec.scenario, rec.inputRefs, rec.syntheticSpec, rec.seed);
   const rules = o.regulatoryRules;
-  const out = rec.scenario === 'adjudication_ladder' ? coachLadder(g, params, rec.seed, rec.result) : rec.scenario === 'plan_options' ? coachPlanOptions(g, params, rec.seed, rec.result, rules) : rec.scenario === 'campaign' ? coachCampaign(g, params, rec.seed, rec.result, rules) : rec.scenario === 'outcomes_based_care' ? outcomes.coach(g.programme, params, rec.seed, rec.result) : rec.scenario === 'premium_financing' ? fin.coachPremium(g.offer, params, rec.seed, rec.result) : rec.scenario === 'copay_cash' ? fin.coachCover(g.offer, params, rec.seed, rec.result) : coachSettlement(g, params, rec.seed, rec.result);
+  const out = rec.scenario === 'print_run' || rec.scenario === 'build_economics' ? packs.scenario(rec.scenario).engine.coach(g.design, params, rec.seed, rec.result) : rec.scenario === 'adjudication_ladder' ? coachLadder(g, params, rec.seed, rec.result) : rec.scenario === 'plan_options' ? coachPlanOptions(g, params, rec.seed, rec.result, rules) : rec.scenario === 'campaign' ? coachCampaign(g, params, rec.seed, rec.result, rules) : rec.scenario === 'outcomes_based_care' ? outcomes.coach(g.programme, params, rec.seed, rec.result) : rec.scenario === 'premium_financing' ? fin.coachPremium(g.offer, params, rec.seed, rec.result) : rec.scenario === 'copay_cash' ? fin.coachCover(g.offer, params, rec.seed, rec.result) : coachSettlement(g, params, rec.seed, rec.result);
   rec.coach = { at: iso(), by: actor ? actor.name : 'platform owner', ...out }; await adapter(orgId).put(orgId, 'runs', rec.id, rec);
   await audit.log(orgId, actor, 'coach.suggest', { runId, found: out.suggestions.length }); return rec.coach;
 }
