@@ -190,6 +190,40 @@ async function postRun(orgId, run, assetId) { // a run finished for an asset: sa
   if (!assetId) return null; try { const room = await getRoom(orgId, 'rm_' + assetId); const h = Object.entries(run.headline || {}).slice(0, 4).map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${fmtN(v)}`).join(' · ');
     return await put(orgId, base(room.id, { id: 'coach', name: 'Coach' }, 'coach', { text: `Run finished: ${run.name}. ${h}`, anchor: { assetId, runId: run.id } })); } catch { return null; } }
 
+// ---- links and uploaded product files ---------------------------------------------------------------------------------------------
+const blobs = require('./blobs');
+const inspector = require('./inspect');
+const MAX_FILE = 100 * 1048576; const orgCap = () => Number(process.env.DRYRUN_UPLOAD_CAP_MB || 1024) * 1048576;
+function classifyLink(u) {
+  const h = u.hostname.replace(/^www\./, '');
+  if (h === 'play.google.com' && /\/store\/apps\/details/.test(u.pathname)) return { type: 'play_store', label: 'Google Play listing', appId: u.searchParams.get('id') || null };
+  if (h === 'apps.apple.com' || h === 'itunes.apple.com') return { type: 'app_store', label: 'App Store listing' };
+  if (['github.com', 'gitlab.com', 'bitbucket.org'].includes(h)) return { type: 'repo', label: 'Code repository' };
+  return { type: 'web', label: 'Live web address' };
+}
+async function addLink(orgId, actor, role, roomId, { url, name, useForTests, probe } = {}) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!canPost(role)) throw err(403, 'Your role cannot post links.'); const room = await getRoom(orgId, roomId);
+  let u; try { u = new URL(String(url || '').trim()); } catch { throw err(422, 'That is not a web address. Include https://'); } if (!['https:', 'http:'].includes(u.protocol)) throw err(422, 'Use an http:// or https:// address.'); if (u.username || u.password) throw err(422, 'Take the username and password out of the address.'); if (String(url).length > 500) throw err(422, 'That address is too long.');
+  const cl = classifyLink(u); const link = { url: u.toString(), name: clip(name, 80) || (probe && probe.title) || u.hostname, ...cl, probe: probe || null };
+  const msg = await put(orgId, base(room.id, actor, 'link', { text: '', link })); let testing = false;
+  if (useForTests && room.assetId && u.protocol === 'https:' && require('./orgs').can(role, 'write')) { await require('./bench').setLiveUrl(orgId, room.assetId, link.url); testing = true; }
+  return { message: msg, testing };
+}
+async function addFile(orgId, actor, role, roomId, { name, buf } = {}) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); plans.assertNotDemo(o, 'File uploads'); if (!canPost(role)) throw err(403, 'Your role cannot upload files.'); const room = await getRoom(orgId, roomId);
+  if (!buf || !buf.length) throw err(422, 'The file is empty.'); if (buf.length > MAX_FILE) throw err(413, 'Files can be up to 100 MB for now. Larger apps will be supported when direct store and repository connections are added.');
+  const used = (await ad(orgId).list(orgId, 'wr_files')).reduce((s, f) => s + f.size, 0); if (used + buf.length > orgCap()) throw err(413, 'Your workspace has used its file storage. Remove old files first.');
+  const fname = clip(String(name || 'file').replace(/[\\/]+/g, '_').replace(/[^\w.\- ()]+/g, '_'), 120) || 'file'; const found = inspector.inspect(fname, buf); const fid = id('fil');
+  const rec = { id: fid, roomId: room.id, name: fname, size: buf.length, at: iso(), by: actor.name, byId: actor.id, sha256: require('crypto').createHash('sha256').update(buf).digest('hex'), inspect: found };
+  blobs.put(orgId, fid, buf); await ad(orgId).put(orgId, 'wr_files', fid, rec);
+  const msg = await put(orgId, base(room.id, actor, 'file', { text: '', file: { id: fid, name: fname, size: buf.length, sha256: rec.sha256.slice(0, 16), inspect: found } })); return { message: msg, file: rec };
+}
+async function getFile(orgId, fileId) { const rec = await ad(orgId).get(orgId, 'wr_files', fileId); if (!rec) throw err(404, 'That file is not here.'); const buf = blobs.get(orgId, fileId); if (!buf) throw err(404, 'The file is no longer stored.'); return { rec, buf }; }
+async function removeFile(orgId, actor, role, fileId) {
+  const rec = await ad(orgId).get(orgId, 'wr_files', fileId); if (!rec) throw err(404, 'That file is not here.'); if (!(rec.byId === actor.id || orgs.can(role, 'team'))) throw err(403, 'Only the person who uploaded it, or an admin, can remove it.');
+  blobs.del(orgId, fileId); await ad(orgId).del(orgId, 'wr_files', fileId); const m = (await allMsgs(orgId)).find((x) => x.kind === 'file' && x.file && x.file.id === fileId); if (m) { m.kind = 'system'; m.text = `${actor.name} removed the file "${rec.name}".`; delete m.file; await put(orgId, m); } return { ok: true };
+}
+
 // ---- guest rooms ----------------------------------------------------------------------------------------------------------------
 async function createGuestRoom(orgId, actor, role, { name, engagementIds } = {}) {
   const o = orgs.raw(orgId); plans.assertNotDemo(o, 'Guest rooms'); plans.assertWritable(o); if (!orgs.can(role, 'settings')) throw err(403, 'Only an admin can open a guest room.');
@@ -200,4 +234,4 @@ async function createGuestRoom(orgId, actor, role, { name, engagementIds } = {})
 }
 async function guestRooms(orgId, eid) { return (await ensureRooms(orgId)).filter((r) => r.kind === 'guest' && (r.engagementIds || []).includes(eid)).map((r) => ({ id: r.id, name: r.name })); }
 
-module.exports = { GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, createGuestRoom, guestRooms, markRead, getRoom };
+module.exports = { GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, addLink, addFile, getFile, removeFile, createGuestRoom, guestRooms, markRead, getRoom };

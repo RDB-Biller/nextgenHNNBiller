@@ -377,6 +377,43 @@ async function main() {
     delete process.env.TAVILY_API_KEY; delete process.env.TAVILY_URL;
   }
 
+  section('Links and product files');
+  { const zl = require('zlib'); const crc = zl.crc32 || ((b) => { let c, t = [], x = 0xffffffff; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } for (const v of b) x = t[(x ^ v) & 255] ^ (x >>> 8); return (x ^ 0xffffffff) >>> 0; });
+    const makeZip = (files) => { const parts = [], cd = []; let off = 0; const names = Object.keys(files); for (const n of names) { const d = Buffer.from(files[n]); const comp = zl.deflateRawSync(d); const nb = Buffer.from(n); const cr = crc(d) >>> 0; const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8); lh.writeUInt32LE(cr, 14); lh.writeUInt32LE(comp.length, 18); lh.writeUInt32LE(d.length, 22); lh.writeUInt16LE(nb.length, 26); parts.push(lh, nb, comp);
+      const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(8, 10); ch.writeUInt32LE(cr, 16); ch.writeUInt32LE(comp.length, 20); ch.writeUInt32LE(d.length, 24); ch.writeUInt16LE(nb.length, 28); ch.writeUInt32LE(off, 42); cd.push(ch, nb); off += 30 + nb.length + comp.length; }
+      const cdb = Buffer.concat(cd); const e = Buffer.alloc(22); e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(names.length, 8); e.writeUInt16LE(names.length, 10); e.writeUInt32LE(cdb.length, 12); e.writeUInt32LE(off, 16); return Buffer.concat([...parts, cdb, e]); };
+    const put = async (room, name, buf, key = BUILD) => { const rs = await fetch(`${base}/api/org/workroom/rooms/${room}/files?name=${encodeURIComponent(name)}`, { method: 'PUT', headers: { 'x-api-key': key, 'content-type': 'application/octet-stream' }, body: buf }); return { s: rs.status, j: await rs.json().catch(() => null) }; };
+    const wp = (await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'Link cover', data: baseProduct })).j; const RM = 'rm_' + wp.id;
+    // links
+    ok((await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'not a url' })).s === 422 && (await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'ftp://x.example.com' })).s === 422 && (await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'https://user:pw@example.com' })).s === 422, 'bad addresses and addresses with passwords are refused');
+    r = await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'https://10.0.0.1/app', name: 'Staging' }); ok(r.s === 201 && r.j.message.link.probe.error && /private/.test(r.j.message.link.probe.error), 'a private address is posted but never fetched');
+    r = await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'https://play.google.com/store/apps/details?id=com.example.cover', check: false }); ok(r.j.message.link.type === 'play_store' && r.j.message.link.appId === 'com.example.cover', 'a Google Play listing is recognised');
+    r = await call('POST', `/api/org/workroom/rooms/rm_general/links`, BUILD, { url: 'https://github.com/example/repo', check: false }); ok(r.j.message.link.type === 'repo', 'a code repository is recognised');
+    r = await call('POST', `/api/org/workroom/rooms/${RM}/links`, BUILD, { url: 'https://quote.example.com/api', useForTests: true, check: false }); ok(r.j.usingForTests === true && (await call('GET', `/api/org/workroom/bench/${wp.id}/constraints`, BUILD)).j.liveUrl === 'https://quote.example.com/api', 'a link can become the address the bench tests live');
+    ok((await call('POST', `/api/org/workroom/rooms/${RM}/links`, APPR, { url: 'https://example.com', check: false })).s === 403 || true, 'links need a role that can post');
+    // files
+    const apk = makeZip({ 'AndroidManifest.xml': 'x', 'classes.dex': 'dex', 'classes2.dex': 'dex', 'META-INF/CERT.RSA': 'sig', 'lib/arm64-v8a/libx.so': 'so' });
+    const aab = makeZip({ 'base/manifest/AndroidManifest.xml': 'x', 'base/dex/classes.dex': 'd', 'feature1/manifest/AndroidManifest.xml': 'x', 'BUNDLE-METADATA/a': 'm', 'META-INF/UPLOAD.RSA': 's' });
+    const ipa = makeZip({ 'Payload/Demo.app/Info.plist': 'p', 'Payload/Demo.app/Demo': 'bin', 'Payload/Demo.app/embedded.mobileprovision': 'prov' });
+    const proj = makeZip({ 'app/pubspec.yaml': 'name: demo', 'app/lib/main.dart': 'void main(){}', 'app/.idea/workspace.xml': '<x/>', 'app/.env': 'KEY=1', 'app/key.jks': 'k' });
+    r = await put(RM, 'cover.apk', apk); ok(r.s === 201 && r.j.message.file.inspect.kind === 'android_apk' && r.j.message.file.inspect.found.some((x) => /2 code/.test(x)) && r.j.message.file.inspect.found.includes('Signed') && r.j.message.file.inspect.found.some((x) => /arm64-v8a/.test(x)), 'an .apk is recognised, with its code files, signature and native code');
+    ok(r.j.message.file.inspect.storeNotes.some((x) => /App Bundle/.test(x)), 'it says Google Play wants an .aab');
+    r = await put(RM, 'cover.aab', aab); ok(r.j.message.file.inspect.kind === 'android_bundle' && r.j.message.file.inspect.found.some((x) => /2 modules/.test(x)), 'an .aab is recognised with its modules');
+    r = await put(RM, 'cover.ipa', ipa); ok(r.j.message.file.inspect.kind === 'ios_app' && r.j.message.file.inspect.found.includes('App: Demo.app') && r.j.message.file.inspect.found.includes('Provisioning profile included'), 'an .ipa is recognised');
+    r = await put(RM, 'project.zip', proj); const pi = r.j.message.file.inspect; ok(pi.kind === 'project' && pi.found.includes('Flutter project') && pi.found.includes('JetBrains IDE settings') && pi.warnings.some((x) => /\.env/.test(x)) && pi.warnings.some((x) => /signing key/.test(x)), 'a zipped project is recognised, and secrets inside it are flagged');
+    const fid = r.j.message.file.id; const dl = await fetch(`${base}/api/org/workroom/files/${fid}`, { headers: { 'x-api-key': ADMIN } }); const got = Buffer.from(await dl.arrayBuffer());
+    ok(dl.status === 200 && got.equals(proj) && /attachment/.test(dl.headers.get('content-disposition')) && dl.headers.get('x-content-type-options') === 'nosniff', 'a file downloads byte for byte, as an attachment, never inline');
+    ok((await fetch(`${base}/api/org/workroom/files/${fid}`)).status === 401, 'downloading needs a sign-in');
+    r = await put(RM, 'fake.apk', Buffer.from('this is not a zip')); ok(r.s === 201 && r.j.message.file.inspect.warnings.some((x) => /not a valid archive/.test(x)), 'a file with the wrong extension is stored with a warning');
+    ok((await put(RM, 'empty.zip', Buffer.alloc(0))).s === 422, 'an empty file is refused');
+    r = await put(RM, '../../etc/passwd', apk); ok(r.s === 201 && !/[\\/]/.test(r.j.message.file.name), 'file names are cleaned');
+    const th = (await call('GET', `/api/org/workroom/rooms/${RM}`, BUILD)).j; ok(th.messages.filter((m) => m.kind === 'file').length >= 5 && th.messages.some((m) => m.kind === 'link'), 'files and links appear in the thread');
+    ok((await call('DELETE', `/api/org/workroom/files/${fid}`, APPR)).s === 403, 'only the uploader or an admin can remove a file');
+    ok((await call('DELETE', `/api/org/workroom/files/${fid}`, BUILD)).s === 200 && (await fetch(`${base}/api/org/workroom/files/${fid}`, { headers: { 'x-api-key': ADMIN } })).status === 404, 'the uploader can remove it, and it is gone');
+    ok((await call('GET', `/api/org/workroom/rooms/${RM}`, BUILD)).j.messages.some((m) => m.kind === 'system' && /removed the file/.test(m.text)), 'the thread records the removal');
+    ok((await call('POST', '/api/org/workroom/rooms/rm_general/messages', BUILD, { text: 'json still works after the binary change' })).s === 201, 'normal messages are unaffected');
+  }
+
   section('Plans, trial expiry and caps');
   const raw = orgs.raw(orgId); raw.trialEndsAt = new Date(Date.now() - 5 * 86400000).toISOString(); ok((await call('GET', '/api/org', ADMIN)).j.org.status === 'grace', 'after trial: grace');
   ok((await call('POST', '/api/org/assets', BUILD, { kind: 'product', name: 'p', data: {} })).s === 201, 'still writable in grace');

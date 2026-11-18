@@ -42,6 +42,7 @@ function text(opts = {}) { const limit = parseSize(opts.limit); return (req, res
 function parseSize(s) { const m = /^(\d+)\s*(mb|kb)?$/i.exec(String(s || '1mb')); return Number(m[1]) * (/mb/i.test(m[2] || '') ? 1048576 : /kb/i.test(m[2] || '') ? 1024 : 1); }
 function body(req, limit, cb) {
   if (req.method === 'GET' || req.method === 'DELETE' && !req.headers['content-length']) return cb(null, '');
+  if (/^application\/octet-stream/.test(req.headers['content-type'] || '')) return cb(null, '');
   if (req._raw !== undefined) return cb(null, req._raw);
   let size = 0; const chunks = []; req.on('data', (c) => { size += c.length; if (size > limit) { req.destroy(); return cb(Object.assign(new Error('The request is too large.'), { status: 413 })); } chunks.push(c); });
   req.on('end', () => { req._raw = Buffer.concat(chunks).toString('utf8'); cb(null, req._raw); }); req.on('error', cb);
@@ -65,5 +66,7 @@ function express() {
   app.listen = (port, cb) => http.createServer(app.handler).listen(port, cb);
   return app;
 }
+/** Reads a binary request body up to `limit` bytes. */
+express.readBinary = (req, limit) => new Promise((resolve, reject) => { let size = 0; const chunks = []; req.on('data', (c) => { size += c.length; if (size > limit) { req.destroy(); return reject(Object.assign(new Error('That file is too large.'), { status: 413 })); } chunks.push(c); }); req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject); });
 express.Router = Router; express.json = json; express.text = text; express.static = serveStatic;
 module.exports = express;

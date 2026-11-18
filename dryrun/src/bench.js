@@ -39,7 +39,7 @@ function assumptionMap(rec) { const m = {}; for (const sh of rec.sheets) for (co
 
 async function constraints(orgId, assetId) {
   await needProduct(orgId, assetId); const rec = await store(orgId, assetId);
-  return { rules: rec.rules, sheets: rec.sheets.map((s) => ({ id: s.id, name: s.name, at: s.at, by: s.by, count: s.rows.length })), assumptions: Object.entries(assumptionMap(rec)).map(([key, value]) => ({ key, value })), known: KNOWN_KEYS.map(([key, label]) => ({ key, label })) };
+  return { liveUrl: rec.liveUrl || '', rules: rec.rules, sheets: rec.sheets.map((s) => ({ id: s.id, name: s.name, at: s.at, by: s.by, count: s.rows.length })), assumptions: Object.entries(assumptionMap(rec)).map(([key, value]) => ({ key, value })), known: KNOWN_KEYS.map(([key, label]) => ({ key, label })) };
 }
 function cleanRule(b) {
   const type = String(b.type || ''); if (!RULE_TYPES.includes(type)) throw err(422, 'Choose a kind of rule.'); const num = (v, name, lo, hi) => { const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw err(422, `${name} must be a number from ${lo} to ${hi}.`); return n; };
@@ -182,6 +182,20 @@ async function run(orgId, actor, role, assetId, body = {}) {
   try { await wr.coachNote(orgId, 'rm_' + assetId, lines.join('\n'), { benchId: rec2.id }); } catch { /* the room may not exist yet */ }
   return rec2;
 }
+/** Looks at a web address the way a visitor would: does it answer, how fast, what is it called. Public https addresses only. */
+function probe(url) {
+  return new Promise((resolve) => {
+    const t0 = Date.now(); let u; try { u = new URL(url); } catch { return resolve({ error: 'That is not a web address.' }); }
+    if (!(u.protocol === 'https:' || (allowPrivate() && u.protocol === 'http:'))) return resolve({ error: 'Not checked: only https addresses are checked.' });
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname) && !allowPrivate() && isPrivate(u.hostname)) return resolve({ error: 'Not checked: it is a private address.' });
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request({ protocol: u.protocol, hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search, method: 'GET', lookup: guardedLookup, timeout: 6000, headers: { 'user-agent': 'DryRunBench/1', accept: 'text/html,*/*' } }, (res) => {
+      let buf = ''; res.setEncoding('utf8'); res.on('data', (c) => { if (buf.length < 100000) buf += c; else res.destroy(); }); const done = () => { const t = (buf.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1]; resolve({ status: res.statusCode, ms: Date.now() - t0, contentType: clip(res.headers['content-type'], 80), title: t ? clip(t.replace(/\s+/g, ' '), 120) : null }); }; res.on('end', done); res.on('close', done);
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ error: 'No answer within 6 seconds.' }); }); req.on('error', (e) => resolve({ error: e.message })); req.end();
+  });
+}
+async function setLiveUrl(orgId, assetId, url) { const rec = await store(orgId, assetId); rec.liveUrl = url; await save(orgId, rec); }
 async function history(orgId, assetId) { await needProduct(orgId, assetId); return (await ad(orgId).list(orgId, 'wr_bench')).filter((b) => b.assetId === assetId).sort((x, y) => y.at.localeCompare(x.at)).slice(0, 10); }
 
-module.exports = { constraints, addRule, removeRule, addSheet, removeSheet, plan, run, history, isPrivate, expandVariants, METRICS };
+module.exports = { probe, setLiveUrl, constraints, addRule, removeRule, addSheet, removeSheet, plan, run, history, isPrivate, expandVariants, METRICS };

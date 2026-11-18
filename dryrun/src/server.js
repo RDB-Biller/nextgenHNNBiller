@@ -364,6 +364,18 @@ O.post('/workroom/tasks/:tid', need('read'), wrap(async (req, res) => {
   res.json(r.task);
 }));
 O.post('/workroom/guest-rooms', need('settings'), wrap(async (req, res) => res.status(201).json(await wr.createGuestRoom(oid(req), req.actor, req.role, req.body || {}))));
+// links and uploaded product files
+O.post('/workroom/rooms/:rid/links', need('read'), wrap(async (req, res) => {
+  const b = req.body || {}; let probe = null; if (req.org.plan !== 'demo' && b.check !== false && /^https:/i.test(String(b.url || ''))) probe = await bench.probe(String(b.url).trim());
+  const r = await wr.addLink(oid(req), req.actor, req.role, req.params.rid, { ...b, probe }); res.status(201).json({ message: r.message, usingForTests: r.testing });
+}));
+O.put('/workroom/rooms/:rid/files', need('read'), wrap(async (req, res) => {
+  const buf = await express.readBinary(req, 100 * 1048576 + 1024); const r = await wr.addFile(oid(req), req.actor, req.role, req.params.rid, { name: req.query.name, buf }); res.status(201).json({ message: r.message });
+}));
+O.get('/workroom/files/:fid', need('read'), wrap(async (req, res) => {
+  const { rec, buf } = await wr.getFile(oid(req), req.params.fid); res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Disposition', `attachment; filename="${rec.name.replace(/[^\w.\- ()]/g, '_')}"`); res.setHeader('Content-Length', buf.length); res.end(buf);
+}));
+O.delete('/workroom/files/:fid', need('read'), wrap(async (req, res) => res.json(await wr.removeFile(oid(req), req.actor, req.role, req.params.fid))));
 // ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
 O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
 O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));
