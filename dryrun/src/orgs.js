@@ -10,9 +10,9 @@ const usernames = () => new Set(allMembers().map((x) => (x.m.username || '').toL
 
 const ROLES = ['admin', 'builder', 'approver', 'viewer'];
 const CAN = {
-  admin:    new Set(['read', 'write', 'run', 'promote', 'approve', 'team', 'settings']),
-  builder:  new Set(['read', 'write', 'run', 'promote']),
-  approver: new Set(['read', 'run', 'promote', 'approve']),
+  admin:    new Set(['read', 'write', 'run', 'promote', 'approve', 'team', 'settings', 'iterate']),
+  builder:  new Set(['read', 'write', 'run', 'promote', 'iterate']),
+  approver: new Set(['read', 'run', 'promote', 'approve', 'iterate']),
   viewer:   new Set(['read']),
 };
 const can = (role, action) => !!(CAN[role] && CAN[role].has(action));

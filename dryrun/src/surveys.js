@@ -22,12 +22,12 @@ function cleanQuestions(qs) {
     return { id: q.id || `q${i + 1}`, type, prompt: String(q.prompt).slice(0, 300), options: type === 'choice' ? q.options.map(String) : undefined, feeds: q.feeds && q.feeds.param ? { param: String(q.feeds.param), option: q.feeds.option != null ? String(q.feeds.option) : undefined } : undefined };
   });
 }
-async function create(orgId, actor, { title, purpose = '', questions } = {}) {
+async function create(orgId, actor, { title, purpose = '', questions } = {}, extra = {}) {
   const o = orgs.raw(orgId); plans.assertWritable(o); if (!title) throw err(422, 'Give the survey a title.');
-  const s = { id: id('svy'), token: `${orgId}.${newKey('s').slice(2, 22)}`, title: String(title).slice(0, 120), purpose: String(purpose).slice(0, 400), status: 'open', questions: cleanQuestions(questions), createdAt: iso(), createdBy: actor ? actor.name : 'platform owner' };
+  const s = { id: id('svy'), token: `${orgId}.${newKey('s').slice(2, 22)}`, title: String(title).slice(0, 120), purpose: String(purpose).slice(0, 400), status: 'open', questions: cleanQuestions(questions), createdAt: iso(), createdBy: actor ? actor.name : 'platform owner', ...extra };
   await adapter(orgId).put(orgId, 'surveys', s.id, s); await audit.log(orgId, actor, 'survey.create', { surveyId: s.id, title: s.title }); return pub(s);
 }
-const pub = (s, n) => ({ id: s.id, token: s.token, title: s.title, purpose: s.purpose, status: s.status, questions: s.questions, createdAt: s.createdAt, createdBy: s.createdBy, ...(n !== undefined ? { responses: n } : {}) });
+const pub = (s, n) => ({ kind: s.kind || 'general', id: s.id, token: s.token, title: s.title, purpose: s.purpose, status: s.status, questions: s.questions, createdAt: s.createdAt, createdBy: s.createdBy, ...(n !== undefined ? { responses: n } : {}) });
 async function list(orgId) { const ad = adapter(orgId); const all = await ad.list(orgId, 'surveys'); const rs = await ad.list(orgId, 'responses'); return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((s) => pub(s, rs.filter((r) => r.surveyId === s.id).length)); }
 async function setStatus(orgId, actor, surveyId, status) { const o = orgs.raw(orgId); plans.assertWritable(o); const s = await adapter(orgId).get(orgId, 'surveys', surveyId); if (!s) throw err(404, 'Unknown survey.'); if (!['open', 'closed'].includes(status)) throw err(422, 'status must be open or closed.'); s.status = status; await adapter(orgId).put(orgId, 'surveys', s.id, s); await audit.log(orgId, actor, 'survey.status', { surveyId, status }); return pub(s); }
 
@@ -36,9 +36,10 @@ async function byToken(token) {
   const orgId = String(token || '').split('.')[0]; let o; try { o = orgs.raw(orgId); } catch { throw err(404, 'This survey link is not valid.'); }
   const s = (await adapter(orgId).list(orgId, 'surveys')).find((x) => x.token === token); if (!s) throw err(404, 'This survey link is not valid.'); return { o, orgId, s };
 }
-async function publicView(token) { const { o, s } = await byToken(token); return { title: s.title, purpose: s.purpose, organisation: o.name, open: s.status === 'open' && !['suspended', 'read_only'].includes(plans.statusOf(o)), questions: s.questions.map(({ id: i, type, prompt, options }) => ({ id: i, type, prompt, options })) }; }
+async function publicView(token) { const { o, s } = await byToken(token); return { title: s.title, purpose: s.purpose, organisation: o.name, open: s.status === 'open' && !['suspended', 'read_only'].includes(plans.statusOf(o)), questions: s.questions.map(({ id: i, type, prompt, options }) => ({ id: i, type, prompt, options })), ...(s.options ? { options: s.options.map((x) => ({ key: x.key, label: x.label, summary: x.summary, link: Date.parse(x.expiresAt) > Date.now() ? x.link : null, expired: Date.parse(x.expiresAt) <= Date.now() })) } : {}) }; }
 const scrub = (t) => String(t || '').replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[removed]').replace(/\+?\d[\d\s().-]{6,}\d/g, '[removed]').slice(0, 500);
-async function submit(token, answers, ip) {
+const SOURCES = ['facebook', 'x', 'linkedin', 'whatsapp', 'telegram', 'email', 'instagram', 'tiktok', 'sms', 'direct'];
+async function submit(token, answers, ip, src) {
   const { o, orgId, s } = await byToken(token); const st = plans.statusOf(o);
   if (s.status !== 'open' || st === 'suspended' || st === 'read_only') throw err(410, 'This survey is closed.');
   const k = token + '|' + ip, now = Date.now(); const h = (hits.get(k) || []).filter((t) => now - t < 3600000); if (h.length >= 20) throw err(429, 'Too many answers from this device. Try again later.'); h.push(now); hits.set(k, h);
@@ -48,7 +49,7 @@ async function submit(token, answers, ip) {
     else if (q.type === 'rating') { const n = Number(v); if (!(n >= 1 && n <= 5)) throw err(422, 'Ratings go from 1 to 5.'); clean[q.id] = n; }
     else if (q.type === 'number') { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > 1e7) throw err(422, 'Enter a number.'); clean[q.id] = n; } else clean[q.id] = scrub(v); }
   if (!Object.keys(clean).length) throw err(422, 'Answer at least one question.');
-  const rid = id('rsp'); await ad.put(orgId, 'responses', rid, { id: rid, surveyId: s.id, at: iso(), answers: clean }); return { thanks: true };
+  const rid = id('rsp'); await ad.put(orgId, 'responses', rid, { id: rid, surveyId: s.id, at: iso(), answers: clean, src: SOURCES.includes(src) ? src : 'direct' }); return { thanks: true };
 }
 
 // ---- results ---------------------------------------------------------------------------------------------------------------------
@@ -63,7 +64,10 @@ async function results(orgId, surveyId) {
     return { ...base, answers: vals.slice(-20).reverse() };
   });
   const feeds = s.questions.filter((q) => q.feeds && q.type === 'choice').map((q) => { const r = qs.find((x) => x.id === q.id); const c = r && r.counts && r.counts.find((x) => x.option === q.feeds.option); return c ? { param: q.feeds.param, value: c.pct, answered: r.answered, from: q.prompt } : null; }).filter(Boolean);
-  return { survey: pub(s, rs.length), questions: qs, feeds };
+  const bySource = {}; for (const r of rs) bySource[r.src || 'direct'] = (bySource[r.src || 'direct'] || 0) + 1;
+  const out = { survey: pub(s, rs.length), questions: qs, feeds, bySource };
+  if (s.kind === 'iteration') out.iterations = require('./iterfeedback').analyse(s, rs);
+  return out;
 }
 /** Send the link to a short list of people. Numbers are not stored; only the count and the masked log entries. */
 async function invite(orgId, actor, surveyId, url, { phones, channels }, inviteUrl) {
@@ -73,4 +77,4 @@ async function invite(orgId, actor, surveyId, url, { phones, channels }, inviteU
   for (const p of list) { const r = await messaging.deliver({ phone: p, channels: channels || { sms: true }, text, orgId, orgName: o.name, who: 'survey', purpose: 'survey invite' }); if (r.length && r.every((x) => x.ok)) sent++; else failed++; }
   await audit.log(orgId, actor, 'survey.invite', { surveyId, sent, failed }); return { sent, failed };
 }
-module.exports = { create, list, setStatus, publicView, submit, results, invite, MIN_SHOWN };
+module.exports = { SOURCES, create, list, setStatus, publicView, submit, results, invite, MIN_SHOWN };

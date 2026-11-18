@@ -120,9 +120,9 @@ async function all(orgId) { return ad(orgId).list(orgId, COL); }
 const save = (orgId, s) => ad(orgId).put(orgId, COL, s.id, s);
 async function find(orgId, siteId) { const s = await ad(orgId).get(orgId, COL, siteId); if (!s) throw err(404, 'That site is not here.'); return s; }
 function extrasOf(s) { const c = s.capabilities || {}, p = (s.manifest || {}).permissions || {}; const o = []; if (c.capture) o.push(SIGNED_EXTRAS[0]); if (c.overlay) o.push(SIGNED_EXTRAS[1]); if (c.capture && p.sampleData) o.push(SIGNED_EXTRAS[2]); if (c.overlay && p.iterate) o.push(SIGNED_EXTRAS[3]); return o; }
-function view(s) {
+function view(s, me) {
   const level = s.level === 'signed' ? 'signed' : 'inferred';
-  return { id: s.id, url: s.href, origin: s.origin, name: s.name, level, status: s.level, createdAt: s.createdAt, createdBy: s.createdBy, verifiedAt: s.verifiedAt || null, capabilities: s.capabilities || { capture: false, overlay: false }, permissions: s.manifest ? s.manifest.permissions : null, extras: level === 'signed' ? extrasOf(s) : [], capture: s.capture || null, inferred: s.inferred || null, lastCheckError: s.lastCheckError || null, checks: s.checks || null, iterations: (s.iterations || []).map((x) => ({ id: x.id, title: x.title, note: x.note, by: x.by, at: x.at, patches: x.patches, shares: (s.shares || []).filter((h) => h.iid === x.id && new Date(h.exp) > new Date()).map((h) => ({ id: h.id, exp: h.exp, by: h.by })) })) };
+  return { id: s.id, url: s.href, origin: s.origin, name: s.name, level, status: s.level, createdAt: s.createdAt, createdBy: s.createdBy, verifiedAt: s.verifiedAt || null, capabilities: s.capabilities || { capture: false, overlay: false }, permissions: s.manifest ? s.manifest.permissions : null, extras: level === 'signed' ? extrasOf(s) : [], capture: s.capture || null, inferred: s.inferred || null, lastCheckError: s.lastCheckError || null, checks: s.checks || null, iterations: (s.iterations || []).map((x) => ({ id: x.id, title: x.title, note: x.note, by: x.by, byId: x.byId || null, scope: x.scope || 'member', fromBallot: x.fromBallot || null, votes: x.votes === undefined ? null : x.votes, at: x.at, patches: x.patches, shares: (s.shares || []).filter((h) => h.iid === x.id && new Date(h.exp) > new Date()).map((h) => ({ id: h.id, exp: h.exp, by: h.by })) })), ballots: (s.ballots || []).map((b) => ballotView(b, me)).reverse() };
 }
 function installFor(s, orgId, publicUrl) {
   const secret = secretFor(s, orgId); const origin = publicUrl || 'https://dryrun.hnnworld.com';
@@ -146,7 +146,7 @@ async function create(orgId, actor, role, { url, publicUrl } = {}) {
   if (!s) { if (list.length >= MAX_SITES) throw err(422, 'That is the most sites a workspace can connect. Remove one first.'); s = { id: id('st'), origin: n.origin, href: n.href, name: n.host, level: 'pending', token: 'drt_' + crypto.randomBytes(16).toString('hex'), nonce: crypto.randomBytes(8).toString('hex'), createdAt: iso(), createdBy: actor.name, iterations: [], capabilities: { capture: false, overlay: false } }; await save(orgId, s); await audit.log(orgId, actor, 'site.create', { origin: n.origin }); }
   return { site: view(s), install: installFor(s, orgId, publicUrl) };
 }
-async function details(orgId, role, siteId, publicUrl) { const s = await find(orgId, siteId); return { site: view(s), install: orgs.can(role, 'write') ? installFor(s, orgId, publicUrl) : null }; }
+async function details(orgId, role, siteId, publicUrl, me) { const s = await find(orgId, siteId); return { site: view(s, me), install: orgs.can(role, 'write') ? installFor(s, orgId, publicUrl) : null }; }
 
 async function handshake(s, orgId, manifest) {
   const path = String(manifest.capture || '/dryrun/capture'); if (!/^\/[\w\-./]{1,100}$/.test(path)) return { error: 'The capture path in your manifest is not valid.' };
@@ -196,15 +196,15 @@ async function labelFor(orgId, url) { try { const n = normalise(url); const s = 
 
 // ---- iterations and packs ------------------------------------------------------------------------------------------------------
 async function addIteration(orgId, actor, role, siteId, { title, note, patches } = {}) {
-  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot add iterations.'); const s = await find(orgId, siteId);
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'iterate')) throw err(403, 'Viewers can look at iterations but not make them.'); const s = await find(orgId, siteId);
   if (s.level !== 'signed') throw err(422, 'Iterations on a live page need the Dry Run connector. Install it and check the site first.'); if (!s.manifest.permissions.iterate) throw err(403, 'The owner has not allowed iterations in the manifest.');
   const t = clip(title, 80); if (!t) throw err(422, 'Name the iteration.'); if (!Array.isArray(patches) || !patches.length) throw err(422, 'Add at least one change.'); if (patches.length > MAX_PATCH) throw err(422, `An iteration can hold up to ${MAX_PATCH} changes.`);
   s.iterations = s.iterations || []; if (s.iterations.length >= MAX_ITER) throw err(422, 'That is the most iterations a site can hold. Remove one first.');
-  const it = { id: id('it'), title: t, note: clip(note, 300), by: actor.name, at: iso(), patches: patches.map(cleanPatch) }; s.iterations.push(it); await save(orgId, s); return { iteration: it, site: view(s) };
+  const it = { id: id('it'), title: t, note: clip(note, 300), by: actor.name, byId: actor.id, scope: 'member', at: iso(), patches: patches.map(cleanPatch) }; s.iterations.push(it); await save(orgId, s); return { iteration: it, site: view(s) };
 }
-async function removeIteration(orgId, role, siteId, iid) { if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot remove iterations.'); const s = await find(orgId, siteId); s.iterations = (s.iterations || []).filter((x) => x.id !== iid); await save(orgId, s); return view(s); }
+async function removeIteration(orgId, actor, role, siteId, iid) { if (!orgs.can(role, 'iterate')) throw err(403, 'Your role cannot remove iterations.'); const s = await find(orgId, siteId); const cur = (s.iterations || []).find((x) => x.id === iid); if (cur && !orgs.can(role, 'write') && cur.byId !== actor.id) throw err(403, 'You can remove your own iterations. An admin or builder can remove anyone\'s.'); if ((s.ballots || []).some((b) => b.status === 'open' && b.candidates.includes(iid))) throw err(422, 'This iteration is in a vote that is still open. Close the vote first.'); s.iterations = (s.iterations || []).filter((x) => x.id !== iid); await save(orgId, s); return view(s); }
 async function pack(orgId, actor, role, siteId, iid, publicUrl) {
-  if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot export packs.'); const s = await find(orgId, siteId); const it = (s.iterations || []).find((x) => x.id === iid); if (!it) throw err(404, 'That iteration is not here.');
+  if (!orgs.can(role, 'iterate')) throw err(403, 'Your role cannot export packs.'); const s = await find(orgId, siteId); const it = (s.iterations || []).find((x) => x.id === iid); if (!it) throw err(404, 'That iteration is not here.');
   const settings = {}; for (const p of it.patches) if (p.type === 'setting') settings[p.key] = p.value;
   const body = { dryrunPack: 1, site: s.origin, iteration: { id: it.id, title: it.title, note: it.note }, createdAt: iso(), createdBy: it.by, patches: it.patches.filter((p) => p.type !== 'setting'), settings,
     howToInstall: ['Read every change below. Nothing is applied until you install it.', 'Save this file as dryrun-pack.json next to your connector and set applyPack: true (or DRYRUN_APPLY_PACK=1). The page script then applies the text, style, hide and attribute changes on your live pages.', 'Settings are read in your own code with dryrun.setting("key").', 'To remove it, delete the file or turn applyPack off.'] };
@@ -212,16 +212,42 @@ async function pack(orgId, actor, role, siteId, iid, publicUrl) {
   await audit.log(orgId, actor, 'site.pack', { origin: s.origin, iteration: it.id }); return body;
 }
 
+
+// ---- team votes: member iterations become a Team iteration -------------------------------------------------------------------------
+const MAX_BALLOTS = 20;
+function ballotView(b, me) { const tally = {}; for (const iid of b.candidates) tally[iid] = 0; for (const v of Object.values(b.votes)) if (tally[v] !== undefined) tally[v]++; const total = Object.keys(b.votes).length; const mine = b.votes[me] || null;
+  return { id: b.id, title: b.title, status: b.status, candidates: b.candidates, by: b.by, byId: b.byId, at: b.at, closedAt: b.closedAt || null, voters: total, mine, resultIid: b.resultIid || null, tally: b.status === 'closed' || mine ? tally : null, winner: b.winner || null }; }
+async function createBallot(orgId, actor, role, siteId, { title, iids } = {}) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'iterate')) throw err(403, 'Viewers cannot start a vote.'); const s = await find(orgId, siteId); const its = s.iterations || [];
+  const ids = [...new Set((iids || []).map(String))]; if (ids.length < 2) throw err(422, 'Choose at least two iterations to vote between.'); if (ids.length > 8) throw err(422, 'A vote can have up to 8 iterations.'); for (const i of ids) { const it = its.find((x) => x.id === i); if (!it) throw err(404, 'One of those iterations is no longer here.'); if (it.scope === 'team') throw err(422, 'Team iterations are the result of a vote. Choose members\' iterations.'); }
+  s.ballots = s.ballots || []; if (s.ballots.length >= MAX_BALLOTS) throw err(422, 'That site has the most votes it can hold. Close or remove one first.'); const b = { id: id('bal'), title: clip(title, 80) || 'Which iteration should become the Team\'s?', candidates: ids, votes: {}, status: 'open', by: actor.name, byId: actor.id, at: iso() };
+  s.ballots.push(b); await save(orgId, s); await audit.log(orgId, actor, 'site.ballot', { origin: s.origin, ballot: b.id }); return { ballot: ballotView(b, actor.id), site: view(s) };
+}
+async function vote(orgId, actor, role, siteId, bid, iid) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'iterate')) throw err(403, 'Viewers can watch a vote but not cast one.'); const s = await find(orgId, siteId); const b = (s.ballots || []).find((x) => x.id === bid); if (!b) throw err(404, 'That vote is not here.');
+  if (b.status !== 'open') throw err(422, 'This vote is closed.'); if (!b.candidates.includes(String(iid))) throw err(422, 'Choose one of the iterations in this vote.'); b.votes[actor.id] = String(iid); await save(orgId, s); return { ballot: ballotView(b, actor.id) };
+}
+/** The person who started the vote, or an admin, can close it. The most votes wins; a tie goes to the iteration made first. The winner is copied as a Team iteration. */
+async function closeBallot(orgId, actor, role, siteId, bid) {
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'iterate')) throw err(403, 'Your role cannot close a vote.'); const s = await find(orgId, siteId); const b = (s.ballots || []).find((x) => x.id === bid); if (!b) throw err(404, 'That vote is not here.');
+  if (b.status !== 'open') throw err(422, 'This vote is already closed.'); if (b.byId !== actor.id && !orgs.can(role, 'team')) throw err(403, 'Only the person who started the vote, or an admin, can close it.'); const total = Object.keys(b.votes).length; if (!total) throw err(422, 'Nobody has voted yet.');
+  const tally = {}; for (const i of b.candidates) tally[i] = 0; for (const v of Object.values(b.votes)) if (tally[v] !== undefined) tally[v]++; const order = b.candidates.map((i) => (s.iterations || []).find((x) => x.id === i)).filter(Boolean); if (!order.length) throw err(422, 'The iterations in this vote have been removed.');
+  order.sort((x, y) => tally[y.id] - tally[x.id] || x.at.localeCompare(y.at)); const win = order[0]; if ((s.iterations || []).length >= MAX_ITER) throw err(422, 'That site is full of iterations. Remove one, then close the vote.');
+  const team = { id: id('it'), title: `Team: ${win.title}`.slice(0, 80), note: clip(`Chosen by vote: ${tally[win.id]} of ${total} vote${total === 1 ? '' : 's'}. Made by ${win.by}. ${win.note || ''}`, 300), by: 'Team vote', byId: null, scope: 'team', fromIid: win.id, fromBallot: b.id, votes: tally[win.id], at: iso(), patches: JSON.parse(JSON.stringify(win.patches)) };
+  s.iterations.push(team); b.status = 'closed'; b.closedAt = iso(); b.resultIid = team.id; b.winner = { iid: win.id, title: win.title, by: win.by, votes: tally[win.id], of: total }; await save(orgId, s); await audit.log(orgId, actor, 'site.ballot.close', { origin: s.origin, ballot: b.id, winner: win.id });
+  return { ballot: ballotView(b, actor.id), iteration: team, site: view(s) };
+}
+
 // ---- Dry Run Iteration (DRI): the owner's own site, opened with an iteration applied and a watermark ------------------------------
 const hashTok = (t) => crypto.createHash('sha256').update(t).digest('hex');
 async function shareIteration(orgId, actor, role, siteId, iid, { days } = {}) {
-  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot share iterations.'); const s = await find(orgId, siteId);
+  const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'iterate')) throw err(403, 'Your role cannot share iterations.'); const s = await find(orgId, siteId);
   if (s.level !== 'signed' || !s.manifest.permissions.iterate) throw err(422, 'Opening an iteration live needs a Dry Run signed site that allows iterations.'); const it = (s.iterations || []).find((x) => x.id === iid); if (!it) throw err(404, 'That iteration is not here.');
   const d = Math.min(30, Math.max(1, Math.round(Number(days) || 7))); s.shares = (s.shares || []).filter((x) => new Date(x.exp) > new Date()); if (s.shares.length >= 20) throw err(422, 'That site has the most open links it can hold. Revoke one first.');
   const token = `dri.${orgId}.${s.id}.${crypto.randomBytes(18).toString('hex')}`; const exp = new Date(Date.now() + d * 86400000).toISOString(); const sh = { id: id('shr'), iid, h: hashTok(token), exp, by: actor.name, at: iso() }; s.shares.push(sh); await save(orgId, s); await audit.log(orgId, actor, 'site.share', { origin: s.origin, iteration: iid, days: d });
   return { link: `${s.origin}/?dri=${token}`, token, expiresAt: exp, site: view(s) };
 }
-async function revokeShares(orgId, role, siteId, iid) { if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot revoke links.'); const s = await find(orgId, siteId); s.shares = (s.shares || []).filter((x) => x.iid !== iid); await save(orgId, s); return view(s); }
+async function revokeShares(orgId, role, siteId, iid) { if (!orgs.can(role, 'iterate')) throw err(403, 'Your role cannot revoke links.'); const s = await find(orgId, siteId); s.shares = (s.shares || []).filter((x) => x.iid !== iid); await save(orgId, s); return view(s); }
 /** What the page script on the owner's site fetches. Only the site the token was made for may read it. */
 async function publicIteration(token, origin) {
   const dead = () => err(404, 'This link is not active.'); const parts = String(token || '').split('.'); if (parts.length !== 4 || parts[0] !== 'dri') throw dead();
@@ -231,4 +257,4 @@ async function publicIteration(token, origin) {
   return { dryrunIteration: 1, label: 'Dry Run Iteration (DRI)', title: it.title, by: it.by, expiresAt: sh.exp, patches: it.patches.filter((p) => p.type !== 'setting'), settings, origin: s.origin };
 }
 
-module.exports = { shareIteration, revokeShares, publicIteration, create, details, verify, capture, read, revoke, list, labelFor, addIteration, removeIteration, pack, readSite, readPage, inferFeatures, robotsAllows, cleanPatch, sign, secretFor, normalise, SIGNED_EXTRAS };
+module.exports = { createBallot, vote, closeBallot, ballotView, find, shareIteration, revokeShares, publicIteration, create, details, verify, capture, read, revoke, list, labelFor, addIteration, removeIteration, pack, readSite, readPage, inferFeatures, robotsAllows, cleanPatch, sign, secretFor, normalise, SIGNED_EXTRAS };

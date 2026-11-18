@@ -76,6 +76,7 @@ async function plan(orgId, assetId) {
     regulatory: { title: 'Regulator rules', note: 'Each variation is compared with your current product and classed as needing nothing, a notice, or approval.', items },
     bestPractice: { title: 'Best practice', note: bp.NOTE, items: bp.PLAN },
     market: { title: 'Market factors', note: 'Your sheet overrides the built-in typical assumptions. All are assumptions, and each is shown in the results.', items: Object.keys(a).length ? Object.entries(a).slice(0, 12).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`) : ['No sheet uploaded. Only the built-in typical assumptions for this product type are used.'] },
+    customers: await (async () => { const ins = await require('./iterfeedback').listInsights(orgId); return { title: 'Customer feedback', note: 'Results from surveys you added to the design. Answers that match a bench assumption replace it, and every one is listed in the results.', items: ins.length ? ins.slice(0, 6).flatMap((x) => [`${x.title} (${x.responses} answers)`, ...x.lines.slice(0, 2).map((l) => '  ' + l)]) : ['No survey results have been added yet. Open a survey in Surveys and press "Use in design".'] }; })(),
     web: { title: 'Web lookup', available: !!webKey(), note: webKey() ? 'The Coach searches the web once, and you see every source it used.' : 'Web lookup is not connected. The platform owner can switch it on by setting TAVILY_API_KEY.', items: [`Search for current market and regulator information on "${asset.name.replace(/ · .*$/, '')}" type cover${country ? ' in ' + country : ''}`] } };
 }
 async function webLookup(asset, data) {
@@ -156,7 +157,8 @@ function expandVariants({ variants, sweep }) {
 }
 async function run(orgId, actor, role, assetId, body = {}) {
   const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot run the test bench.');
-  const { asset, version } = await needProduct(orgId, assetId); const rec = await store(orgId, assetId); const a = assumptionMap(rec); const consent = { regulatory: !!(body.consent || {}).regulatory, bestPractice: !!(body.consent || {}).bestPractice, market: !!(body.consent || {}).market, web: !!(body.consent || {}).web };
+  const { asset, version } = await needProduct(orgId, assetId); const rec = await store(orgId, assetId); const a = assumptionMap(rec); const consent = { regulatory: !!(body.consent || {}).regulatory, bestPractice: !!(body.consent || {}).bestPractice, market: !!(body.consent || {}).market, web: !!(body.consent || {}).web, customers: !!(body.consent || {}).customers };
+  const ins = consent.customers ? await require('./iterfeedback').listInsights(orgId) : []; const applied = []; for (const x of [...ins].reverse()) for (const f of x.feeds || []) if (Number.isFinite(Number(f.value))) { a[f.param] = Number(f.value); applied.push({ param: f.param, value: Number(f.value), from: x.title }); }
   const vs = expandVariants(body); if (body.live && body.live.url) plans.assertNotDemo(o, 'Live tests');
   const members = Math.min(Math.max(Math.round(Number(body.members || (consent.market && a.expected_members_year1) || 2000)), 100), 20000);
   const params = { members }; if (consent.market) for (const [k, p] of Object.entries(PARAM_KEYS)) if (a[k] !== undefined && Number.isFinite(Number(a[k]))) params[p] = Number(a[k]);
@@ -171,6 +173,7 @@ async function run(orgId, actor, role, assetId, body = {}) {
   const eligible = out.filter((r) => r.failed === 0).sort((x, y) => y.metrics.margin - x.metrics.margin); const winner = eligible.length ? eligible[0] : null;
   const rec2 = { id: id('bch'), assetId, at: iso(), by: actor.name, byId: actor.id, consent, members, variants: out, winnerId: winner ? winner.assetId : null, ruleCount: rec.rules.length, assumptionsFromSheet: Object.keys(a).length };
   if (consent.market) rec2.market = { fromSheet: Object.entries(a).map(([key, value]) => ({ key, value })), builtIn: out[0].assumptionsUsed };
+  if (consent.customers) rec2.customers = { insights: ins.map((x) => ({ title: x.title, responses: x.responses, at: x.at, lines: x.lines })), applied };
   if (consent.web) rec2.web = await webLookup(asset, version.data);
   if (body.live && body.live.url) rec2.live = await liveTest(String(body.live.url).trim(), version.data, body.live.tolerancePct);
   await ad(orgId).put(orgId, 'wr_bench', rec2.id, rec2); await audit.log(orgId, actor, 'bench.run', { assetId, variants: vs.length });

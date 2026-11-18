@@ -152,3 +152,12 @@ Workroom, **Connected sites** (and the label on any web link posted in a room).
 - Robots are bridge-only. Running code is never exposed to the public internet.
 
 **Robot programs.** An arm (servos) or a two-wheel rover. Steps: move joints, reach a point (inverse kinematics, refused if out of reach or past a joint limit), gripper, wait, repeat. Played in a simulation first. Code is generated for Arduino and ESP32 (C++), Raspberry Pi Pico (MicroPython), Raspberry Pi (Python) and ROS 2 (a package, downloaded as a zip). Generated code clamps every angle to your limits, ramps moves, and halts on an optional stop button. The simulation uses your link lengths only: no weight, torque or collisions other than the table. Rover distances are timed, not measured.
+
+## Iterations, team votes and customer surveys
+
+- **Who can iterate.** Everyone on a team except viewers can make an iteration on a connected Dry Run signed site and view it live. Viewers can look but not create, vote or start surveys.
+- **Team votes.** Anyone who can iterate can start a vote between two or more member iterations. One vote each, changeable until closed. The creator or an admin closes it. The winner is copied as a Team iteration; a tie goes to the iteration made first.
+- **Surveys about iterations.** Under Workroom → Surveys, pick 2 to 6 iterations (Team, individual, or a mix). Respondents see blind Option A, B, C labels, open each live with a DRI label, rate them and say which they prefer. Each channel has its own link so results show where answers came from. Results show at 5 or more answers.
+- **General surveys** can also be created from the Workroom, using the same templates and custom questions as the main Surveys tab.
+- **Design considerations.** "Use in design considerations" saves the results as an insight, posts a Coach note in General, and adds a "Customer feedback" option in the test bench next to regulatory, best practice, market and web.
+- The live DRI link opens the owner's real site, so respondents' actions there are real.

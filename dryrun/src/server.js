@@ -87,7 +87,7 @@ app.post('/api/public/demo', wrap(async (req, res) => res.status(201).json(await
 
 // ---- public: survey pages (no sign-in) ------------------------------------------------------------------------------------------
 app.get('/api/public/survey/:token', wrap(async (req, res) => res.json(await surveys.publicView(req.params.token))));
-app.post('/api/public/survey/:token', wrap(async (req, res) => res.status(201).json(await surveys.submit(req.params.token, (req.body || {}).answers, req.get('x-forwarded-for') || req.headers.host || 'x'))));
+app.post('/api/public/survey/:token', wrap(async (req, res) => res.status(201).json(await surveys.submit(req.params.token, (req.body || {}).answers, req.get('x-forwarded-for') || req.headers.host || 'x', (req.body || {}).src))));
 
 // ---- platform owner ------------------------------------------------------------------------------------------------------------
 const platformOnly = (req, res, next) => { const a = orgs.authenticate(req); if (!a.platform) throw err(403, 'Platform owner only.'); next(); };
@@ -386,13 +386,25 @@ O.get('/workroom/sites', need('read'), wrap(async (req, res) => res.json({ sites
 O.post('/workroom/sites', need('read'), wrap(async (req, res) => res.status(201).json(await connect.create(oid(req), req.actor, req.role, { url: (req.body || {}).url, publicUrl: pubOf(req) }))));
 O.post('/workroom/sites/read', need('read'), wrap(async (req, res) => res.json(await connect.read(oid(req), req.actor, req.role, { url: (req.body || {}).url }))));
 O.get('/workroom/sites/label', need('read'), wrap(async (req, res) => res.json(await connect.labelFor(oid(req), String(req.query.url || '')))));
-O.get('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json(await connect.details(oid(req), req.role, req.params.sid, pubOf(req)))));
+O.get('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json(await connect.details(oid(req), req.role, req.params.sid, pubOf(req), req.actor.id))));
 O.post('/workroom/sites/:sid/verify', need('read'), wrap(async (req, res) => res.json(await connect.verify(oid(req), req.actor, req.role, req.params.sid))));
 O.post('/workroom/sites/:sid/capture', need('read'), wrap(async (req, res) => res.json({ site: await connect.capture(oid(req), req.actor, req.role, req.params.sid) })));
 O.delete('/workroom/sites/:sid', need('read'), wrap(async (req, res) => res.json(await connect.revoke(oid(req), req.actor, req.role, req.params.sid))));
 O.post('/workroom/sites/:sid/iterations', need('read'), wrap(async (req, res) => res.status(201).json(await connect.addIteration(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
-O.delete('/workroom/sites/:sid/iterations/:iid', need('read'), wrap(async (req, res) => res.json({ site: await connect.removeIteration(oid(req), req.role, req.params.sid, req.params.iid) })));
+O.delete('/workroom/sites/:sid/iterations/:iid', need('read'), wrap(async (req, res) => res.json({ site: await connect.removeIteration(oid(req), req.actor, req.role, req.params.sid, req.params.iid) })));
 O.get('/workroom/sites/:sid/iterations/:iid/pack', need('read'), wrap(async (req, res) => { const p = await connect.pack(oid(req), req.actor, req.role, req.params.sid, req.params.iid, pubOf(req)); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', 'attachment; filename="dryrun-pack.json"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.end(JSON.stringify(p, null, 2)); }));
+const feedback = require('./iterfeedback');
+const iterOnly = (req) => { if (!orgs.can(req.role, 'iterate')) throw err(403, 'Viewers can read but not start surveys or votes.'); };
+O.post('/workroom/sites/:sid/ballots', need('read'), wrap(async (req, res) => res.status(201).json(await connect.createBallot(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
+O.post('/workroom/sites/:sid/ballots/:bid/vote', need('read'), wrap(async (req, res) => res.json(await connect.vote(oid(req), req.actor, req.role, req.params.sid, req.params.bid, (req.body || {}).iid))));
+O.post('/workroom/sites/:sid/ballots/:bid/close', need('read'), wrap(async (req, res) => res.json(await connect.closeBallot(oid(req), req.actor, req.role, req.params.sid, req.params.bid))));
+O.post('/workroom/surveys', need('read'), wrap(async (req, res) => { iterOnly(req); plans.assertNotDemo(req.org, 'Sending surveys'); res.status(201).json(await surveys.create(oid(req), req.actor, req.body)); }));
+O.post('/workroom/surveys/:id/status', need('read'), wrap(async (req, res) => { iterOnly(req); res.json(await surveys.setStatus(oid(req), req.actor, req.params.id, (req.body || {}).status)); }));
+O.post('/workroom/iteration-surveys', need('read'), wrap(async (req, res) => res.status(201).json(await feedback.create(oid(req), req.actor, req.role, req.body || {}))));
+O.get('/workroom/surveys/:id/kit', need('read'), wrap(async (req, res) => res.json(await feedback.kit(oid(req), req.params.id, pubOf(req)))));
+O.post('/workroom/surveys/:id/insight', need('read'), wrap(async (req, res) => res.status(201).json(await feedback.addInsight(oid(req), req.actor, req.role, req.params.id))));
+O.get('/workroom/insights', need('read'), wrap(async (req, res) => res.json(await feedback.listInsights(oid(req)))));
+O.delete('/workroom/insights/:id', need('read'), wrap(async (req, res) => res.json(await feedback.removeInsight(oid(req), req.role, req.params.id))));
 O.post('/workroom/sites/:sid/iterations/:iid/share', need('read'), wrap(async (req, res) => res.status(201).json(await connect.shareIteration(oid(req), req.actor, req.role, req.params.sid, req.params.iid, req.body || {}))));
 O.delete('/workroom/sites/:sid/iterations/:iid/share', need('read'), wrap(async (req, res) => res.json({ site: await connect.revokeShares(oid(req), req.role, req.params.sid, req.params.iid) })));
 app.get('/api/public/dri/:token', wrap(async (req, res) => {
