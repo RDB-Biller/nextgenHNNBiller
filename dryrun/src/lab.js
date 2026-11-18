@@ -105,7 +105,7 @@ async function regenerate(orgId, actor, role, assetId, params, note) {
   await audit.log(orgId, actor, 'lab.regenerate', { assetId }); return r;
 }
 /** Copy a product into a new one with a few changes, so several can be run side by side. */
-async function variation(orgId, actor, role, assetId, { name, changes = {} } = {}) {
+async function variation(orgId, actor, role, assetId, { name, changes = {}, extraTags = [] } = {}) {
   const o = orgs.raw(orgId); plans.assertWritable(o); if (!orgs.can(role, 'write')) throw err(403, 'Your role cannot create variations.');
   const { asset, version } = await assets.versionData(orgId, assetId); if (asset.kind !== 'product') throw err(422, 'Variations are for products.');
   const d = JSON.parse(JSON.stringify(version.data)); const c = changes; const bits = [];
@@ -115,7 +115,7 @@ async function variation(orgId, actor, role, assetId, { name, changes = {} } = {
   setN('coPayPct', c.coPayPct, 'co-pay'); if (c.waitingFactor !== undefined) { d.waitingDays = Math.round(d.waitingDays * Number(c.waitingFactor)); bits.push(`waiting ${d.waitingDays} days`); } else setN('waitingDays', c.waitingDays, 'waiting');
   if (!bits.length) throw err(422, 'Change at least one thing.'); if (d.premium <= 0 || d.benefitCap <= 0 || d.coPayPct < 0 || d.coPayPct > 100 || d.waitingDays < 0) throw err(422, 'Those changes give values that do not make sense.');
   const root = (asset.card.lab && asset.card.lab.root) || asset.id; const vname = String(name || `${asset.name.replace(/ · .*$/, '')} · ${bits.join(', ')}`).slice(0, 140); d.name = vname; if (d.generatedFrom) d.generatedFrom = { ...d.generatedFrom, name: vname, monthlyPremium: d.premium, annualCap: d.benefitCap, coPayPct: d.coPayPct, waitingDays: d.waitingDays };
-  const na = await assets.create(orgId, actor, { kind: 'product', name: vname, description: `Variation of "${asset.name}": ${bits.join(', ')}.`, tags: ['product-lab', 'variation'], data: d, note: `Variation of ${asset.name} v${version.v}` });
+  const na = await assets.create(orgId, actor, { kind: 'product', name: vname, description: `Variation of "${asset.name}": ${bits.join(', ')}.`, tags: ['product-lab', 'variation', ...extraTags], data: d, note: `Variation of ${asset.name} v${version.v}` });
   const rec = await adapter(orgId).get(orgId, 'assets', na.id); rec.card.lab = { archetype: d.archetype || null, root, derivedFrom: asset.id, changes: bits }; await adapter(orgId).put(orgId, 'assets', na.id, rec);
   const cls = regulatory.classify(version.data, d, o.regulatoryRules); await audit.log(orgId, actor, 'lab.variation', { from: assetId, to: na.id });
   return { asset: await assets.detail(orgId, na.id, {}), changes: bits, regulatory: { overall: cls.overall, summary: cls.summary } };

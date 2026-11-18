@@ -19,6 +19,7 @@ const lab = require('./lab');
 const labcoach = require('./labcoach');
 const demo = require('./demo');
 const wr = require('./workroom');
+const bench = require('./bench');
 const { err, wrap } = require('./util');
 
 const app = express();
@@ -363,6 +364,15 @@ O.post('/workroom/tasks/:tid', need('read'), wrap(async (req, res) => {
   res.json(r.task);
 }));
 O.post('/workroom/guest-rooms', need('settings'), wrap(async (req, res) => res.status(201).json(await wr.createGuestRoom(oid(req), req.actor, req.role, req.body || {}))));
+// ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
+O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
+O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));
+O.delete('/workroom/bench/:aid/rules/:rid', need('read'), wrap(async (req, res) => res.json(await bench.removeRule(oid(req), req.role, req.params.aid, req.params.rid))));
+O.post('/workroom/bench/:aid/sheets', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addSheet(oid(req), req.actor, req.role, req.params.aid, req.body))));
+O.delete('/workroom/bench/:aid/sheets/:sid', need('read'), wrap(async (req, res) => res.json(await bench.removeSheet(oid(req), req.role, req.params.aid, req.params.sid))));
+O.get('/workroom/bench/:aid/plan', need('read'), wrap(async (req, res) => res.json(await bench.plan(oid(req), req.params.aid))));
+O.get('/workroom/bench/:aid/history', need('read'), wrap(async (req, res) => res.json(await bench.history(oid(req), req.params.aid))));
+O.post('/workroom/bench/:aid/run', need('read'), wrap(async (req, res) => res.status(201).json(await bench.run(oid(req), req.actor, req.role, req.params.aid, req.body || {}))));
 // The one door to HNN Biller. Read-only.
 O.get('/hnn/price-books', need('read'), wrap(async (req, res) => res.json(await hnn.listPriceBooks())));
 O.post('/hnn/import', need('write'), wrap(async (req, res) => {

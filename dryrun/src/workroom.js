@@ -27,7 +27,7 @@ async function ensureRooms(orgId) {
   const rooms = await ad(orgId).list(orgId, 'wr_rooms'); const byId = new Map(rooms.map((r) => [r.id, r]));
   if (!byId.has(GENERAL)) { const r = { id: GENERAL, kind: 'general', name: 'General', createdAt: iso() }; await ad(orgId).put(orgId, 'wr_rooms', r.id, r); byId.set(r.id, r); }
   for (const a of await assets.list(orgId)) {
-    if (DATA_KINDS.includes(a.kind)) continue; const rid = 'rm_' + a.id; const cur = byId.get(rid);
+    if (DATA_KINDS.includes(a.kind) || (a.card && a.card.tags || []).includes('bench')) continue; const rid = 'rm_' + a.id; const cur = byId.get(rid);
     if (!cur) { const r = { id: rid, kind: 'asset', name: a.name, assetId: a.id, assetKind: a.kind, createdAt: iso() }; await ad(orgId).put(orgId, 'wr_rooms', rid, r); byId.set(rid, r); }
     else if (cur.name !== a.name) { cur.name = a.name; await ad(orgId).put(orgId, 'wr_rooms', rid, cur); }
   }
@@ -185,6 +185,7 @@ async function coachReply(orgId, actor, role, roomId, { text, pack } = {}) {
   const msg = await put(orgId, base(roomId, { id: 'coach', name: 'Coach' }, 'coach', { text: reply, ...extra }));
   return msg;
 }
+async function coachNote(orgId, roomId, text, extra) { const room = await getRoom(orgId, roomId); return put(orgId, base(room.id, { id: 'coach', name: 'Coach' }, 'coach', { text: clip(text, 1800), ...(extra || {}) })); }
 async function postRun(orgId, run, assetId) { // a run finished for an asset: say so in its room
   if (!assetId) return null; try { const room = await getRoom(orgId, 'rm_' + assetId); const h = Object.entries(run.headline || {}).slice(0, 4).map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${fmtN(v)}`).join(' · ');
     return await put(orgId, base(room.id, { id: 'coach', name: 'Coach' }, 'coach', { text: `Run finished: ${run.name}. ${h}`, anchor: { assetId, runId: run.id } })); } catch { return null; } }
@@ -199,4 +200,4 @@ async function createGuestRoom(orgId, actor, role, { name, engagementIds } = {})
 }
 async function guestRooms(orgId, eid) { return (await ensureRooms(orgId)).filter((r) => r.kind === 'guest' && (r.engagementIds || []).includes(eid)).map((r) => ({ id: r.id, name: r.name })); }
 
-module.exports = { GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, parseWhatIf, postRun, createGuestRoom, guestRooms, markRead, getRoom };
+module.exports = { GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, createGuestRoom, guestRooms, markRead, getRoom };
