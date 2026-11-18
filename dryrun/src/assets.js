@@ -10,7 +10,7 @@ const audit = require('./audit');
 const regulatory = require('./regulatory');
 const { err, iso, id, sha, parseCsv } = require('./util');
 
-const KINDS = ['product', 'price_book', 'rule_set', 'campaign', 'vas', 'payment_plan', 'customer_dataset', 'claims_dataset', 'finance_offer', 'outcomes_programme', 'hardware_design'];
+const KINDS = ['product', 'price_book', 'rule_set', 'campaign', 'vas', 'payment_plan', 'customer_dataset', 'claims_dataset', 'finance_offer', 'outcomes_programme', 'hardware_design', 'robot_program'];
 const GATES = ['draft', 'dry_run', 'shadow', 'approved'];
 const DATASET = new Set(['customer_dataset', 'claims_dataset']);
 const adapter = (orgId) => audit.adapter(orgId);
@@ -26,10 +26,11 @@ function validate(kind, data) {
   if (kind === 'finance_offer' && !(data.premiumOverdraft || data.coverCash)) throw err(422, 'A finance offer needs a premiumOverdraft or a coverCash section.');
   if (kind === 'hardware_design') {
     const cad = require('./cad'); if (!Array.isArray(data.parts) || !data.parts.length) throw err(422, 'A hardware design needs at least one part.'); if (data.parts.length > 60) throw err(422, 'A design can hold up to 60 parts.');
-    const ids = new Set(); for (const p of data.parts) { if (!p || !p.id || ids.has(p.id)) throw err(422, 'Every part needs its own id.'); ids.add(p.id); if (!String(p.name || '').trim()) throw err(422, 'Every part needs a name.'); cad.cleanParams(p.type, p.params || {}); const q = Number(p.qty === undefined ? 1 : p.qty); if (!Number.isFinite(q) || q < 1 || q > 1000) throw err(422, `${p.name}: quantity must be from 1 to 1000.`); }
+    const ids = new Set(); for (const p of data.parts) { if (!p || !p.id || ids.has(p.id)) throw err(422, 'Every part needs its own id.'); ids.add(p.id); if (!String(p.name || '').trim()) throw err(422, 'Every part needs a name.'); if (p.type === 'imported') { if (!/^hwf_[a-f0-9]+$/.test(String(p.fileId || ''))) throw err(422, `${p.name}: choose an imported file.`); const k = Number(p.scale === undefined ? 1 : p.scale); if (!(k >= 0.001 && k <= 1000)) throw err(422, `${p.name}: scale must be from 0.001 to 1000.`); } else cad.cleanParams(p.type, p.params || {}); const q = Number(p.qty === undefined ? 1 : p.qty); if (!Number.isFinite(q) || q < 1 || q > 1000) throw err(422, `${p.name}: quantity must be from 1 to 1000.`); }
     if (data.bom !== undefined && (!Array.isArray(data.bom) || data.bom.length > 100 || data.bom.some((b) => !b || !String(b.item || '').trim() || !(Number(b.qty) >= 0) || !(Number(b.unitCost) >= 0)))) throw err(422, 'Each bought part needs a name, a quantity and a cost.');
     if (data.printSettings) cad.cleanSettings(data.printSettings);
   }
+  if (kind === 'robot_program') { require('./robot').compile(data.robot, data.steps); }
   if (kind === 'payment_plan' && !Array.isArray(data.tiers)) throw err(422, 'A payment plan needs a tiers list.');
 }
 const rowsOf = (kind, d) => (kind === 'claims_dataset' ? d.claims.length : kind === 'customer_dataset' ? d.customers.length : kind === 'price_book' ? d.items.length : 0);

@@ -154,6 +154,9 @@ P.get('/live', wrap(async (req, res) => res.json(await live.all())));
 P.patch('/live/:orgId/:id', wrap(async (req, res) => res.json(await live.setTerms(req.params.orgId, req.params.id, req.body))));
 app.use('/api/platform', P);
 
+// ---- Dry Run Bridge: a program on the owner's network that connects out to here ----------------------------------------------------
+app.post('/api/bridge/poll', wrap(async (req, res) => { const a = await require('./fab').bridgeAuth(req.get('authorization')); res.setHeader('Cache-Control', 'no-store'); res.json(await require('./fab').poll(a, req.body)); }));
+app.get('/api/bridge/file/:id', wrap(async (req, res) => { const a = await require('./fab').bridgeAuth(req.get('authorization')); const buf = await require('./fab').bridgeFile(a, req.params.id); res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.end(buf); }));
 // ---- an organisation's own workspace -------------------------------------------------------------------------------------------
 const O = express.Router();
 O.use((req, res, next) => {
@@ -402,28 +405,56 @@ const studioOnly = (req, res, next) => { if (req.org.pack !== 'hardware') throw 
 const partList = (b) => { const ps = (b || {}).parts; if (!Array.isArray(ps) || !ps.length) throw err(422, 'Add at least one part.'); if (ps.length > 60) throw err(422, 'Up to 60 parts at a time.'); return ps; };
 const meshJson = (m) => ({ v: m.v.map((x) => Math.round(x * 100) / 100), f: m.f });
 O.get('/studio/catalog', need('read'), studioOnly, wrap(async (req, res) => res.json({ parts: cad.types(), materials: Object.entries(cad.MATERIALS).map(([key, m]) => ({ key, label: m.label, density: m.density, costPerKg: m.costPerKg })), printers: Object.entries(cad.PRINTERS).map(([key, p]) => ({ key, label: p.label, bed: p.bed })), defaults: cad.DEFAULT_SETTINGS, starter: hardware.DEFAULT_DESIGN() })));
+const fab = require('./fab'); const robot = require('./robot'); const meshio = require('./meshio');
+const sum = (arr, f) => arr.reduce((t, p, i) => t + (p.ok ? f(p) * Math.max(1, Number(arr.src[i].qty) || 1) : 0), 0);
 O.post('/studio/mesh', need('read'), studioOnly, wrap(async (req, res) => {
-  const out = partList(req.body).map((p) => { try { const part = cad.buildPart(p.type, p.params); return { id: p.id, ok: true, mesh: meshJson(part.mesh), stats: cad.stats(part.mesh), note: part.note, minFeature: Math.round(part.minFeature * 100) / 100 }; } catch (e) { return { id: p.id, ok: false, error: e.message }; } });
+  const out = await Promise.all(partList(req.body).map(async (p) => { try { const part = await fab.build(oid(req), p); return { id: p.id, ok: true, mesh: meshJson(meshio.decimate(part.mesh)), full: part.mesh.f.length / 3, stats: cad.stats(part.mesh), note: part.note, minFeature: Math.round(part.minFeature * 100) / 100 }; } catch (e) { return { id: p.id, ok: false, error: e.message }; } }));
   res.json({ parts: out });
 }));
 O.post('/studio/check', need('read'), studioOnly, wrap(async (req, res) => {
-  const st = cad.cleanSettings((req.body || {}).settings || {}); const out = partList(req.body).map((p) => { try { const part = cad.buildPart(p.type, p.params); return { id: p.id, ok: true, ...cad.printCheck(part, st) }; } catch (e) { return { id: p.id, ok: false, error: e.message, warnings: [e.message] }; } });
-  res.json({ settings: st, parts: out, totals: { grams: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.grams * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 10) / 10, hours: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.hours * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 100) / 100, cost: Math.round(out.reduce((s, p, i) => s + (p.ok ? p.estimate.materialCost * Math.max(1, Number(req.body.parts[i].qty) || 1) : 0), 0) * 100) / 100 } });
+  const st = cad.cleanSettings((req.body || {}).settings || {}); const src = partList(req.body); const out = await Promise.all(src.map(async (p) => { try { const part = await fab.build(oid(req), p); return { id: p.id, ok: true, ...cad.printCheck(part, st) }; } catch (e) { return { id: p.id, ok: false, error: e.message, warnings: [e.message] }; } })); out.src = src;
+  res.json({ settings: st, parts: out, totals: { grams: Math.round(sum(out, (p) => p.estimate.grams) * 10) / 10, hours: Math.round(sum(out, (p) => p.estimate.hours) * 100) / 100, cost: Math.round(sum(out, (p) => p.estimate.materialCost) * 100) / 100 } });
 }));
 O.post('/studio/export', need('read'), studioOnly, wrap(async (req, res) => {
   const b = req.body || {}; const st = cad.cleanSettings(b.settings || {}); const fmt = b.format === 'obj' ? 'obj' : 'stl'; const ps = partList(b); const orient = (m) => (b.orient === 'design' ? m : cad.bestOrientation(m).mesh);
   let name = 'design', file;
-  if (b.scope === 'part') { const p = ps.find((x) => x.id === b.partId); if (!p) throw err(404, 'That part is not in the design.'); const part = cad.buildPart(p.type, p.params); const m = orient(part.mesh); name = p.name; file = fmt === 'obj' ? Buffer.from(cad.toOBJ([{ name: p.name, mesh: m }])) : cad.toSTL(m, p.name); }
-  else { const items = []; for (const p of ps) { const part = cad.buildPart(p.type, p.params); const m = orient(part.mesh); const q = Math.min(50, Math.max(1, Math.round(Number(p.qty) || 1))); for (let i = 0; i < q; i++) items.push({ name: q > 1 ? `${p.name} ${i + 1}` : p.name, mesh: m }); }
+  if (b.scope === 'part') { const p = ps.find((x) => x.id === b.partId); if (!p) throw err(404, 'That part is not in the design.'); const part = await fab.build(oid(req), p); const m = orient(part.mesh); name = p.name; file = fmt === 'obj' ? Buffer.from(cad.toOBJ([{ name: p.name, mesh: m }])) : cad.toSTL(m, p.name); }
+  else { const items = []; for (const p of ps) { const part = await fab.build(oid(req), p); const m = orient(part.mesh); const q = Math.min(50, Math.max(1, Math.round(Number(p.qty) || 1))); for (let i = 0; i < q; i++) items.push({ name: q > 1 ? `${p.name} ${i + 1}` : p.name, mesh: m }); }
     const pl = cad.plates(items, st); const idx = Math.max(0, Math.round(Number(b.plate) || 0)); const plate = pl.plates[idx]; if (!plate) throw err(404, 'There is no such plate.'); name = `plate-${idx + 1}`; res.setHeader('X-Dryrun-Plates', String(pl.plates.length)); res.setHeader('X-Dryrun-Skipped', encodeURIComponent(pl.skipped.join(', ')));
     file = fmt === 'obj' ? Buffer.from(cad.toOBJ([{ name, mesh: plate.mesh }])) : cad.toSTL(plate.mesh, name); }
   res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Disposition', `attachment; filename="${String(name).replace(/[^\w.\- ]/g, '_')}.${fmt}"`); res.setHeader('Content-Length', file.length); res.end(file);
 }));
 O.post('/studio/slice', need('read'), studioOnly, wrap(async (req, res) => {
-  const b = req.body || {}; const st = cad.cleanSettings(b.settings || {}); const p = b.part; if (!p) throw err(422, 'Choose a part to slice.'); const part = cad.buildPart(p.type, p.params); const oriented = cad.bestOrientation(part.mesh);
+  const b = req.body || {}; const st = cad.cleanSettings(b.settings || {}); const p = b.part; if (!p) throw err(422, 'Choose a part to slice.'); const part = await fab.build(oid(req), p); const oriented = cad.bestOrientation(part.mesh);
   const r = cad.gcode(oriented.mesh, st); if (r.gcode.length > 40 * 1048576) throw err(422, 'The G-code is too large to send. Use a taller layer height or slice it in your own slicer.');
   res.json({ orientation: oriented.name, ...r, name: p.name });
 }));
+// imported models and G-code files
+O.get('/studio/files', need('read'), studioOnly, wrap(async (req, res) => res.json(await fab.listFiles(oid(req)))));
+O.post('/studio/files', need('write'), studioOnly, wrap(async (req, res) => { const buf = await express.readBinary(req, 61 * 1048576); res.status(201).json(await fab.addFile(oid(req), req.actor, req.role, { name: req.query.name, buf })); }));
+O.delete('/studio/files/:id', need('write'), studioOnly, wrap(async (req, res) => res.json(await fab.removeFile(oid(req), req.actor, req.role, req.params.id))));
+O.get('/studio/files/:id/download', need('read'), studioOnly, wrap(async (req, res) => { const f = await fab.getFile(oid(req), req.params.id); res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Disposition', `attachment; filename="${String(f.rec.name).replace(/[^\w.\- ]/g, '_')}"`); res.end(f.buf); }));
+O.post('/studio/slice-to-file', need('write'), studioOnly, wrap(async (req, res) => res.status(201).json(await fab.sliceToFile(oid(req), req.actor, req.role, req.body || {}))));
+// printers, bridges and sending
+O.get('/studio/devices', need('read'), studioOnly, wrap(async (req, res) => res.json(await fab.targets(oid(req)))));
+O.post('/studio/printers', need('write'), studioOnly, wrap(async (req, res) => res.status(201).json(await fab.addPrinter(oid(req), req.actor, req.role, req.body || {}))));
+O.delete('/studio/printers/:id', need('write'), studioOnly, wrap(async (req, res) => res.json(await fab.removePrinter(oid(req), req.actor, req.role, req.params.id))));
+O.post('/studio/bridges', need('write'), studioOnly, wrap(async (req, res) => res.status(201).json(await fab.createBridge(oid(req), req.actor, req.role, (req.body || {}).name))));
+O.delete('/studio/bridges/:id', need('write'), studioOnly, wrap(async (req, res) => res.json(await fab.revokeBridge(oid(req), req.actor, req.role, req.params.id))));
+O.post('/studio/printer/op', need('read'), studioOnly, wrap(async (req, res) => res.json(await fab.printerOp(oid(req), req.actor, req.role, req.body || {}))));
+O.get('/studio/jobs/:id', need('read'), studioOnly, wrap(async (req, res) => res.json(await fab.getJob(oid(req), req.params.id))));
+// robot programs
+O.get('/studio/robot/catalog', need('read'), studioOnly, wrap(async (req, res) => res.json({ brains: Object.entries(robot.BRAINS).map(([key, b]) => ({ key, label: b.label })), arm: { robot: robot.defaultRobot('arm', 'esp32'), steps: robot.DEFAULT_PROGRAM('arm') }, rover: { robot: robot.defaultRobot('rover', 'esp32'), steps: robot.DEFAULT_PROGRAM('rover') } })));
+O.post('/studio/robot/defaults', need('read'), studioOnly, wrap(async (req, res) => res.json(robot.defaultRobot((req.body || {}).kind, (req.body || {}).brain))));
+O.post('/studio/robot/simulate', need('read'), studioOnly, wrap(async (req, res) => { const b = req.body || {}; const sim = robot.simulate(b.robot, b.steps); const cfg = robot.cleanRobot(b.robot); res.json({ ...sim, robot: cfg, ...(cfg.kind === 'arm' ? { pose: sim.frames.map((f) => robot.joints3d(cfg, f.a)).filter((_, i) => i % 1 === 0) } : {}) }); }));
+O.post('/studio/robot/reach', need('read'), studioOnly, wrap(async (req, res) => { const b = req.body || {}; const cfg = robot.cleanRobot(b.robot); if (cfg.kind !== 'arm') throw err(422, 'Only an arm can reach a point.'); const a = robot.reach(cfg, Number(b.x), Number(b.y), Number(b.z)); res.json({ angles: a, tip: robot.forward(cfg, a) }); }));
+O.post('/studio/robot/export', need('read'), studioOnly, wrap(async (req, res) => {
+  const b = req.body || {}; const ex = robot.exportCode(b.robot, b.steps); const cfg = robot.cleanRobot(b.robot); const one = ex.files.length === 1;
+  const buf = one ? Buffer.from(ex.files[0].content) : robot.zip(ex.files); const fname = one ? ex.files[0].path.split('/').pop() : ex.files[0].path.split('/')[0] + '.zip';
+  res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Dryrun-Language', ex.language); res.setHeader('Content-Disposition', `attachment; filename="${fname.replace(/[^\w.\- ]/g, '_')}"`); res.setHeader('Content-Length', buf.length); void cfg; res.end(buf);
+}));
+O.post('/studio/robot/code', need('read'), studioOnly, wrap(async (req, res) => res.json(robot.exportCode((req.body || {}).robot, (req.body || {}).steps))));
+O.post('/studio/robot/send', need('read'), studioOnly, wrap(async (req, res) => { const b = req.body || {}; res.json(await fab.robotOp(oid(req), req.actor, req.role, { ref: b.ref, op: b.op, robotCfg: b.robot, steps: b.steps, confirm: b.confirm })); }));
 // ---- test bench (inside a product's room) ---------------------------------------------------------------------------------------
 O.get('/workroom/bench/:aid/constraints', need('read'), wrap(async (req, res) => res.json(await bench.constraints(oid(req), req.params.aid))));
 O.post('/workroom/bench/:aid/rules', need('read'), wrap(async (req, res) => res.status(201).json(await bench.addRule(oid(req), req.actor, req.role, req.params.aid, req.body))));

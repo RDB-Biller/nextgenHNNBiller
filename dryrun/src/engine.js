@@ -39,7 +39,7 @@ async function gather(orgId, scenario, inputs = {}, syntheticSpec = {}, seed) {
   }
   if (scenario === 'print_run' || scenario === 'build_economics') {
     const hd = await resolve(orgId, inputs.hardware_design, 'hardware_design'); used.hardware_design = hd ? ref(hd) : { synthetic: true };
-    return { design: hd ? hd.data : hardwareSc.DEFAULT_DESIGN(), used };
+    const design = hd ? JSON.parse(JSON.stringify(hd.data)) : hardwareSc.DEFAULT_DESIGN(); await require('./fab').attachMeshes(orgId, design); return { design, used };
   }
   if (scenario === 'outcomes_based_care') {
     const op = await resolve(orgId, inputs.outcomes_programme, 'outcomes_programme'); used.outcomes_programme = op ? ref(op) : { synthetic: true };

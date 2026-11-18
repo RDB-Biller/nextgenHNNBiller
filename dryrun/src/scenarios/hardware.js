@@ -27,7 +27,7 @@ const num = (v, d) => (Number.isFinite(Number(v)) && v !== '' && v !== null && v
 function partResults(design, st) {
   return design.parts.map((p) => {
     const base = { id: p.id, name: p.name, type: p.type, qty: Math.max(1, Math.round(num(p.qty, 1))) };
-    try { const part = cad.buildPart(p.type, p.params); const c = cad.printCheck(part, st); return { ...base, fits: c.fits, size: c.size, orientation: c.orientation, grams: c.estimate.grams, hours: c.estimate.hours, materialCost: c.estimate.materialCost, volumeMm3: c.estimate.volumeMm3, warnings: c.warnings }; }
+    try { if (p._error) throw new Error(p._error); const part = p.type === 'imported' ? p._built : cad.buildPart(p.type, p.params); if (!part) throw new Error('This imported model could not be read.'); const c = cad.printCheck(part, st); return { ...base, fits: c.fits, size: c.size, orientation: c.orientation, grams: c.estimate.grams, hours: c.estimate.hours, materialCost: c.estimate.materialCost, volumeMm3: c.estimate.volumeMm3, warnings: c.warnings }; }
     catch (e) { return { ...base, error: e.message, fits: false, grams: 0, hours: 0, materialCost: 0, warnings: [e.message] }; }
   });
 }

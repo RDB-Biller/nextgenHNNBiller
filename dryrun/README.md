@@ -131,3 +131,24 @@ Workroom, **Connected sites** (and the label on any web link posted in a room).
 - New sector pack `hardware` with two scenarios (`print_run`, `build_economics`) and a `hardware_design` asset kind (parts, bought parts, print settings, price). The Coach suggests cheaper print settings or a price for a target margin, as a draft.
 - **Design studio** (own tab, landing page for this pack, API under `/api/org/studio/*`): 14 parametric parts in three groups, robot (mounting plate, arm link, gripper finger, enclosure and lid), machine (involute spur gear, V pulley, stepped shaft, pipe reducer, hex bolt, L bracket) and automobile (wheel or rim, brake disc, connecting rod). Each is checked for sensible values and builds a closed solid in millimetres (`src/cad.js`, no dependencies). A software 3D viewer turns and zooms. Export STL (binary) or OBJ for one part or a print plate. The print check reports fit to the printer, best way up, overhang, thin walls, weight, hours and material cost. The slicer writes G-code (perimeters, straight infill, solid top and bottom) with a layer preview.
 - Limits: estimates use stated assumptions (material price, machine rate, moulding cost). Strength is not modelled. The slicer is for prototyping, so open the G-code in your printer's own slicer first. There is no printer connection: you download the file. Parts are built from the catalogue, not imported from other CAD files.
+
+## Importing models, printing and robots (Hardware Developer pack)
+
+**Import.** In the Design studio, "Your files" takes STL (binary or text) and OBJ models, and G-code. A model can be added to a design as an imported part with a scale (use 25.4 for inches). It is print-checked, shown in the viewer, sliced and exported like any other part. Wall thickness and strength are not checked for imported models.
+
+**Sending G-code.** Every file is scanned before it leaves: hotend and bed over the printer's limit, moves outside the bed or above the printer, driving into the bed, and commands that change settings or firmware (M92, M500, M997, M30 and others) are refused, and unknown printer macros are refused. Sending is upload-only by default. Starting a print needs the run role, a confirmation, and a printer that was set to allow starts.
+
+| Printer | How | Status |
+|---|---|---|
+| OctoPrint | HTTP API with an API key. Also the route for USB-only printers such as EasyThreed K-series or Ender, via a Raspberry Pi | Tested against a stand-in server |
+| Klipper (Moonraker) | HTTP API | Tested against a stand-in server |
+| PrusaLink | HTTP API with an API key | Tested against a stand-in server |
+| Bambu Lab | LAN mode: FTPS upload on port 990 (bridge only). You start the print on the printer | Not tested on a real printer |
+| EasyThreed and similar | No network interface of their own. Use OctoPrint on a Pi, or download the G-code and copy it to the printer's card | n/a |
+
+**Reaching devices.** Dry Run runs in the cloud and cannot see your Wi-Fi.
+- **Bridge** (`public/bridge/dryrun-bridge.js`, one file, Node 18+): runs on your network and connects out to Dry Run, so nothing is opened on your router. Printer keys stay in its config file. It enforces its own limits: it rescans the G-code, only starts prints when `allowStart` is true, and only runs robot programs when `allowRun` is true. Start it with `node dryrun-bridge.js --init`, edit the file, then `node dryrun-bridge.js`.
+- **Direct**: for a printer with a public, secured address. Addresses inside a private network are refused. Keys are encrypted at rest and never shown again.
+- Robots are bridge-only. Running code is never exposed to the public internet.
+
+**Robot programs.** An arm (servos) or a two-wheel rover. Steps: move joints, reach a point (inverse kinematics, refused if out of reach or past a joint limit), gripper, wait, repeat. Played in a simulation first. Code is generated for Arduino and ESP32 (C++), Raspberry Pi Pico (MicroPython), Raspberry Pi (Python) and ROS 2 (a package, downloaded as a zip). Generated code clamps every angle to your limits, ramps moves, and halts on an optional stop button. The simulation uses your link lengths only: no weight, torque or collisions other than the table. Rover distances are timed, not measured.
