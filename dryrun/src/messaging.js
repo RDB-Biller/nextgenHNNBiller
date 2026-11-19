@@ -39,15 +39,19 @@ async function sendWhatsApp(to, text) {
   const { r, j, ok, error } = await post(c.waUrl, { apikey: c.apiKey, 'content-type': 'application/json' }, JSON.stringify({ username: c.username, waNumber: c.waNumber, phoneNumber: to, body: { message: text } })); if (error) return { ok, error };
   return r.ok ? { ok: true } : { ok: false, error: j.message || j.error || j.description || `Africa's Talking WhatsApp answered ${r.status}` };
 }
-function logIt(entry) { const r = reg.load(); r.messages = r.messages || []; r.messages.unshift({ at: iso(), ...entry }); r.messages.length = Math.min(r.messages.length, 500); reg.save(); }
+/** The log keeps the full text of every message, sent or failed. Passwords and keys inside a text are hidden first. */
+const hide = (t) => String(t == null ? '' : t).replace(/(password[:\s]+)([^\s,;()]+)/gi, '$1[hidden]').replace(/\b(?:dr|drs|drt|dr_s)_[0-9a-f]{12,}\b/g, '[key hidden]').replace(/\bsk_(?:live|test)_\w+/g, '[key hidden]').slice(0, 600);
+function logIt(entry) { const r = reg.load(); r.messages = r.messages || []; const e = { at: iso(), ...entry }; if (e.text !== undefined) e.text = hide(e.text); r.messages.unshift(e); r.messages.length = Math.min(r.messages.length, 1500); reg.save(); }
+/** Record an attempt that never reached the SMS service, for example no phone number on file. */
+const record = (entry) => logIt({ ok: false, ...entry });
 
 /** Send one message on the chosen channels. Returns one result per channel; never throws. */
-async function deliver({ phone, channels, text, orgId, orgName, who, purpose, regarding }) {
+async function deliver({ phone, channels, text, orgId, orgName, who, purpose, regarding, toName }) {
   const to = toDialable(phone); const out = [];
   for (const ch of ['sms', 'whatsapp']) {
     if (!channels || !channels[ch]) continue;
     const res = !to ? { ok: false, error: 'That phone number does not look right. Use 024… or +233….' } : ch === 'sms' ? await sendSms(to, text) : await sendWhatsApp(to, text);
-    logIt({ orgId, orgName, who, purpose, regarding: regarding || undefined, channel: ch, to: mask(phone), ok: res.ok, error: res.ok ? null : res.error }); out.push({ channel: ch, ok: res.ok, error: res.ok ? null : res.error });
+    logIt({ orgId, orgName, who, purpose, regarding: regarding || undefined, toName: toName || undefined, text, channel: ch, to: mask(phone), ok: res.ok, error: res.ok ? null : res.error }); out.push({ channel: ch, ok: res.ok, error: res.ok ? null : res.error });
   }
   return out;
 }
@@ -73,4 +77,4 @@ const teamTexts = {
   declinedApplicant: ({ name, org, reason, url }) => `Hi ${first(name)}, your request to join the ${org} team on Dry Run was not approved${reason ? `: ${reason}` : ''}. Please speak to your team admin if you think this is a mistake. Dry Run: ${url}`,
   addedInviter: ({ name, invitee, org, url, teamUrl }) => `Good news ${first(name)}: ${invitee}, who you invited, has been added to the ${org} team on Dry Run. Open the platform: ${url}${teamUrl ? `\nKeep the momentum. Invite more colleagues with your link: ${teamUrl}` : ''}`,
 };
-module.exports = { teamTexts, surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };
+module.exports = { record, teamTexts, surveyText, quickInviteText, status, toDialable, validPhone, mask, deliver, history, adminText, memberText };

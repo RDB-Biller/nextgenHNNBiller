@@ -99,7 +99,8 @@ P.post('/orgs', wrap(async (req, res) => {
   res.status(201).json({ ...r, delivery, signInUrl: `${siteUrl(req)}/app?u=${encodeURIComponent(r.admin.username)}` });
 }));
 P.get('/directory', (req, res) => res.json(orgs.directory()));
-P.get('/messaging', (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(null, 50) }));
+P.get('/messaging', (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(null, 300) }));
+P.get('/messages.csv', (req, res) => { const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; const rows = [['When', 'Team', 'Purpose', 'Channel', 'To', 'Person', 'About', 'Result', 'Error', 'Message']].concat(messaging.history(null, 1500).map((m) => [m.at, m.orgName || '', m.purpose || '', m.channel || '', m.to || '', m.toName || '', m.regarding ? m.regarding.team + (m.regarding.project ? ' / ' + m.regarding.project : '') : '', m.ok ? 'Sent' : 'Failed', m.error || '', m.text || ''])); res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="message-history.csv"'); res.setHeader('Cache-Control', 'no-store'); res.end(rows.map((r) => r.map(q).join(',')).join('\n')); });
 P.post('/orgs/:id/members/:mid/resend', wrap(async (req, res) => {
   const o = orgs.raw(req.params.id); const m = orgs.memberRaw(req.params.id, req.params.mid);
   if (req.body && req.body.phone) { if (!messaging.validPhone(req.body.phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); m.phone = String(req.body.phone).trim(); require('./registry').save(); }
@@ -140,9 +141,9 @@ P.post('/orgs/:id/message', wrap(async (req, res) => {
   const to = recipientsOf(o, b); if (!to.length) throw err(404, 'Nobody to send to.');
   const results = [];
   for (const m of to) {
-    if (!m.phone) { results.push({ name: m.name, ok: false, error: 'No phone number on file.' }); continue; }
-    if (rt.id !== o.id && !Object.values(rt.members).some((x) => sameMember(m, x))) { results.push({ name: m.name, ok: false, error: `Not part of ${rt.name}.` }); continue; }
-    const d = await messaging.deliver({ phone: m.phone, channels, text, orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message', regarding: about ? { team: rt.name, project: project ? project.name : null } : null });
+    if (!m.phone) { results.push({ name: m.name, ok: false, error: 'No phone number on file.' }); messaging.record({ orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message', channel: 'sms', to: '', toName: m.name, text, error: 'No phone number on file.', regarding: about ? { team: rt.name, project: project ? project.name : null } : undefined }); continue; }
+    if (rt.id !== o.id && !Object.values(rt.members).some((x) => sameMember(m, x))) { results.push({ name: m.name, ok: false, error: `Not part of ${rt.name}.` }); messaging.record({ orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message', channel: 'sms', to: messaging.mask(m.phone), toName: m.name, text, error: `Not part of ${rt.name}.`, regarding: { team: rt.name, project: project ? project.name : null } }); continue; }
+    const d = await messaging.deliver({ phone: m.phone, channels, text, orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message', toName: m.name, regarding: about ? { team: rt.name, project: project ? project.name : null } : null });
     results.push({ name: m.name, ok: d.length > 0 && d.every((x) => x.ok), error: (d.find((x) => !x.ok) || {}).error || null });
   }
   let posted = null; if (b.alsoPost) { const n = await desk.sendNotice({ to: [rt.id], kind: 'suggestion', title: project ? `About ${project.name}` : 'From the platform team', text: String(b.text).trim() }); posted = n.sent.length; }
@@ -274,7 +275,7 @@ O.post('/lab/ideas', need('write'), wrap(async (req, res) => res.status(201).jso
 O.post('/lab/ideas/:id/vote', need('read'), wrap(async (req, res) => res.json(await lab.vote(oid(req), req.actor, req.params.id))));
 O.post('/lab/ideas/:id/promote', need('write'), wrap(async (req, res) => res.json(await lab.promote(oid(req), req.actor, req.role, req.params.id, req.body || {}))));
 O.post('/lab/ideas/:id/close', need('write'), wrap(async (req, res) => res.json(await lab.closeIdea(oid(req), req.actor, req.params.id))));
-O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30) }));
+O.get('/messaging', need('read'), (req, res) => res.json({ configured: messaging.status(), recent: messaging.history(oid(req), 30).map(({ text, ...rest }) => rest) }));
 O.patch('/team/:mid', need('team'), (req, res) => res.json(orgs.setRole(oid(req), req.params.mid, req.body.role)));
 O.delete('/team/:mid', need('team'), (req, res) => res.json(orgs.removeMember(oid(req), req.params.mid)));
 O.post('/team/:mid/rotate-key', need('team'), (req, res) => res.json(orgs.rotateKey(oid(req), req.params.mid)));
