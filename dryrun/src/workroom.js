@@ -186,6 +186,10 @@ async function coachReply(orgId, actor, role, roomId, { text, pack } = {}) {
   const msg = await put(orgId, base(roomId, { id: 'coach', name: 'Coach' }, 'coach', { text: reply, ...extra }));
   return msg;
 }
+/** A message from the platform team, posted in a team's General room. kind: announcement or suggestion. */
+async function platformNote(orgId, { kind, title, text, noticeId, helpId } = {}) { const room = await getRoom(orgId, GENERAL); return put(orgId, base(room.id, { id: 'platform', name: 'Platform team' }, 'platform', { text: clip(text, 1800), notice: { id: noticeId || null, kind: kind === 'suggestion' ? 'suggestion' : 'announcement', title: clip(title, 80), helpId: helpId || null, responses: {} } })); }
+async function respondNote(orgId, actor, role, msgId, response) { if (!['helpful', 'not_now'].includes(response)) throw err(422, 'Choose Helpful or Not for us.'); const m = await ad(orgId).get(orgId, 'wr_msgs', msgId); if (!m || m.kind !== 'platform') throw err(404, 'That message is not here.'); m.notice.responses = m.notice.responses || {}; m.notice.responses[actor.id] = response; await put(orgId, m); return m; }
+async function recentText(orgId, roomId, n) { return (await allMsgs(orgId)).filter((m) => m.roomId === roomId && m.kind === 'text').slice(-n).map((m) => ({ by: m.by, text: m.text })); }
 async function coachNote(orgId, roomId, text, extra) { const room = await getRoom(orgId, roomId); return put(orgId, base(room.id, { id: 'coach', name: 'Coach' }, 'coach', { text: clip(text, 1800), ...(extra || {}) })); }
 async function postRun(orgId, run, assetId) { // a run finished for an asset: say so in its room
   if (!assetId) return null; try { const room = await getRoom(orgId, 'rm_' + assetId); const h = Object.entries(run.headline || {}).slice(0, 4).map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${fmtN(v)}`).join(' · ');
@@ -235,4 +239,4 @@ async function createGuestRoom(orgId, actor, role, { name, engagementIds } = {})
 }
 async function guestRooms(orgId, eid) { return (await ensureRooms(orgId)).filter((r) => r.kind === 'guest' && (r.engagementIds || []).includes(eid)).map((r) => ({ id: r.id, name: r.name })); }
 
-module.exports = { GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, addLink, addFile, getFile, removeFile, createGuestRoom, guestRooms, markRead, getRoom };
+module.exports = { recentText, platformNote, respondNote, GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, addLink, addFile, getFile, removeFile, createGuestRoom, guestRooms, markRead, getRoom };

@@ -130,6 +130,14 @@ P.post('/orgs/:id/message', wrap(async (req, res) => {
   }
   res.json({ results, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
 }));
+const desk = require('./platformdesk');
+P.get('/notices', wrap(async (req, res) => res.json({ notices: await desk.listNotices() })));
+P.post('/notices', wrap(async (req, res) => res.status(201).json(await desk.sendNotice(req.body || {}))));
+P.get('/help', (req, res) => res.json({ requests: desk.inbox() }));
+P.post('/help/:id/draft', (req, res) => res.json(desk.draft(req.params.id)));
+P.post('/help/:id/lint', (req, res) => res.json({ warnings: desk.lint((req.body || {}).text) }));
+P.post('/help/:id/answer', wrap(async (req, res) => res.json(await desk.answer(req.params.id, (req.body || {}).text))));
+P.post('/help/:id/close', (req, res) => res.json(desk.close(req.params.id)));
 P.post('/message-preview', (req, res) => res.json(previewTexts(req, req.body || {})));
 P.get('/proposals', (req, res) => res.json(proposals.listAll()));
 P.patch('/proposals/:pid', (req, res) => res.json(proposals.platformUpdate(req.params.pid, req.body || {})));
@@ -398,6 +406,10 @@ O.delete('/workroom/sites/:sid/research/:rid', need('read'), wrap(async (req, re
 O.post('/workroom/sites/:sid/model-iterations', need('read'), wrap(async (req, res) => res.status(201).json(await connect.addModelIteration(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
 O.delete('/workroom/sites/:sid/model-iterations/:iid', need('read'), wrap(async (req, res) => res.json(await connect.removeModelIteration(oid(req), req.actor, req.role, req.params.sid, req.params.iid))));
 O.get('/workroom/sites/:sid/signing-kit.txt', need('read'), wrap(async (req, res) => { const t = await connect.signingKit(oid(req), req.role, req.params.sid, pubOf(req)); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="dri-signing-kit.txt"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store'); res.end(t); }));
+const deskO = require('./platformdesk');
+O.post('/workroom/ask-platform', need('read'), wrap(async (req, res) => res.status(201).json(await deskO.ask(oid(req), req.actor, req.role, req.body || {}))));
+O.get('/workroom/ask-platform', need('read'), (req, res) => res.json({ requests: deskO.mine(oid(req)) }));
+O.post('/workroom/notices/:mid/respond', need('read'), wrap(async (req, res) => { const m = await wr.respondNote(oid(req), req.actor, req.role, req.params.mid, (req.body || {}).response); res.json({ ok: true, mine: m.notice.responses[req.actor.id] }); }));
 const feedback = require('./iterfeedback');
 const iterOnly = (req) => { if (!orgs.can(req.role, 'iterate')) throw err(403, 'Viewers can read but not start surveys or votes.'); };
 O.post('/workroom/sites/:sid/ballots', need('read'), wrap(async (req, res) => res.status(201).json(await connect.createBallot(oid(req), req.actor, req.role, req.params.sid, req.body || {}))));
