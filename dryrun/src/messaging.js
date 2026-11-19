@@ -42,12 +42,12 @@ async function sendWhatsApp(to, text) {
 function logIt(entry) { const r = reg.load(); r.messages = r.messages || []; r.messages.unshift({ at: iso(), ...entry }); r.messages.length = Math.min(r.messages.length, 500); reg.save(); }
 
 /** Send one message on the chosen channels. Returns one result per channel; never throws. */
-async function deliver({ phone, channels, text, orgId, orgName, who, purpose }) {
+async function deliver({ phone, channels, text, orgId, orgName, who, purpose, regarding }) {
   const to = toDialable(phone); const out = [];
   for (const ch of ['sms', 'whatsapp']) {
     if (!channels || !channels[ch]) continue;
     const res = !to ? { ok: false, error: 'That phone number does not look right. Use 024… or +233….' } : ch === 'sms' ? await sendSms(to, text) : await sendWhatsApp(to, text);
-    logIt({ orgId, orgName, who, purpose, channel: ch, to: mask(phone), ok: res.ok, error: res.ok ? null : res.error }); out.push({ channel: ch, ok: res.ok, error: res.ok ? null : res.error });
+    logIt({ orgId, orgName, who, purpose, regarding: regarding || undefined, channel: ch, to: mask(phone), ok: res.ok, error: res.ok ? null : res.error }); out.push({ channel: ch, ok: res.ok, error: res.ok ? null : res.error });
   }
   return out;
 }

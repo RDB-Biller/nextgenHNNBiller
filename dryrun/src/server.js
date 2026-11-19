@@ -115,22 +115,39 @@ P.patch('/orgs/:id/members/:mid', (req, res) => {
   require('./registry').save(); res.json({ ok: true });
 });
 // Free-text message from the platform owner to one person, the org's admins, or everyone in the org.
+const desk = require('./platformdesk');
+/** The same person can be on several teams. People are matched across teams by email or phone; only names are shown, never content. */
+const dial = (p) => messaging.toDialable(p) || '';
+const sameMember = (a, b) => (a.email && b.email && String(a.email).toLowerCase() === String(b.email).toLowerCase()) || (dial(a.phone) && dial(a.phone) === dial(b.phone));
+async function teamsFor(recipients) {
+  const out = []; for (const o of orgs.list()) { const r = orgs.raw(o.id); if (r.demo) continue; const mem = Object.values(r.members); const hit = recipients.some((x) => mem.some((m) => sameMember(x, m))); if (hit) out.push(r); }
+  return out;
+}
+const recipientsOf = (o, b) => { const all = Object.values(o.members); return b.memberId ? all.filter((m) => m.id === b.memberId) : b.to === 'admins' ? all.filter((m) => m.role === 'admin') : all; };
+P.get('/orgs/:id/regarding', wrap(async (req, res) => {
+  const o = orgs.raw(req.params.id); const rec = recipientsOf(o, { memberId: req.query.memberId, to: req.query.to }); const teams = await teamsFor(rec); if (!teams.find((t) => t.id === o.id)) teams.unshift(o);
+  const out = []; for (const t of teams) { let projects = []; try { projects = (await assets.list(t.id)).slice(0, 60).map((a) => ({ id: a.id, name: a.name, kind: a.kind })); } catch { /* no projects yet */ } out.push({ orgId: t.id, name: t.name, projects }); }
+  res.json({ teams: out });
+}));
 P.post('/orgs/:id/message', wrap(async (req, res) => {
   const o = orgs.raw(req.params.id); plans.assertNotDemo(o, 'Sending messages'); const b = req.body || {};
-  const text = String(b.text || '').trim(); if (!text) throw err(422, 'Write the message first.'); if (text.length > 480) throw err(422, 'Keep it under 480 characters.');
+  let text = String(b.text || '').trim(); if (!text) throw err(422, 'Write the message first.');
+  // which team and project is it about? Default: this team, no particular project.
+  const reg0 = b.regarding || {}; const rt = reg0.orgId ? orgs.raw(reg0.orgId) : o; let project = null;
+  if (reg0.assetId) { const found = (await assets.list(rt.id)).find((a) => a.id === reg0.assetId); if (!found) throw err(422, 'That project is not in that team.'); project = { id: found.id, name: found.name }; }
+  const about = (reg0.orgId && reg0.orgId !== o.id) || project ? `Re ${rt.name}${project ? ' / ' + project.name : ''}: ` : ''; text = about + text; if (text.length > 480) throw err(422, 'Keep it under 480 characters, including the team and project it refers to.');
   const channels = { sms: !(b.deliver && b.deliver.sms === false), whatsapp: !!(b.deliver && b.deliver.whatsapp) };
-  const all = Object.values(o.members);
-  const to = b.memberId ? all.filter((m) => m.id === b.memberId) : b.to === 'admins' ? all.filter((m) => m.role === 'admin') : all;
-  if (!to.length) throw err(404, 'Nobody to send to.');
+  const to = recipientsOf(o, b); if (!to.length) throw err(404, 'Nobody to send to.');
   const results = [];
   for (const m of to) {
     if (!m.phone) { results.push({ name: m.name, ok: false, error: 'No phone number on file.' }); continue; }
-    const d = await messaging.deliver({ phone: m.phone, channels, text, orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message' });
+    if (rt.id !== o.id && !Object.values(rt.members).some((x) => sameMember(m, x))) { results.push({ name: m.name, ok: false, error: `Not part of ${rt.name}.` }); continue; }
+    const d = await messaging.deliver({ phone: m.phone, channels, text, orgId: o.id, orgName: o.name, who: m.role, purpose: 'platform message', regarding: about ? { team: rt.name, project: project ? project.name : null } : null });
     results.push({ name: m.name, ok: d.length > 0 && d.every((x) => x.ok), error: (d.find((x) => !x.ok) || {}).error || null });
   }
-  res.json({ results, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
+  let posted = null; if (b.alsoPost) { const n = await desk.sendNotice({ to: [rt.id], kind: 'suggestion', title: project ? `About ${project.name}` : 'From the platform team', text: String(b.text).trim() }); posted = n.sent.length; }
+  res.json({ results, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, regarding: about ? { team: rt.name, project: project ? project.name : null } : null, posted });
 }));
-const desk = require('./platformdesk');
 P.get('/notices', wrap(async (req, res) => res.json({ notices: await desk.listNotices() })));
 P.post('/notices', wrap(async (req, res) => res.status(201).json(await desk.sendNotice(req.body || {}))));
 P.post('/notices/:id/resend', wrap(async (req, res) => res.status(201).json(await desk.resendNotice(req.params.id, req.body || {}))));
