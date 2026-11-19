@@ -47,7 +47,7 @@ async function listNotices() {
   const out = [];
   for (const n of Object.values(store('notices')).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100)) {
     const teams = []; let helpful = 0, notNow = 0;
-    for (const s of n.sent) { let h = 0, nn = 0; try { const m = await audit.adapter(s.orgId).get(s.orgId, 'wr_msgs', s.msgId); for (const v of Object.values((m && m.notice.responses) || {})) v === 'helpful' ? h++ : nn++; } catch { /* team gone */ } helpful += h; notNow += nn; teams.push({ orgId: s.orgId, name: s.name, helpful: h, notNow: nn, answer: h + nn === 0 ? 'none' : nn > 0 && h === 0 ? 'not_now' : h > 0 && nn === 0 ? 'helpful' : 'mixed', texted: s.sms.length ? s.sms.every((x) => x.ok) ? 'delivered' : 'failed' : null }); }
+    for (const s of n.sent) { let h = 0, nn = 0; try { const m = await audit.adapter(s.orgId).get(s.orgId, 'wr_msgs', s.msgId); for (const v of Object.values((m && m.notice.responses) || {})) v === 'helpful' ? h++ : nn++; } catch { /* team gone */ } helpful += h; notNow += nn; teams.push({ orgId: s.orgId, name: s.name, helpful: h, notNow: nn, answer: h + nn === 0 ? 'none' : nn > 0 && h === 0 ? 'not_now' : h > 0 && nn === 0 ? 'helpful' : 'mixed', adopted: await (async () => { try { return (await audit.adapter(s.orgId).list(s.orgId, 'wr_ideas')).some((x) => x.msgId === s.msgId); } catch { return false; } })(), texted: s.sms.length ? s.sms.every((x) => x.ok) ? 'delivered' : 'failed' : null }); }
     out.push({ id: n.id, root: n.root, again: n.again || null, edited: !!n.edited, at: n.at, kind: n.kind, title: n.title, text: n.text, texted: n.texted, skipped: n.skipped, teams, helpful, notNow, sent: n.sent }); }
   return out;
 }

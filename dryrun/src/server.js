@@ -410,6 +410,10 @@ O.post('/workroom/sites/:sid/model-iterations', need('read'), wrap(async (req, r
 O.delete('/workroom/sites/:sid/model-iterations/:iid', need('read'), wrap(async (req, res) => res.json(await connect.removeModelIteration(oid(req), req.actor, req.role, req.params.sid, req.params.iid))));
 O.get('/workroom/sites/:sid/signing-kit.txt', need('read'), wrap(async (req, res) => { const t = await connect.signingKit(oid(req), req.role, req.params.sid, pubOf(req)); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="dri-signing-kit.txt"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store'); res.end(t); }));
 const deskO = require('./platformdesk');
+const ideas = require('./ideas');
+O.get('/workroom/ideas', need('read'), wrap(async (req, res) => res.json({ ideas: await ideas.list(oid(req)) })));
+O.post('/workroom/ideas', need('read'), wrap(async (req, res) => res.status(201).json({ idea: await ideas.add(oid(req), req.actor, req.role, req.body || {}) })));
+O.delete('/workroom/ideas/:iid', need('read'), wrap(async (req, res) => res.json(await ideas.remove(oid(req), req.actor, req.role, req.params.iid, req.query.use))));
 O.post('/workroom/ask-platform', need('read'), wrap(async (req, res) => res.status(201).json(await deskO.ask(oid(req), req.actor, req.role, req.body || {}))));
 O.get('/workroom/ask-platform', need('read'), (req, res) => res.json({ requests: deskO.mine(oid(req)) }));
 O.post('/workroom/notices/:mid/respond', need('read'), wrap(async (req, res) => { const m = await wr.respondNote(oid(req), req.actor, req.role, req.params.mid, (req.body || {}).response); res.json({ ok: true, mine: m.notice.responses[req.actor.id] }); }));
