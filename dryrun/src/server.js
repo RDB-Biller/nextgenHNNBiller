@@ -135,6 +135,8 @@ P.get('/notices', wrap(async (req, res) => res.json({ notices: await desk.listNo
 P.post('/notices', wrap(async (req, res) => res.status(201).json(await desk.sendNotice(req.body || {}))));
 P.post('/notices/:id/resend', wrap(async (req, res) => res.status(201).json(await desk.resendNotice(req.params.id, req.body || {}))));
 P.get('/notices.csv', wrap(async (req, res) => { res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="platform-messages.csv"'); res.setHeader('Cache-Control', 'no-store'); res.end(await desk.logCsv()); }));
+P.get('/chief', (req, res) => res.json({ seats: desk.chiefSeats() }));
+P.post('/chief/:orgId/open', wrap(async (req, res) => res.json(desk.openChief(req.params.orgId))));
 P.get('/message-log', (req, res) => res.json({ log: desk.logList() }));
 P.get('/help', (req, res) => res.json({ requests: desk.inbox() }));
 P.post('/help/:id/draft', (req, res) => res.json(desk.draft(req.params.id)));
@@ -411,6 +413,7 @@ O.delete('/workroom/sites/:sid/model-iterations/:iid', need('read'), wrap(async 
 O.get('/workroom/sites/:sid/signing-kit.txt', need('read'), wrap(async (req, res) => { const t = await connect.signingKit(oid(req), req.role, req.params.sid, pubOf(req)); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="dri-signing-kit.txt"'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store'); res.end(t); }));
 const deskO = require('./platformdesk');
 const ideas = require('./ideas');
+O.post('/workroom/notices/:mid/chief', need('read'), wrap(async (req, res) => { const m = await deskO.decideChief(oid(req), req.actor, req.role, req.params.mid, (req.body || {}).decision); res.json({ chief: m.notice.chief }); }));
 O.get('/workroom/ideas', need('read'), wrap(async (req, res) => res.json({ ideas: await ideas.list(oid(req)) })));
 O.post('/workroom/ideas', need('read'), wrap(async (req, res) => res.status(201).json({ idea: await ideas.add(oid(req), req.actor, req.role, req.body || {}) })));
 O.delete('/workroom/ideas/:iid', need('read'), wrap(async (req, res) => res.json(await ideas.remove(oid(req), req.actor, req.role, req.params.iid, req.query.use))));

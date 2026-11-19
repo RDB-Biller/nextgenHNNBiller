@@ -8,12 +8,13 @@ const SESSION_MS = 12 * 3600000;
 const allMembers = () => Object.values(reg.load().orgs).flatMap((o) => Object.values(o.members).map((m) => ({ o, m })));
 const usernames = () => new Set(allMembers().map((x) => (x.m.username || '').toLowerCase()));
 
-const ROLES = ['admin', 'builder', 'approver', 'viewer'];
+const ROLES = ['admin', 'builder', 'approver', 'viewer', 'contributor'];
 const CAN = {
   admin:    new Set(['read', 'write', 'run', 'promote', 'approve', 'team', 'settings', 'iterate']),
   builder:  new Set(['read', 'write', 'run', 'promote', 'iterate']),
   approver: new Set(['read', 'run', 'promote', 'approve', 'iterate']),
   viewer:   new Set(['read']),
+  contributor: new Set(['read', 'iterate']), // the platform's DRI Chief seat: look, iterate, vote, post. Nothing else.
 };
 const can = (role, action) => !!(CAN[role] && CAN[role].has(action));
 
@@ -92,7 +93,7 @@ function addMember(orgId, { name, email, phone, role = 'builder' } = {}, addedBy
   if (!name || !email) throw err(422, 'name and email are required.');
   if (phone && !require('./messaging').validPhone(phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….');
   if (Object.values(o.members).some((m) => m.email.toLowerCase() === String(email).toLowerCase())) throw err(409, 'That email is already on the team.');
-  plans.assertRoom(o, 'members', Object.keys(o.members).length);
+  if (role !== 'contributor') plans.assertRoom(o, 'members', Object.values(o.members).filter((m) => m.role !== 'contributor').length); // the platform's DRI Chief seat does not use up the team's places
   const mid = id('mem'), key = newKey('dr'); const username = creds.makeUsername(name, o.name, usernames()), password = creds.genPassword();
   o.members[mid] = { id: mid, name, email, phone: phone || '', role, addedBy: addedBy || 'platform owner', keyHash: sha(key), username, passwordHash: creds.hashPassword(password), mustChange: true, createdAt: iso() }; reg.save();
   return { ...publicMember(o.members[mid]), apiKey: key, password, note: 'Shown once. Store it safely.' };

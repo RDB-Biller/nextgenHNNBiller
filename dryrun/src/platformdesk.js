@@ -23,16 +23,16 @@ async function deliverTo(n, ids, alsoText) {
   for (const oid of ids) {
     let o = null; try { o = orgs.raw(oid); } catch { /* unknown */ } if (!o) { n.skipped.push({ orgId: oid, why: 'Unknown team' }); continue; }
     if (n.sent.some((x) => x.orgId === oid)) continue;
-    try { const m = await workroom.platformNote(oid, { kind: n.kind === 'reply' ? 'suggestion' : n.kind, title: n.title, text: n.text, noticeId: n.id, helpId: n.helpId }); const rec = { orgId: oid, name: o.name, msgId: m.id, sms: [] };
+    try { const m = await workroom.platformNote(oid, { kind: n.kind === 'reply' ? 'suggestion' : n.kind, title: n.title, text: n.text, noticeId: n.id, helpId: n.helpId, chief: n.chief }); const rec = { orgId: oid, name: o.name, msgId: m.id, sms: [] };
       if (alsoText) for (const mem of Object.values(o.members).filter((q) => q.role === 'admin' && q.phone)) { try { const d = await messaging.deliver({ phone: mem.phone, channels: { sms: true, whatsapp: false }, text: `${o.name}: new ${n.kind} from the platform team in your Workroom General room: ${n.title}`.slice(0, 300), orgId: o.id, orgName: o.name, who: 'admin', purpose: 'platform notice' }); rec.sms.push({ ok: d.length > 0 && d.every((x) => x.ok) }); } catch { rec.sms.push({ ok: false }); } }
       n.sent.push(rec); await audit.log(oid, PLAT_ACTOR, 'platform.' + n.kind, { noticeId: n.id, title: n.title });
     } catch (e) { n.skipped.push({ orgId: oid, name: o.name, why: e.message }); }
   }
 }
-async function sendNotice({ to, kind, title, text, alsoText } = {}) {
+async function sendNotice({ to, kind, title, text, alsoText, chief } = {}) {
   if (!KINDS.includes(kind)) throw err(422, 'Choose announcement or suggestion.'); const t = clip(title, 80), x = clip(text, 1500); if (!t) throw err(422, 'Give it a short title.'); if (x.length < 10) throw err(422, 'Write the message first.');
   const ids = to === 'all' ? orgs.list().map((o) => o.id) : Array.isArray(to) ? to : []; if (!ids.length) throw err(422, 'Choose who it goes to.');
-  const n = { id: id('ntc'), root: null, at: iso(), kind, title: t, text: x, sent: [], skipped: [], texted: !!alsoText }; n.root = n.id; await deliverTo(n, ids, alsoText);
+  const n = { id: id('ntc'), root: null, at: iso(), kind, title: t, text: x, sent: [], skipped: [], texted: !!alsoText, chief: !!chief }; n.root = n.id; await deliverTo(n, ids, alsoText);
   store('notices')[n.id] = n; logLine('notice.send', { noticeId: n.id, kind, title: t, teams: n.sent.map((s) => s.name), skipped: n.skipped.length }); reg.save(); return n;
 }
 /** Send the same message to other teams, for example a team that answered "Not for us". A team that already got it (in any send) is not sent it twice. */
@@ -40,15 +40,15 @@ async function resendNotice(noticeId, { to, alsoText, title, text } = {}) {
   const src = store('notices')[noticeId]; if (!src) throw err(404, 'That message is not here.'); if (src.kind === 'reply') throw err(422, 'A reply to a help request belongs to that team. Write a new suggestion instead.');
   const ids = to === 'all' ? orgs.list().map((o) => o.id) : Array.isArray(to) ? to : []; if (!ids.length) throw err(422, 'Choose which teams to send it to.');
   const got = new Set(Object.values(store('notices')).filter((x) => x.root === src.root).flatMap((x) => x.sent.map((s) => s.orgId))); const fresh = ids.filter((i) => !got.has(i));
-  const n = { id: id('ntc'), root: src.root, again: src.id, at: iso(), kind: src.kind, title: clip(title, 80) || src.title, text: clip(text, 1500) || src.text, edited: false, sent: [], skipped: ids.filter((i) => got.has(i)).map((i) => ({ orgId: i, why: 'Already received this message' })), texted: !!alsoText };
+  const n = { id: id('ntc'), root: src.root, again: src.id, at: iso(), kind: src.kind, title: clip(title, 80) || src.title, text: clip(text, 1500) || src.text, edited: false, sent: [], skipped: ids.filter((i) => got.has(i)).map((i) => ({ orgId: i, why: 'Already received this message' })), texted: !!alsoText, chief: !!src.chief };
   if (!fresh.length) throw err(409, 'Every team you chose has already received this message.'); if (n.title.length < 1 || n.text.length < 10) throw err(422, 'The message is too short.'); n.edited = n.title !== src.title || n.text !== src.text; await deliverTo(n, fresh, alsoText); store('notices')[n.id] = n; logLine('notice.resend', { noticeId: n.id, from: src.id, edited: n.edited, title: n.title, teams: n.sent.map((s) => s.name) }); reg.save(); return n;
 }
 async function listNotices() {
   const out = [];
   for (const n of Object.values(store('notices')).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100)) {
     const teams = []; let helpful = 0, notNow = 0;
-    for (const s of n.sent) { let h = 0, nn = 0; try { const m = await audit.adapter(s.orgId).get(s.orgId, 'wr_msgs', s.msgId); for (const v of Object.values((m && m.notice.responses) || {})) v === 'helpful' ? h++ : nn++; } catch { /* team gone */ } helpful += h; notNow += nn; teams.push({ orgId: s.orgId, name: s.name, helpful: h, notNow: nn, answer: h + nn === 0 ? 'none' : nn > 0 && h === 0 ? 'not_now' : h > 0 && nn === 0 ? 'helpful' : 'mixed', adopted: await (async () => { try { return (await audit.adapter(s.orgId).list(s.orgId, 'wr_ideas')).some((x) => x.msgId === s.msgId); } catch { return false; } })(), texted: s.sms.length ? s.sms.every((x) => x.ok) ? 'delivered' : 'failed' : null }); }
-    out.push({ id: n.id, root: n.root, again: n.again || null, edited: !!n.edited, at: n.at, kind: n.kind, title: n.title, text: n.text, texted: n.texted, skipped: n.skipped, teams, helpful, notNow, sent: n.sent }); }
+    for (const s of n.sent) { let h = 0, nn = 0, ch = null; try { const m = await audit.adapter(s.orgId).get(s.orgId, 'wr_msgs', s.msgId); ch = (m && m.notice && m.notice.chief && m.notice.chief.status) || null; for (const v of Object.values((m && m.notice.responses) || {})) v === 'helpful' ? h++ : nn++; } catch { /* team gone */ } helpful += h; notNow += nn; teams.push({ orgId: s.orgId, name: s.name, chief: ch, helpful: h, notNow: nn, answer: h + nn === 0 ? 'none' : nn > 0 && h === 0 ? 'not_now' : h > 0 && nn === 0 ? 'helpful' : 'mixed', adopted: await (async () => { try { return (await audit.adapter(s.orgId).list(s.orgId, 'wr_ideas')).some((x) => x.msgId === s.msgId); } catch { return false; } })(), texted: s.sms.length ? s.sms.every((x) => x.ok) ? 'delivered' : 'failed' : null }); }
+    out.push({ chief: !!n.chief, id: n.id, root: n.root, again: n.again || null, edited: !!n.edited, at: n.at, kind: n.kind, title: n.title, text: n.text, texted: n.texted, skipped: n.skipped, teams, helpful, notNow, sent: n.sent }); }
   return out;
 }
 /** The complete record as a spreadsheet file. */
@@ -102,4 +102,17 @@ async function answer(helpId, text) {
   const n = { id: id('ntc'), at: iso(), kind: 'reply', title: 'Reply to your request', text: t, helpId: r.id, sent: [], skipped: [], texted: false }; n.root = n.id; await deliverTo(n, [r.orgId], false); if (!n.sent.length) throw err(502, 'Could not post the reply to the team. ' + ((n.skipped[0] || {}).why || '')); store('notices')[n.id] = n; r.status = 'answered'; r.answer = t; r.answeredAt = iso(); logLine('help.answer', { noticeId: n.id, helpId: r.id, team: r.orgName }); reg.save(); return { request: view(r, false), msgId: n.sent[0].msgId, warnings: lint(t) };
 }
 function close(helpId) { const r = store('help')[helpId]; if (!r) throw err(404, 'That request is not here.'); r.status = 'closed'; reg.save(); return view(r, false); }
-module.exports = { resendNotice, logCsv, logList, sendNotice, listNotices, ask, mine, inbox, draft, answer, close, lint, KINDS, SHARES };
+const CHIEF_NAME = 'DRI Chief';
+const chiefOf = (o) => Object.values(o.members).find((m) => m.role === 'contributor' && m.name === CHIEF_NAME) || null;
+/** The team's admin decides. Approving adds a limited seat (look, iterate, vote, post); the team can remove it at any time. */
+async function decideChief(orgId, actor, role, msgId, decision) {
+  if (!orgs.can(role, 'team')) throw err(403, 'Only an admin can decide this.'); if (!['approve', 'decline'].includes(decision)) throw err(422, 'Choose approve or decline.');
+  const o = orgs.raw(orgId); const m = await audit.adapter(orgId).get(orgId, 'wr_msgs', msgId); if (!m || m.kind !== 'platform' || !m.notice.chief) throw err(404, 'That request is not here.'); if (m.notice.chief.status !== 'pending') throw err(409, 'This has already been decided.');
+  if (decision === 'approve') { if (chiefOf(o)) { m.notice.chief = { status: 'approved', by: actor.name, at: iso() }; } else { plans.assertWritable(o); try { const added = orgs.addMember(orgId, { name: CHIEF_NAME, email: `dri-chief@${orgId}.platform.invalid`, role: 'contributor' }, 'approved by ' + actor.name); orgs.memberRaw(orgId, added.id).mustChange = false; reg.save(); /* no one knows its password: the owner gets in only through a short session */ } catch (e) { throw err(e.status || 422, e.message); } m.notice.chief = { status: 'approved', by: actor.name, at: iso() }; } }
+  else m.notice.chief = { status: 'declined', by: actor.name, at: iso() };
+  await audit.adapter(orgId).put(orgId, 'wr_msgs', m.id, m); await audit.log(orgId, actor, 'chief.' + (decision === 'approve' ? 'approved' : 'declined'), { msgId }); logLine('chief.' + decision, { team: o.name, by: actor.name }); return m;
+}
+/** Teams that currently have a DRI Chief seat. */
+const chiefSeats = () => orgs.list().map((o) => { const r = orgs.raw(o.id); const c = chiefOf(r); return c ? { orgId: o.id, name: o.name } : null; }).filter(Boolean);
+function openChief(orgId) { const o = orgs.raw(orgId); const c = chiefOf(o); if (!c) throw err(404, 'This team has not approved a DRI Chief, or has removed it.'); logLine('chief.open', { team: o.name }); return { key: orgs.openSession(orgId, c.id), team: o.name }; }
+module.exports = { decideChief, chiefSeats, openChief, resendNotice, logCsv, logList, sendNotice, listNotices, ask, mine, inbox, draft, answer, close, lint, KINDS, SHARES };
