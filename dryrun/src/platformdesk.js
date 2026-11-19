@@ -69,6 +69,7 @@ async function ask(orgId, actor, role, { question, share, assetId, roomId } = {}
   const q = clip(question, 800); if (q.length < 10) throw err(422, 'Say what you would like help with.'); const sh = {}; for (const k of SHARES) sh[k] = !!(share && share[k]);
   const reqs = Object.values(store('help')); if (reqs.filter((r) => r.orgId === orgId && r.status === 'open').length >= MAX_OPEN) throw err(429, `You already have ${MAX_OPEN} open requests. Wait for answers first.`);
   const r = { id: id('hlp'), orgId, orgName: o.name, at: iso(), by: actor.name, byId: actor.id, question: q, shared: sh, context: await snapshot(orgId, sh, assetId, roomId), status: 'open', draft: null, answer: null }; store('help')[r.id] = r; reg.save();
+  await alertOwner('help', 'help:' + r.id, `${o.name} asked the platform team for help.`);
   await workroom.coachNote(orgId, workroom.GENERAL, `${actor.name} asked the platform team for help. You chose to share: ${SHARES.filter((k) => sh[k]).map((k) => ({ product: 'product results', rules: 'rules', customers: 'customer feedback', chat: 'recent chat' }[k])).join(', ') || 'nothing beyond the question'}. The platform team replies in this room.`); return view(r, true);
 }
 const view = (r, team) => ({ id: r.id, orgId: team ? undefined : r.orgId, orgName: team ? undefined : r.orgName, at: r.at, by: r.by, question: r.question, shared: r.shared, context: team ? undefined : r.context, status: r.status, answer: r.answer, answeredAt: r.answeredAt || null, draft: team ? undefined : r.draft });
@@ -102,6 +103,28 @@ async function answer(helpId, text) {
   const n = { id: id('ntc'), at: iso(), kind: 'reply', title: 'Reply to your request', text: t, helpId: r.id, sent: [], skipped: [], texted: false }; n.root = n.id; await deliverTo(n, [r.orgId], false); if (!n.sent.length) throw err(502, 'Could not post the reply to the team. ' + ((n.skipped[0] || {}).why || '')); store('notices')[n.id] = n; r.status = 'answered'; r.answer = t; r.answeredAt = iso(); logLine('help.answer', { noticeId: n.id, helpId: r.id, team: r.orgName }); reg.save(); return { request: view(r, false), msgId: n.sent[0].msgId, warnings: lint(t) };
 }
 function close(helpId) { const r = store('help')[helpId]; if (!r) throw err(404, 'That request is not here.'); r.status = 'closed'; reg.save(); return view(r, false); }
+// ---- text the owner when a team responds ---------------------------------------------------------------------------------------------
+const EVENTS = { answer: 'A team answered Helpful or Not for us', adopted: 'A team added your suggestion to its plan', help: 'A team asked for help', chief: 'A team decided on DRI Chief' };
+const DAILY_CAP = 20;
+const alertCfg = () => { const r = reg.load(); r.deskAlerts = r.deskAlerts || { on: false, phone: '', events: { answer: true, adopted: true, help: true, chief: true }, sent: {}, day: '', count: 0 }; return r.deskAlerts; };
+const alertView = () => { const a = alertCfg(); return { on: a.on, phone: a.phone ? messaging.mask(a.phone) : '', hasPhone: !!a.phone, events: a.events, labels: EVENTS, today: a.day === iso().slice(0, 10) ? a.count : 0, cap: DAILY_CAP }; }
+function setAlerts({ on, phone, events } = {}) { const a = alertCfg(); if (phone !== undefined && phone !== '') { if (!messaging.validPhone(phone)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); a.phone = String(phone).trim(); } if (phone === '') a.phone = ''; if (on !== undefined) { if (on && !a.phone) throw err(422, 'Add your phone number first.'); a.on = !!on; } if (events && typeof events === 'object') for (const k of Object.keys(EVENTS)) if (k in events) a.events[k] = !!events[k]; reg.save(); return alertView(); }
+const siteUrl = () => (process.env.DRYRUN_PUBLIC_URL || 'https://dryrun.hnnworld.com') + '/app.html';
+/** One text per team and message and kind of response, so a busy team does not flood the owner. Never throws: a failed text must not hold up a team. */
+async function alertOwner(event, key, text) {
+  try { const a = alertCfg(); if (!a.on || !a.phone || !a.events[event]) return { sent: false, why: 'off' }; if (a.sent[key]) return { sent: false, why: 'already told you' };
+    const day = iso().slice(0, 10); if (a.day !== day) { a.day = day; a.count = 0; } if (a.count >= DAILY_CAP) return { sent: false, why: 'daily limit' };
+    a.sent[key] = iso(); const keys = Object.keys(a.sent); if (keys.length > 2000) for (const k of keys.slice(0, 500)) delete a.sent[k]; a.count++; reg.save();
+    const d = await Promise.race([messaging.deliver({ phone: a.phone, channels: { sms: true, whatsapp: false }, text: `Dry Run: ${text} Open Team messages: ${siteUrl()}`.slice(0, 300), orgId: null, orgName: 'Platform', who: 'owner', purpose: 'owner alert' }), new Promise((r) => setTimeout(() => r([{ ok: false }]), 5000))]);
+    const ok = d.length > 0 && d.every((x) => x.ok); logLine('owner.alert', { event, ok }); return { sent: ok };
+  } catch { return { sent: false, why: 'error' }; }
+}
+async function testAlert() { const a = alertCfg(); if (!a.phone) throw err(422, 'Add your phone number first.'); const d = await messaging.deliver({ phone: a.phone, channels: { sms: true, whatsapp: false }, text: 'Dry Run: this is a test. You will get a text like this when a team responds to your messages.', orgId: null, orgName: 'Platform', who: 'owner', purpose: 'owner alert test' }); const ok = d.length > 0 && d.every((x) => x.ok); if (!ok) throw err(502, (d.find((x) => !x.ok) || {}).error || 'The text could not be sent.'); return { ok: true }; }
+const teamName = (orgId) => { try { return orgs.raw(orgId).name; } catch { return 'A team'; } };
+/** Called when a member marks a platform message Helpful or Not for us. */
+const onResponse = (orgId, msg, response) => alertOwner('answer', `answer:${msg.notice.id || msg.id}:${orgId}`, `${teamName(orgId)} said "${response === 'helpful' ? 'Helpful' : 'Not for us'}" to "${msg.notice.title}".`);
+const onAdopted = (orgId, idea, use) => alertOwner('adopted', `adopted:${idea.noticeId || idea.msgId}:${orgId}:${use}`, `${teamName(orgId)} added "${idea.title}" to its ${use === 'design' ? 'design considerations' : 'iteration ideas'}.`);
+
 const CHIEF_NAME = 'DRI Chief';
 const chiefOf = (o) => Object.values(o.members).find((m) => m.role === 'contributor' && m.name === CHIEF_NAME) || null;
 /** The team's admin decides. Approving adds a limited seat (look, iterate, vote, post); the team can remove it at any time. */
@@ -110,9 +133,9 @@ async function decideChief(orgId, actor, role, msgId, decision) {
   const o = orgs.raw(orgId); const m = await audit.adapter(orgId).get(orgId, 'wr_msgs', msgId); if (!m || m.kind !== 'platform' || !m.notice.chief) throw err(404, 'That request is not here.'); if (m.notice.chief.status !== 'pending') throw err(409, 'This has already been decided.');
   if (decision === 'approve') { if (chiefOf(o)) { m.notice.chief = { status: 'approved', by: actor.name, at: iso() }; } else { plans.assertWritable(o); try { const added = orgs.addMember(orgId, { name: CHIEF_NAME, email: `dri-chief@${orgId}.platform.invalid`, role: 'contributor' }, 'approved by ' + actor.name); orgs.memberRaw(orgId, added.id).mustChange = false; reg.save(); /* no one knows its password: the owner gets in only through a short session */ } catch (e) { throw err(e.status || 422, e.message); } m.notice.chief = { status: 'approved', by: actor.name, at: iso() }; } }
   else m.notice.chief = { status: 'declined', by: actor.name, at: iso() };
-  await audit.adapter(orgId).put(orgId, 'wr_msgs', m.id, m); await audit.log(orgId, actor, 'chief.' + (decision === 'approve' ? 'approved' : 'declined'), { msgId }); logLine('chief.' + decision, { team: o.name, by: actor.name }); return m;
+  await audit.adapter(orgId).put(orgId, 'wr_msgs', m.id, m); await audit.log(orgId, actor, 'chief.' + (decision === 'approve' ? 'approved' : 'declined'), { msgId }); await alertOwner('chief', 'chief:' + msgId, `${o.name} ${decision === 'approve' ? 'approved' : 'declined'} adding DRI Chief.`); logLine('chief.' + decision, { team: o.name, by: actor.name }); return m;
 }
 /** Teams that currently have a DRI Chief seat. */
 const chiefSeats = () => orgs.list().map((o) => { const r = orgs.raw(o.id); const c = chiefOf(r); return c ? { orgId: o.id, name: o.name } : null; }).filter(Boolean);
 function openChief(orgId) { const o = orgs.raw(orgId); const c = chiefOf(o); if (!c) throw err(404, 'This team has not approved a DRI Chief, or has removed it.'); logLine('chief.open', { team: o.name }); return { key: orgs.openSession(orgId, c.id), team: o.name }; }
-module.exports = { decideChief, chiefSeats, openChief, resendNotice, logCsv, logList, sendNotice, listNotices, ask, mine, inbox, draft, answer, close, lint, KINDS, SHARES };
+module.exports = { alertView, setAlerts, testAlert, onResponse, onAdopted, decideChief, chiefSeats, openChief, resendNotice, logCsv, logList, sendNotice, listNotices, ask, mine, inbox, draft, answer, close, lint, KINDS, SHARES };
