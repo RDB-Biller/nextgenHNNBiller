@@ -153,6 +153,8 @@ P.get('/notices', wrap(async (req, res) => res.json({ notices: await desk.listNo
 P.post('/notices', wrap(async (req, res) => res.status(201).json(await desk.sendNotice(req.body || {}))));
 P.post('/notices/:id/resend', wrap(async (req, res) => res.status(201).json(await desk.resendNotice(req.params.id, req.body || {}))));
 P.get('/notices.csv', wrap(async (req, res) => { res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="platform-messages.csv"'); res.setHeader('Cache-Control', 'no-store'); res.end(await desk.logCsv()); }));
+P.get('/translator', wrap(async (req, res) => res.json(await require('./translate').status())));
+P.post('/translator/refresh', wrap(async (req, res) => res.json(await require('./translate').refresh())));
 P.get('/alerts', (req, res) => res.json(desk.alertView()));
 P.patch('/alerts', (req, res) => res.json(desk.setAlerts(req.body || {})));
 P.post('/alerts/test', wrap(async (req, res) => res.json(await desk.testAlert())));
@@ -374,7 +376,13 @@ O.post('/workroom/digest/now', need('read'), wrap(async (req, res) => {
 }));
 O.get('/workroom/decisions', need('read'), wrap(async (req, res) => res.json(await wr.decisions(oid(req), req.query.q))));
 O.get('/workroom/rooms/:rid', need('read'), wrap(async (req, res) => res.json(await wr.thread(oid(req), req.actor, req.params.rid))));
+O.post('/workroom/rooms/:rid/translate', need('read'), wrap(async (req, res) => { const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.filter((x) => typeof x === 'string').slice(0, 20) : []; res.json({ tr: await wr.translateIds(oid(req), req.actor, req.params.rid, ids) }); }));
+/** Preview what teammates will read, before sending. */
+O.post('/workroom/translate-preview', need('read'), wrap(async (req, res) => { const T = require('./translate'); const b = req.body || {}; const text = String(b.text || '').slice(0, 2000); if (!text.trim()) throw err(422, 'Write something first.'); const from = T.normalise(b.from || orgs.memberRaw(oid(req), req.actor.id).lang); const langs = [...new Set(Object.values(req.org.members).map((m) => T.normalise(m.lang)))].filter((l) => l !== from).slice(0, 4); const out = []; for (const l of langs) { const r = await T.translate(text, from, l, { orgId: oid(req) }); out.push({ lang: l, name: T.lang(l).name, ok: r.ok, text: r.ok ? r.text : null, why: r.ok ? null : r.why }); } res.json({ previews: out }); }));
+O.get('/languages', need('read'), wrap(async (req, res) => { const st = await require('./translate').status(); res.json({ languages: st.languages, translator: { on: st.reachable }, me: { ...(({ lang, showOriginal, translate }) => ({ lang: lang || 'en', showOriginal: !!showOriginal, translate: translate !== false }))(orgs.memberRaw(oid(req), req.actor.id)) } }); }));
+O.patch('/me/language', need('read'), (req, res) => res.json(orgs.setLanguage(oid(req), req.actor.id, req.body || {})));
 O.post('/workroom/rooms/:rid/messages', need('read'), wrap(async (req, res) => {
+  const bot = await require('./interp').command(oid(req), req.actor, (req.body || {}).text); if (bot) return res.json({ bot });
   const r = await wr.post(oid(req), req.actor, req.role, req.params.rid, req.body || {});
   await smsTo(req.org, r.mentioned.filter((i) => i !== req.actor.id).map((i) => memberOf(req, i)), `Dry Run: ${req.actor.name} mentioned you in ${r.room.name}: "${snip(r.message.text)}" Open: ${roomUrl(req, r.room.id)}`, 'workroom mention');
   let coach = null; if (r.coach) coach = await wr.coachReply(oid(req), req.actor, req.role, req.params.rid, { text: r.message.text, pack: packs.detail(req.org.pack) });

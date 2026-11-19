@@ -64,6 +64,17 @@ async function put(orgId, rec) { await ad(orgId).put(orgId, 'wr_msgs', rec.id, r
 const base = (roomId, actor, kind, extra) => ({ id: id('msg'), roomId, at: iso(), byId: actor ? actor.id : null, by: actor ? actor.name : 'Dry Run', kind, ...extra });
 
 /** Messages of a room, oldest first, with the tasks they refer to and a name for each approver decision. */
+const TRANSLATABLE = new Set(['text', 'coach', 'platform']);
+const langOf = (orgId, memberId) => { try { const m = orgs.memberRaw(orgId, memberId); return { lang: require('./translate').normalise(m.lang), showOriginal: !!m.showOriginal, translate: m.translate !== false }; } catch { return { lang: 'en', showOriginal: false, translate: true }; } };
+/** Show each message in the reader's language. The stored message never changes; the translation is made for this reader and cached. */
+async function localise(orgId, me, msgs, { limit = 40, budgetMs = 5000, only = null } = {}) {
+  const tr = require('./translate'); const pref = langOf(orgId, me.id); const out = {}; if (!pref.translate) return { pref, out };
+  const todo = msgs.filter((m) => TRANSLATABLE.has(m.kind) && m.text && tr.normalise(m.lang) !== pref.lang && (!only || only.has(m.id))); const mine = todo.slice(-limit); const t0 = Date.now(); let i = 0;
+  const work = async () => { while (i < mine.length) { const m = mine[i++]; if (Date.now() - t0 > budgetMs) { out[m.id] = { state: 'pending' }; continue; } const r = await tr.translate(m.text, m.lang || 'en', pref.lang, { orgId });
+    out[m.id] = r.ok ? { state: 'translated', text: r.text, from: tr.normalise(m.lang), to: pref.lang } : { state: r.why === 'same' ? 'same' : 'unavailable', why: r.why, from: tr.normalise(m.lang), to: pref.lang }; } };
+  await Promise.all([work(), work(), work(), work()]); for (const m of todo.slice(0, Math.max(0, todo.length - limit))) out[m.id] = { state: 'pending' }; return { pref, out };
+}
+async function translateIds(orgId, me, roomId, ids) { const msgs = (await allMsgs(orgId)).filter((m) => m.roomId === roomId && ids.includes(m.id)); const { out } = await localise(orgId, me, msgs, { limit: 20, budgetMs: 8000, only: new Set(ids) }); return out; }
 async function thread(orgId, me, roomId, { guestEid = null } = {}) {
   const room = await getRoom(orgId, roomId);
   if (guestEid && !(room.kind === 'guest' && (room.engagementIds || []).includes(guestEid))) throw err(403, 'This room has not been shared with you.');
@@ -74,18 +85,21 @@ async function thread(orgId, me, roomId, { guestEid = null } = {}) {
   if (room.assetId && !guestEid) { try { const d = await assets.detail(orgId, room.assetId, { withData: true }); const last = d.versionList[d.versionList.length - 1]; const data = last.data || {}; const src = data.generatedFrom || data;
     const params = Object.entries(src).filter(([k, v]) => ['string', 'number'].includes(typeof v) && !['name', 'currency', 'archetype', 'id'].includes(k)).slice(0, 12).map(([k, v]) => ({ key: k, value: v }));
     pinned = { assetId: d.id, name: d.name, kind: d.kind, version: last.v, gate: last.gate, params, versions: d.versionList.map((v) => ({ v: v.v, gate: v.gate })) }; } catch { pinned = null; } }
+  let langInfo = null; if (!guestEid) { const { pref, out } = await localise(orgId, me, msgs); for (let i = 0; i < msgs.length; i++) if (out[msgs[i].id]) msgs[i] = { ...msgs[i], tr: out[msgs[i].id] };
+    const T = require('./translate'); const st = await T.status(); langInfo = { me: pref, translator: { on: st.reachable }, members: Object.values(orgs.raw(orgId).members).slice(0, 60).map((x) => ({ id: x.id, name: x.name, lang: T.normalise(x.lang) })) }; }
   if (!guestEid) await markRead(orgId, me.id, roomId);
-  return { room: { id: room.id, kind: room.kind, name: room.name, assetId: room.assetId || null, engagementIds: room.engagementIds || [] }, messages: msgs, tasks, pinned };
+  return { langInfo, room: { id: room.id, kind: room.kind, name: room.name, assetId: room.assetId || null, engagementIds: room.engagementIds || [] }, messages: msgs, tasks, pinned };
 }
 
-async function post(orgId, actor, role, roomId, { text, anchor, guestEid = null } = {}) {
+async function post(orgId, actor, role, roomId, { text, anchor, lang: wrote, guestEid = null } = {}) {
   const o = orgs.raw(orgId); plans.assertWritable(o); const room = await getRoom(orgId, roomId);
   if (guestEid) { if (!(room.kind === 'guest' && (room.engagementIds || []).includes(guestEid))) throw err(403, 'This room has not been shared with you.'); }
   else if (!canPost(role)) throw err(403, 'Your role can read the Workroom but not post.');
   const t = clip(text, 2000); if (!t) throw err(422, 'Write a message first.');
   const men = guestEid ? { ids: [], coach: false } : mentionsIn(orgId, t);
   let a = null; if (anchor && !guestEid) a = { assetId: room.assetId || anchor.assetId || null, version: anchor.version ? Number(anchor.version) : null, param: clip(anchor.param, 60) || null, runId: clip(anchor.runId, 60) || null };
-  const msg = await put(orgId, base(roomId, actor, 'text', { text: t, mentions: men.ids, anchor: a && (a.param || a.version || a.runId) ? a : null }));
+  const T = require('./translate'); const wl = guestEid ? 'en' : (wrote && T.isKnown(wrote) ? String(wrote).toLowerCase() : langOf(orgId, actor.id).lang);
+  const msg = await put(orgId, base(roomId, actor, 'text', { lang: wl, text: t, mentions: men.ids, anchor: a && (a.param || a.version || a.runId) ? a : null }));
   return { message: msg, mentioned: men.ids, coach: men.coach, room };
 }
 
@@ -239,4 +253,4 @@ async function createGuestRoom(orgId, actor, role, { name, engagementIds } = {})
 }
 async function guestRooms(orgId, eid) { return (await ensureRooms(orgId)).filter((r) => r.kind === 'guest' && (r.engagementIds || []).includes(eid)).map((r) => ({ id: r.id, name: r.name })); }
 
-module.exports = { recentText, platformNote, respondNote, GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, addLink, addFile, getFile, removeFile, createGuestRoom, guestRooms, markRead, getRoom };
+module.exports = { translateIds, localise, recentText, platformNote, respondNote, GENERAL, rooms, thread, post, mentionsIn, requestApproval, decideApproval, addDecision, decisions, addTask, setTask, mine, digestFor, coachReply, coachNote, parseWhatIf, postRun, addLink, addFile, getFile, removeFile, createGuestRoom, guestRooms, markRead, getRoom };

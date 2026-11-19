@@ -23,7 +23,7 @@ function publicOrg(o) {
   const { members, salt, ...rest } = o;
   return { ...rest, storage: store.describe(o.storage), memberCount: Object.keys(members).length, status: plans.statusOf(o), daysLeft: plans.daysLeft(o), limits: plans.limitsFor(o), planLabel: plans.PLANS[o.plan].label };
 }
-const publicMember = (m) => ({ username: m.username || null, mustChange: !!m.mustChange, id: m.id, name: m.name, email: m.email, role: m.role, phone: m.phone ? require('./messaging').mask(m.phone) : '', addedBy: m.addedBy || null, createdAt: m.createdAt, lastSeenAt: m.lastSeenAt || null });
+const publicMember = (m) => ({ username: m.username || null, mustChange: !!m.mustChange, id: m.id, name: m.name, email: m.email, role: m.role, phone: m.phone ? require('./messaging').mask(m.phone) : '', addedBy: m.addedBy || null, createdAt: m.createdAt, lastSeenAt: m.lastSeenAt || null, lang: m.lang || 'en' });
 const freeCount = () => Object.values(reg.load().orgs).filter((o) => plans.isFree(o) && !o.suspended).length;
 function assertFreeRoom() { const cap = reg.load().config.caps.maxFreeOrgs; if (cap !== null && cap !== undefined && freeCount() >= cap) throw err(402, `The platform is capped at ${cap} free organisations. Raise the cap or switch one to paid first.`); }
 
@@ -99,6 +99,13 @@ function addMember(orgId, { name, email, phone, role = 'builder' } = {}, addedBy
   return { ...publicMember(o.members[mid]), apiKey: key, password, note: 'Shown once. Store it safely.' };
 }
 const memberRaw = (orgId, memberId) => { const m = raw(orgId).members[memberId]; if (!m) throw err(404, 'Unknown member.'); return m; };
+/** A person's own reading and writing language. Everyone can set their own; nobody can set another person's. */
+function setLanguage(orgId, memberId, { lang, showOriginal, translate } = {}) {
+  const tr = require('./translate'); const m = raw(orgId).members[memberId]; if (!m) throw err(404, 'Unknown member.');
+  if (lang !== undefined) { if (!tr.isKnown(lang)) throw err(422, 'That language is not available.'); m.lang = String(lang).toLowerCase(); }
+  if (showOriginal !== undefined) m.showOriginal = !!showOriginal; if (translate !== undefined) m.translate = !!translate; reg.save();
+  return { lang: m.lang || 'en', showOriginal: !!m.showOriginal, translate: m.translate !== false };
+}
 function directory() { return Object.values(reg.load().orgs).map((o) => ({ id: o.id, name: o.name, pack: o.pack, plan: o.plan, status: plans.statusOf(o), members: Object.values(o.members).map(publicMember) })); }
 function members(orgId) { return Object.values(raw(orgId).members).map(publicMember); }
 function setRole(orgId, memberId, role) {
@@ -167,4 +174,4 @@ const raws = raw;
 function openSession(orgId, memberId) { const m = raw(orgId).members[memberId]; const key = newKey('dr_s'); m.sessions = [{ hash: sha(key), exp: Date.now() + SESSION_MS * 4 }]; reg.save(); return key; }
 async function removeOrg(orgId) { const o = raw(orgId); try { await store.build(o.storage).purge(orgId); } catch {} delete reg.load().orgs[orgId]; reg.save(); }
 const refCode = (orgId) => String(orgId).slice(4, 12);
-module.exports = { openSession, removeOrg, refCode, login, changePassword, resetPassword, forgotPassword, setRegulatoryRules, memberRaw, directory, ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };
+module.exports = { setLanguage, openSession, removeOrg, refCode, login, changePassword, resetPassword, forgotPassword, setRegulatoryRules, memberRaw, directory, ROLES, can, create, list, get, raw: raws, authenticate, addMember, members, setRole, removeMember, rotateKey, settings, setPlan, platformConfig, setPlatformConfig, setStorage, tickChecklist };
