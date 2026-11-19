@@ -36,19 +36,19 @@ async function sendNotice({ to, kind, title, text, alsoText } = {}) {
   store('notices')[n.id] = n; logLine('notice.send', { noticeId: n.id, kind, title: t, teams: n.sent.map((s) => s.name), skipped: n.skipped.length }); reg.save(); return n;
 }
 /** Send the same message to other teams, for example a team that answered "Not for us". A team that already got it (in any send) is not sent it twice. */
-async function resendNotice(noticeId, { to, alsoText } = {}) {
+async function resendNotice(noticeId, { to, alsoText, title, text } = {}) {
   const src = store('notices')[noticeId]; if (!src) throw err(404, 'That message is not here.'); if (src.kind === 'reply') throw err(422, 'A reply to a help request belongs to that team. Write a new suggestion instead.');
   const ids = to === 'all' ? orgs.list().map((o) => o.id) : Array.isArray(to) ? to : []; if (!ids.length) throw err(422, 'Choose which teams to send it to.');
   const got = new Set(Object.values(store('notices')).filter((x) => x.root === src.root).flatMap((x) => x.sent.map((s) => s.orgId))); const fresh = ids.filter((i) => !got.has(i));
-  const n = { id: id('ntc'), root: src.root, again: src.id, at: iso(), kind: src.kind, title: src.title, text: src.text, sent: [], skipped: ids.filter((i) => got.has(i)).map((i) => ({ orgId: i, why: 'Already received this message' })), texted: !!alsoText };
-  if (!fresh.length) throw err(409, 'Every team you chose has already received this message.'); await deliverTo(n, fresh, alsoText); store('notices')[n.id] = n; logLine('notice.resend', { noticeId: n.id, from: src.id, title: n.title, teams: n.sent.map((s) => s.name) }); reg.save(); return n;
+  const n = { id: id('ntc'), root: src.root, again: src.id, at: iso(), kind: src.kind, title: clip(title, 80) || src.title, text: clip(text, 1500) || src.text, edited: false, sent: [], skipped: ids.filter((i) => got.has(i)).map((i) => ({ orgId: i, why: 'Already received this message' })), texted: !!alsoText };
+  if (!fresh.length) throw err(409, 'Every team you chose has already received this message.'); if (n.title.length < 1 || n.text.length < 10) throw err(422, 'The message is too short.'); n.edited = n.title !== src.title || n.text !== src.text; await deliverTo(n, fresh, alsoText); store('notices')[n.id] = n; logLine('notice.resend', { noticeId: n.id, from: src.id, edited: n.edited, title: n.title, teams: n.sent.map((s) => s.name) }); reg.save(); return n;
 }
 async function listNotices() {
   const out = [];
   for (const n of Object.values(store('notices')).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100)) {
     const teams = []; let helpful = 0, notNow = 0;
     for (const s of n.sent) { let h = 0, nn = 0; try { const m = await audit.adapter(s.orgId).get(s.orgId, 'wr_msgs', s.msgId); for (const v of Object.values((m && m.notice.responses) || {})) v === 'helpful' ? h++ : nn++; } catch { /* team gone */ } helpful += h; notNow += nn; teams.push({ orgId: s.orgId, name: s.name, helpful: h, notNow: nn, answer: h + nn === 0 ? 'none' : nn > 0 && h === 0 ? 'not_now' : h > 0 && nn === 0 ? 'helpful' : 'mixed', texted: s.sms.length ? s.sms.every((x) => x.ok) ? 'delivered' : 'failed' : null }); }
-    out.push({ id: n.id, root: n.root, again: n.again || null, at: n.at, kind: n.kind, title: n.title, text: n.text, texted: n.texted, skipped: n.skipped, teams, helpful, notNow, sent: n.sent }); }
+    out.push({ id: n.id, root: n.root, again: n.again || null, edited: !!n.edited, at: n.at, kind: n.kind, title: n.title, text: n.text, texted: n.texted, skipped: n.skipped, teams, helpful, notNow, sent: n.sent }); }
   return out;
 }
 /** The complete record as a spreadsheet file. */
