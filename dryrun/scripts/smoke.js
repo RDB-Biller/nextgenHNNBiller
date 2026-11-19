@@ -446,6 +446,14 @@ async function main() {
       const sent = await plat('POST', `/help/${hr.id}/answer`, { text: dr.j.text + ' Please take your time.' }); ok(sent.s === 200 && sent.j.request.status === 'answered', 'the owner sends the reply after reading it');
       ok((await plat('POST', `/help/${hr.id}/draft`)).s === 409 && (await plat('POST', `/help/${hr.id}/answer`, { text: 'Another reply that is long enough' })).s === 409, 'an answered request cannot be drafted or answered again');
       const mine = (await call('GET', '/api/org/workroom/ask-platform', APPR)).j.requests; ok(mine.some((x) => x.id === hr.id && x.status === 'answered' && x.answer), 'the team sees the reply');
+      const other = await plat('POST', '/orgs', { name: 'Second Mutual Ltd', sector: 'insurer', adminEmail: 'sm@x.test', plan: 'paid' }); const OTHER = other.j.org.id;
+      const nl = (await plat('GET', '/notices')).j.notices; const sug = nl.find((n) => n.id === nt.j.id); const tm = sug.teams.find((t) => t.orgId === orgId); ok(tm && tm.answer === 'mixed' && sug.text.includes('two percent'), 'the log keeps the full text and each team\'s answer');
+      ok(nl.some((n) => n.kind === 'reply' && n.teams.length === 1), 'replies to help requests are in the log too');
+      const rs = await plat('POST', `/notices/${nt.j.id}/resend`, { to: [orgId, OTHER] }); ok(rs.s === 201 && rs.j.sent.length === 1 && rs.j.sent[0].orgId === OTHER && rs.j.skipped.some((x) => x.orgId === orgId), 'the same message can go to another team, and a team that already has it is skipped');
+      ok((await plat('POST', `/notices/${nt.j.id}/resend`, { to: [OTHER] })).s === 409, 'a team cannot be sent the same message twice');
+      const rep = nl.find((n) => n.kind === 'reply'); ok((await plat('POST', `/notices/${rep.id}/resend`, { to: [OTHER] })).s === 422, 'a reply to one team\'s request cannot be forwarded');
+      const csv = await fetch(`${base}/api/platform/notices.csv`, { headers: { 'x-platform-key': PK } }); const ct = await csv.text(); ok(csv.status === 200 && /attachment/.test(csv.headers.get('content-disposition')) && ct.includes('Second Mutual Ltd') && ct.includes('Try a small price test'), 'the whole record downloads as a spreadsheet');
+      ok((await plat('GET', '/message-log')).j.log.some((l) => l.type === 'notice.resend') , 'sends, resends and replies are written to the platform log');
       const lint = await plat('POST', `/help/${hr.id}/lint`, { text: 'Email me at boss@x.test, it will definitely work' }); ok(lint.j.warnings.length >= 2, 'the assistant flags emails and promises before sending'); }
     // install the Node connector
     const fakeApp = { _router: { stack: [{ route: { path: '/quote', methods: { get: true } } }, { route: { path: '/policy/:id', methods: { get: true, put: true } } }, { route: { path: '/dryrun/capture', methods: { get: true } } }] } };

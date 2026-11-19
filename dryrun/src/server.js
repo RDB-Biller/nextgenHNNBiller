@@ -133,6 +133,9 @@ P.post('/orgs/:id/message', wrap(async (req, res) => {
 const desk = require('./platformdesk');
 P.get('/notices', wrap(async (req, res) => res.json({ notices: await desk.listNotices() })));
 P.post('/notices', wrap(async (req, res) => res.status(201).json(await desk.sendNotice(req.body || {}))));
+P.post('/notices/:id/resend', wrap(async (req, res) => res.status(201).json(await desk.resendNotice(req.params.id, req.body || {}))));
+P.get('/notices.csv', wrap(async (req, res) => { res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="platform-messages.csv"'); res.setHeader('Cache-Control', 'no-store'); res.end(await desk.logCsv()); }));
+P.get('/message-log', (req, res) => res.json({ log: desk.logList() }));
 P.get('/help', (req, res) => res.json({ requests: desk.inbox() }));
 P.post('/help/:id/draft', (req, res) => res.json(desk.draft(req.params.id)));
 P.post('/help/:id/lint', (req, res) => res.json({ warnings: desk.lint((req.body || {}).text) }));
