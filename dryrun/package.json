@@ -10,7 +10,8 @@
     "smoke": "node scripts/smoke.js",
     "smoke:pentest": "node scripts/smoke-pentest.js",
     "smoke:apps": "node scripts/smoke-apps.js",
-    "smoke:invite": "node scripts/smoke-invite.js"
+    "smoke:invite": "node scripts/smoke-invite.js",
+    "smoke:join": "node scripts/smoke-join.js"
   },
   "engines": { "node": ">=18" },
   "dependencies": {},

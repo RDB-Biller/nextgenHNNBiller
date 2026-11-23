@@ -229,3 +229,14 @@ On the Team tab, **Invite by email link** takes one or more email addresses and 
 Links are shared by hand by default: each result has **Copy link** and **Email it** (opens your own mail app with the message ready). To have Dry Run send the email itself, set `RESEND_API_KEY` and `EMAIL_FROM` (a sender address verified with Resend). The message history records each email without the sign-in link. Smoke: `npm run smoke:invite`.
 
 **My apps** now starts with TrimesterSave BirthPrep (`tmsapp.trimestersave.com/birthprep` and its Railway address), with an **Open BirthPrep first** button.
+
+## One link for everyone (general join link)
+
+In Team, **One link for everyone** makes a single link you can paste into any email or chat. Whoever opens it types their own email (and mobile number); Dry Run then sends them *their own* personal sign-in link by text, and by email too when email sending is set up. The personal link is never shown on the page. Options: role, allowed email domains, a cap on people, an expiry; you can replace or switch it off at any time.
+
+Safeguards: existing members only ever receive the link at the email and phone already on file; requests are rate-limited per address and per IP; seat limits apply; personal links are hidden in the message log. Anyone holding the link can request to join, so use a domain list or cap for wider sharing.
+
+### Free email sending
+Set `EMAIL_FROM` (for example `Dry Run <hello@yourdomain.com>`) plus **`BREVO_API_KEY`** (Brevo free plan: 300 emails a day) or `RESEND_API_KEY` (Resend free plan: 100 a day, 3,000 a month). Verify your sending domain or address with the provider first. Without these, the link is sent by text only.
+
+Smoke test: `npm run smoke:join`.

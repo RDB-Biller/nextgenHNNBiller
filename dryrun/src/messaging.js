@@ -40,7 +40,7 @@ async function sendWhatsApp(to, text) {
   return r.ok ? { ok: true } : { ok: false, error: j.message || j.error || j.description || `Africa's Talking WhatsApp answered ${r.status}` };
 }
 /** The log keeps the full text of every message, sent or failed. Passwords and keys inside a text are hidden first. */
-const hide = (t) => String(t == null ? '' : t).replace(/(password[:\s]+)([^\s,;()]+)/gi, '$1[hidden]').replace(/\b(?:dr|drs|drt|dr_s)_[0-9a-f]{12,}\b/g, '[key hidden]').replace(/\bsk_(?:live|test)_\w+/g, '[key hidden]').slice(0, 600);
+const hide = (t) => String(t == null ? '' : t).replace(/(password[:\s]+)([^\s,;()]+)/gi, '$1[hidden]').replace(/\b(?:dr|drs|drt|dr_s)_[0-9a-f]{12,}\b/g, '[key hidden]').replace(/\bsk_(?:live|test)_\w+/g, '[key hidden]').replace(/https?:\/\/\S*\/app\?(?:invite|join)=\S+/g, '[sign-in link hidden]').slice(0, 600);
 function logIt(entry) { const r = reg.load(); r.messages = r.messages || []; const e = { at: iso(), ...entry }; if (e.text !== undefined) e.text = hide(e.text); r.messages.unshift(e); r.messages.length = Math.min(r.messages.length, 1500); reg.save(); }
 /** Record an attempt that never reached the SMS service, for example no phone number on file. */
 const record = (entry) => logIt({ ok: false, ...entry });

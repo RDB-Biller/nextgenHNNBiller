@@ -51,4 +51,6 @@ function accept(token) {
   const { o, m } = parse(token); const i = info(token); m.emailInvite.usedAt = iso(); m.mustChange = false; m.passwordPending = true; m.joinedAt = m.joinedAt || iso(); const key = orgs.openSession(o.id, m.id); reg.save();
   return { key, ...i, needsPhone: !m.phone };
 }
-module.exports = { invite, info, accept, validEmail };
+/** Make a fresh personal sign-in link for an existing member (used by the general join link). */
+function issue(orgId, m, byName, site) { const tok = newKey('i').slice(2, 34); m.emailInvite = { hash: sha(tok), exp: Date.now() + TTL, at: iso(), by: byName }; reg.save(); return link(site, orgId, m.id, tok); }
+module.exports = { invite, info, accept, validEmail, issue, nameFrom };

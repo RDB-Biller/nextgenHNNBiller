@@ -375,8 +375,13 @@ O.post('/workroom/sites/bulk', need('write'), wrap(async (req, res) => { const {
 
 // ---- invite by email link, and the mobile number prompt that follows ------------------------------------------------------------------
 const emailInvite = require('./emailinvite');
+const joinLink = require('./joinlink');
 app.get('/api/public/email-invite/:token', wrap(async (req, res) => res.json(emailInvite.info(req.params.token))));
 app.post('/api/public/email-invite/:token/accept', wrap(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(emailInvite.accept(req.params.token)); }));
+app.get('/api/public/join-link/:token', wrap(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(joinLink.info(req.params.token)); }));
+app.post('/api/public/join-link/:token/request', wrap(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await joinLink.request(req.params.token, req.body || {}, siteUrl(req), clientIp(req))); }));
+O.get('/team/join-link', need('team'), wrap(async (req, res) => res.json(joinLink.get(oid(req), siteUrl(req)))));
+O.post('/team/join-link', need('team'), wrap(async (req, res) => res.json(await joinLink.set(oid(req), req.actor, siteUrl(req), req.body || {}))));
 O.post('/team/email-invite', need('team'), wrap(async (req, res) => res.json(await emailInvite.invite(oid(req), req.actor, siteUrl(req), req.body))));
 P.post('/orgs/:id/email-invite', wrap(async (req, res) => { orgs.raw(req.params.id); res.json(await emailInvite.invite(req.params.id, PLATFORM_ACTOR, siteUrl(req), req.body)); }));
 O.patch('/me/phone', wrap(async (req, res) => { const ph = String((req.body || {}).phone || '').trim(); if (!messaging.validPhone(ph)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); const m = orgs.memberRaw(oid(req), req.actor.id); m.phone = ph; require('./registry').save();
