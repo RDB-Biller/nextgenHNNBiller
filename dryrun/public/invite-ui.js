@@ -17,7 +17,7 @@ function inviteLanding() {
   const v = S.invite; const box = (...k) => h('div', { class: 'login' }, h('h1', {}, 'Dry ', h('b', {}, 'Run')), ...k);
   if (v.error) return box(h('div', { class: 'err', role: 'alert' }, v.error), h('p', { class: 'sm' }, 'Ask the person who invited you for a new link, or sign in with your username and password.'), h('button', { class: 'ghost', onclick: () => { S.invite = null; render(); } }, 'Go to sign in'));
   return box(msgs(), h('p', {}, v.info.invitedBy === 'a join link' ? 'You have been invited to join ' : `${v.info.invitedBy} invited you to join `, h('strong', {}, v.info.organisation), ` as ${v.info.role === 'admin' ? 'an admin' : 'a ' + v.info.role}.`), h('p', { class: 'sm' }, `Signing in as ${v.info.name} (${v.info.email}). No password needed.`),
-    h('button', { class: 'go', onclick: async () => { S.err = null; try { const r = await fetch(`/api/public/email-invite/${encodeURIComponent(v.token)}/accept`, { method: 'POST' }); const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); KEY = j.key; KIND = 'member'; sessionStorage.setItem('dr_key', KEY); sessionStorage.setItem('dr_kind', KIND); history.replaceState(null, '', location.pathname); S.invite = null; S.tab = 'overview'; S.welcome = true; await boot(); } catch (e) { fail(e); } render(); } }, 'Sign in and continue'));
+    h('button', { class: 'go', onclick: async () => { S.err = null; try { const r = await fetch(`/api/public/email-invite/${encodeURIComponent(v.token)}/accept`, { method: 'POST' }); const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); KEY = j.key; KIND = 'member'; sessionStorage.setItem('dr_key', KEY); sessionStorage.setItem('dr_kind', KIND); history.replaceState(null, '', location.pathname); S.invite = null; S.tab = 'overview'; S.welcome = true; await boot(); await dryrunLand(); } catch (e) { fail(e); } render(); } }, 'Sign in and continue'));
 }
 async function inviteBoot() {
   const jt = new URLSearchParams(location.search).get('join');
@@ -63,4 +63,18 @@ function joinLanding() {
     h('label', {}, 'Your email (optional)' + (v.info.domains.length ? ': use your ' + v.info.domains.map((d) => '@' + d).join(' or ') + ' address' : '')), em = h('input', { type: 'email', autocomplete: 'email', placeholder: 'you@example.com', 'aria-label': 'Your email' }),
     h('label', {}, 'Your name (optional)'), nm = h('input', { autocomplete: 'name', 'aria-label': 'Your name' }),
     hint = h('p', { class: 'sm', role: 'status' }), h('p', {}, h('button', { class: 'go', onclick: go }, 'Send me my link')));
+}
+
+/* After a first sign-in from a link: open the Workroom on the connected sites with the main app loaded, ready to try. */
+async function dryrunLand() {
+  try { S.tab = 'workroom'; await wrEnter(); await wrLoadSites(); const list = WR.sites || []; const p = list.find((x) => /birthprep/i.test(x.url)) || list[0]; if (p) await wrOpenSite(p.id); WR.view = 'sites'; } catch { /* the normal home page is fine */ }
+}
+function siteTry() {
+  const D = WR.sd; if (!D) return null; const s = D.site; let url; try { url = new URL(s.url).href; } catch { return null; }
+  const back = location.origin + '/app'; const go = url.split('#')[0] + '#dryrun-back=' + encodeURIComponent(back);
+  return h('div', { class: 'wr-box', style: 'border:2px solid var(--accent,#d9552b)' }, h('h3', { style: 'margin:0 0 .3rem' }, `Try ${s.name} as it is today`),
+    h('p', {}, 'Open the live app in a new tab and use it like any visitor. Nothing you do there changes it. When you are done, press "Back to Dry Run" on that page, or close the tab, to come back here and start iterating.'),
+    h('p', { style: 'display:flex;gap:.5rem;flex-wrap:wrap;margin:.3rem 0' }, h('a', { href: go, target: '_blank', rel: 'opener', class: 'go', style: 'display:inline-block;padding:.55rem 1rem;border-radius:6px;text-decoration:none;color:#fff;background:var(--accent,#d9552b)' }, 'Open the app in a new tab'),
+      h('button', { class: 'ghost', onclick: () => { const el = WR.pvFrame || document.getElementById('pvstat'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); else window.scrollBy({ top: 500, behavior: 'smooth' }); } }, 'Start iterating')),
+    h('div', { class: 'sm', style: 'overflow-wrap:anywhere' }, s.url));
 }

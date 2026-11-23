@@ -99,4 +99,22 @@
   } else if (me && me.getAttribute('data-pack')) {
     fetch(me.getAttribute('data-pack'), { credentials: 'omit' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (p) { if (p && p.dryrunPack === 1 && Array.isArray(p.patches)) { var s = {}; Object.keys(p.settings || {}).forEach(function (k) { s[k] = p.settings[k]; }); apply(p.patches.concat(Object.keys(s).map(function (k) { return { type: 'setting', key: k, value: s[k] }; }))); } }).catch(function () {});
   }
+  /* "Back to Dry Run": Dry Run opens your site in a new tab with #dryrun-back=<its own address>. A small button then takes the visitor back.
+   * It only appears when that address is one you listed in data-dryrun-origin, and it changes nothing on the page. */
+  (function () {
+    if (window.parent !== window) return;
+    var back = null, m = /[#&]dryrun-back=([^&]+)/.exec(location.hash || '');
+    try { if (m) { back = decodeURIComponent(m[1]); sessionStorage.setItem('dryrun.back', back); } else back = sessionStorage.getItem('dryrun.back'); } catch (e) { if (m) { try { back = decodeURIComponent(m[1]); } catch (e2) { back = null; } } }
+    if (!back) return; var u; try { u = new URL(back); } catch (e) { return; }
+    if (allowed.indexOf(u.origin) < 0 || !/^https?:$/.test(u.protocol)) return;
+    function show() {
+      if (document.querySelector('[data-dryrun-back]')) return;
+      var host = document.createElement('div'); host.setAttribute('data-dryrun-back', ''); var root = host.attachShadow({ mode: 'closed' });
+      root.innerHTML = '<style>:host{all:initial}.b{position:fixed;right:12px;bottom:12px;z-index:2147483647;display:flex;gap:4px;font:600 14px/1.2 system-ui,Arial,sans-serif}button{font:inherit;cursor:pointer;border:0;border-radius:999px;padding:10px 16px;background:#d9480f;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3)}button.x{background:#333;padding:10px 12px}button:focus-visible{outline:3px solid #fff;outline-offset:2px}</style><div class="b"><button class="g" type="button">← Back to Dry Run</button><button class="x" type="button" aria-label="Hide this button">×</button></div>';
+      root.querySelector('.g').addEventListener('click', function () { try { if (window.opener && !window.opener.closed) { window.opener.focus(); window.close(); } } catch (e) {} setTimeout(function () { location.href = u.href; }, 250); });
+      root.querySelector('.x').addEventListener('click', function () { if (host.parentNode) host.parentNode.removeChild(host); });
+      (document.body || document.documentElement).appendChild(host);
+    }
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+  })();
 })();
