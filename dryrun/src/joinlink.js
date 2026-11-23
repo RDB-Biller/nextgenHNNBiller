@@ -38,24 +38,34 @@ function find(token) {
 }
 function info(token) { const { o, j } = find(token); return { organisation: o.name, role: j.role, domains: j.domains || [], emailReady: email.configured(), full: !!(j.max && j.joins >= j.max) }; }
 
+/**
+ * Phone first, email optional, and no error messages: whatever the person typed, we reach them through what is usable and always answer
+ * "on its way". Unusable details are quietly skipped. (Limits and rate limits still apply, silently for the person asking.)
+ */
 async function request(token, { email: em, phone, name } = {}, site, ip = '') {
   limit('ip:' + ip, 15, 3600000); const { o, j } = find(token); plans.assertWritable(o);
-  const e = String(em || '').trim().toLowerCase(); if (!einv.validEmail(e)) throw err(422, 'Enter a valid email address.');
-  limit('em:' + e, 3, 3600000);
-  const ph = String(phone || '').trim(); if (ph && !messaging.validPhone(ph)) throw err(422, 'That mobile number does not look right. Use 024… or +233….');
-  const canEmail = email.configured(); if (!canEmail && !ph) throw err(422, 'Enter your mobile number. We send your link by text.');
-  if (j.domains && j.domains.length && !j.domains.includes(e.split('@')[1])) throw err(403, `This link is for ${j.domains.map((d) => '@' + d).join(', ')} email addresses only.`);
-  let m = Object.values(o.members).find((x) => x.email.toLowerCase() === e); const existing = !!m;
-  if (m && m.role === 'contributor') return { ok: true };
+  const done = { ok: true };
+  const ph = messaging.validPhone(String(phone || '')) ? String(phone).trim() : ''; const dial = ph ? messaging.toDialable(ph) : '';
+  let e = String(em || '').trim().toLowerCase(); if (!einv.validEmail(e)) e = '';
+  if (!ph && !e) return done;
+  try { limit('c:' + (dial || e), 3, 3600000); } catch { return done; }
+  const canEmail = email.configured(); if (!ph && !canEmail) return done; // nothing we could send with
+  if (j.domains && j.domains.length && !(e && j.domains.includes(e.split('@')[1]))) return done;
+  const members = Object.values(o.members);
+  let m = members.find((x) => (e && x.email.toLowerCase() === e) || (dial && x.phone && messaging.toDialable(x.phone) === dial)); const existing = !!m;
+  if (m && m.role === 'contributor') return done;
   if (!m) {
-    if (j.max && (j.joins || 0) >= j.max) throw err(403, 'This join link has reached its limit. Ask for a new one.');
-    const a = orgs.addMember(o.id, { name: String(name || '').trim().slice(0, 60) || einv.nameFrom(e), email: e, role: j.role }, 'Join link'); m = o.members[a.id]; m.mustChange = false; j.joins = (j.joins || 0) + 1;
+    if (j.max && (j.joins || 0) >= j.max) return done;
+    const login = e || `${dial.replace(/\D/g, '')}@phone.join`;
+    try { const a = orgs.addMember(o.id, { name: String(name || '').trim().slice(0, 60) || (e ? einv.nameFrom(e) : 'New teammate'), email: login, phone: ph, role: j.role }, 'Join link'); m = o.members[a.id]; } catch (x) { if (process.env.JL_DEBUG) console.log('addMember', x.message); return done; }
+    m.mustChange = false; j.joins = (j.joins || 0) + 1;
   }
   const link = einv.issue(o.id, m, 'a join link', site); const first = m.name.split(' ')[0];
   const toPhone = existing ? m.phone : ph; // someone already in: only the contact we already hold
+  const toEmail = existing ? (/@phone\.join$/.test(m.email) ? '' : m.email) : e;
   const text = `Hello ${first}, here is your personal Dry Run link for ${o.name}: ${link}\nIt works once and expires in 7 days. Only you should use it.`;
   if (toPhone) await messaging.deliver({ phone: toPhone, channels: { sms: true }, text, orgId: o.id, orgName: o.name, who: 'join link', purpose: 'join link', toName: m.name });
-  if (canEmail) { const s = await email.send({ to: e, subject: `Your personal link to ${o.name} on Dry Run`, text: `${text}\n` }); messaging.record({ ok: s.ok, channel: 'email', to: e, toName: m.name, orgId: o.id, orgName: o.name, who: 'join link', purpose: 'join link', text, ...(s.ok ? {} : { error: s.error }) }); }
-  reg.save(); await audit.log(o.id, { id: m.id, name: m.name }, existing ? 'team.join_link_resend' : 'team.join_link_used', { role: m.role }); return { ok: true };
+  if (canEmail && toEmail) { const s = await email.send({ to: toEmail, subject: `Your personal link to ${o.name} on Dry Run`, text: `${text}\n` }); messaging.record({ ok: s.ok, channel: 'email', to: toEmail, toName: m.name, orgId: o.id, orgName: o.name, who: 'join link', purpose: 'join link', text, ...(s.ok ? {} : { error: s.error }) }); }
+  reg.save(); await audit.log(o.id, { id: m.id, name: m.name }, existing ? 'team.join_link_resend' : 'team.join_link_used', { role: m.role }); return done;
 }
 module.exports = { get, set, info, request };
