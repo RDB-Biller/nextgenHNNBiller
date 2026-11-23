@@ -362,6 +362,49 @@ O.post('/engagements/:eid/work/live/:id/status', W('operator', true), wrap(async
 O.get('/engagements/:eid/work/rooms', need('read'), W(), wrap(async (req, res) => res.json(await wr.guestRooms(req.work.clientId, req.params.eid))));
 O.get('/engagements/:eid/work/rooms/:rid', need('read'), W(), wrap(async (req, res) => res.json(await wr.thread(req.work.clientId, req.work.actor, req.params.rid, { guestEid: req.params.eid }))));
 O.post('/engagements/:eid/work/rooms/:rid/messages', W(undefined, true), wrap(async (req, res) => { const r = await wr.post(req.work.clientId, req.work.actor, 'builder', req.params.rid, { text: (req.body || {}).text, guestEid: req.params.eid }); res.status(201).json(r.message); }));
+// ---- Pen Test as a service ------------------------------------------------------------------------------------------------------
+const pt = require('./pentest');
+const ptTeam = (req) => { if (!orgs.can(req.role, 'run')) throw err(403, `Your role (${req.role}) cannot run tests.`); };
+const ptClientIsTester = async (req) => { const e = await pt.getFor(oid(req), req.params.eid, 'client'); if (e.testerType !== 'team') throw err(403, `This test is run by ${e.testerLabel}, not your team.`); ptTeam(req); return e; };
+O.get('/pentest', need('read'), wrap(async (req, res) => { const o = req.org; res.json({ targets: await pt.listTargets(oid(req)), engagements: await pt.list(oid(req)), scanner: await pt.scannerView(oid(req)), checks: pt.checkList(), firms: pt.firms(), declaration: pt.DECLARATION, demo: o.plan === 'demo', paused: pt.status().paused }); }));
+O.post('/pentest/targets', need('settings'), wrap(async (req, res) => res.status(201).json(await pt.addTarget(oid(req), req.actor, req.body))));
+O.post('/pentest/targets/:tid/verify', need('settings'), wrap(async (req, res) => res.json(await pt.verifyTarget(oid(req), req.actor, req.params.tid, req.body.method))));
+O.delete('/pentest/targets/:tid', need('settings'), wrap(async (req, res) => res.json(await pt.removeTarget(oid(req), req.actor, req.params.tid))));
+O.put('/pentest/scanner', need('settings'), wrap(async (req, res) => res.json(await pt.setScanner(oid(req), req.actor, req.body))));
+O.post('/pentest/engagements', need('settings'), wrap(async (req, res) => res.status(201).json(await pt.create(oid(req), req.actor, req.body))));
+O.get('/pentest/engagements/:eid', need('read'), wrap(async (req, res) => res.json(await pt.getFor(oid(req), req.params.eid, 'client'))));
+O.post('/pentest/engagements/:eid/authorise', need('settings'), wrap(async (req, res) => res.json(await pt.authorise(oid(req), req.actor, req.params.eid, req.body))));
+O.post('/pentest/engagements/:eid/stop', need('settings'), wrap(async (req, res) => res.json(await pt.stop(oid(req), req.actor, req.params.eid, req.body.note))));
+O.post('/pentest/engagements/:eid/complete', need('settings'), wrap(async (req, res) => res.json(await pt.complete(oid(req), req.actor, req.params.eid, 'client'))));
+O.post('/pentest/engagements/:eid/run', wrap(async (req, res) => { await ptClientIsTester(req); res.json(await pt.runChecks(oid(req), req.actor, req.params.eid, req.body)); }));
+O.post('/pentest/engagements/:eid/scanner-run', wrap(async (req, res) => { await ptClientIsTester(req); res.json(await pt.runScanner(oid(req), req.actor, req.params.eid, req.body)); }));
+O.post('/pentest/engagements/:eid/findings', wrap(async (req, res) => { await ptClientIsTester(req); res.status(201).json(await pt.addFinding(oid(req), req.actor, req.params.eid, req.body)); }));
+O.post('/pentest/engagements/:eid/import', wrap(async (req, res) => { await ptClientIsTester(req); res.json(await pt.importFindings(oid(req), req.actor, req.params.eid, req.body)); }));
+O.patch('/pentest/engagements/:eid/findings/:fid', need('write'), wrap(async (req, res) => res.json(await pt.setFindingStatus(oid(req), req.actor, req.params.eid, req.params.fid, req.body.status, req.body.note))));
+const ptReport = async (req, res, cid) => { const fmt = req.query.fmt === 'csv' ? 'csv' : 'md'; const t = await pt.report(cid, req.params.eid, fmt); res.setHeader('Content-Type', fmt === 'csv' ? 'text/csv; charset=utf-8' : 'text/markdown; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="security-test-report.${fmt}"`); res.end(t); };
+O.get('/pentest/engagements/:eid/report', need('read'), wrap(async (req, res) => ptReport(req, res, oid(req))));
+// a listed security firm: only the engagements a client assigned to it
+const ptFirm = (req) => { if (req.org.pack !== 'security_firm') throw err(403, 'This is for security testing firms.'); ptTeam(req); };
+const ptWho = (req) => ({ id: req.actor.id, name: `${req.actor.name} (${req.org.name})` });
+O.get('/pentest/assigned', need('read'), wrap(async (req, res) => { if (req.org.pack !== 'security_firm') return res.json([]); res.json(await pt.assigned(oid(req))); }));
+O.get('/pentest/assigned/:eid', need('read'), wrap(async (req, res) => { ptFirm(req); const c = await pt.partnerAccess(oid(req), req.params.eid); res.json(await pt.getFor(c, req.params.eid, 'partner')); }));
+O.post('/pentest/assigned/:eid/:action', wrap(async (req, res) => { ptFirm(req); const c = await pt.partnerAccess(oid(req), req.params.eid); const a = req.params.action, who = ptWho(req);
+  if (a === 'accept' || a === 'decline') return res.json(await pt.respond(c, who, req.params.eid, a === 'accept', 'partner'));
+  if (a === 'run') return res.json(await pt.runChecks(c, who, req.params.eid, req.body)); if (a === 'scanner-run') return res.json(await pt.runScanner(c, who, req.params.eid, req.body));
+  if (a === 'findings') return res.status(201).json(await pt.addFinding(c, who, req.params.eid, req.body)); if (a === 'import') return res.json(await pt.importFindings(c, who, req.params.eid, req.body));
+  if (a === 'complete') return res.json(await pt.complete(c, who, req.params.eid, 'partner')); throw err(404, 'Unknown action.'); }));
+O.patch('/pentest/assigned/:eid/findings/:fid', wrap(async (req, res) => { ptFirm(req); const c = await pt.partnerAccess(oid(req), req.params.eid); res.json(await pt.setFindingStatus(c, ptWho(req), req.params.eid, req.params.fid, req.body.status, req.body.note)); }));
+O.get('/pentest/assigned/:eid/report', need('read'), wrap(async (req, res) => { ptFirm(req); const c = await pt.partnerAccess(oid(req), req.params.eid); return ptReport(req, res, c); }));
+// the platform owner: pause everything, and run the tests clients ask the platform to do
+P.get('/pentest', wrap(async (req, res) => res.json({ status: pt.status(), engagements: await pt.platformQueue() })));
+P.post('/pentest/pause', (req, res) => res.json(pt.setPaused(req.body.paused)));
+P.get('/pentest/:eid', wrap(async (req, res) => { const ix = (await pt.platformQueue()).find((e) => e.id === req.params.eid); if (!ix) throw err(404, 'Unknown engagement.'); res.json(await pt.getFor(ix.clientOrgId, req.params.eid, 'platform')); }));
+P.post('/pentest/:eid/:action', wrap(async (req, res) => { const c = await pt.platformAccess(req.params.eid); const a = req.params.action, who = pt.PLATFORM;
+  if (a === 'accept' || a === 'decline') return res.json(await pt.respond(c, who, req.params.eid, a === 'accept', 'platform')); if (a === 'run') return res.json(await pt.runChecks(c, who, req.params.eid, req.body)); if (a === 'scanner-run') return res.json(await pt.runScanner(c, who, req.params.eid, req.body));
+  if (a === 'findings') return res.status(201).json(await pt.addFinding(c, who, req.params.eid, req.body)); if (a === 'import') return res.json(await pt.importFindings(c, who, req.params.eid, req.body)); if (a === 'complete') return res.json(await pt.complete(c, who, req.params.eid, 'platform')); throw err(404, 'Unknown action.'); }));
+P.patch('/pentest/:eid/findings/:fid', wrap(async (req, res) => { const c = await pt.platformAccess(req.params.eid); res.json(await pt.setFindingStatus(c, pt.PLATFORM, req.params.eid, req.params.fid, req.body.status, req.body.note)); }));
+P.get('/pentest/:eid/report', wrap(async (req, res) => { const c = await pt.platformAccess(req.params.eid); return ptReport(req, res, c); }));
+
 // ---- Workroom ----------------------------------------------------------------------------------------------------------------------
 const roomUrl = (req, roomId) => `${siteUrl(req)}/app?room=${encodeURIComponent(roomId)}`;
 const memberOf = (req, id) => req.org.members[id];

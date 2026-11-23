@@ -197,3 +197,21 @@ Everyone chooses the language they read and write in, and the Workroom shows eac
 - **How it works:** each message is stored once in the author's words with the language it was written in. Translations are made for the reader through your own LibreTranslate service (`LIBRETRANSLATE_URL`, optionally `LIBRETRANSLATE_API_KEY`), cached so each text and language pair is translated only once, and bounded by a daily character cap (`TRANSLATE_DAILY_CHARS`, default 300,000 overall and `TRANSLATE_DAILY_CHARS_PER_TEAM`, default 60,000). Code, links, file paths and @mentions are never translated. If the translator is off, down, over its cap, or lacks a language, people read the original words and are told so. Twi, Hausa, Yoruba and Ga are normally not in LibreTranslate, so readers of those see the original, flagged.
 - **Where it applies:** team rooms (messages, Coach replies and platform messages). Guest rooms shared with clients are not translated. The platform owner sees the translator's status under Platform settings.
 - **Privacy:** message text is sent to your translation service only, not to any outside company, as long as LibreTranslate is self-hosted.
+
+## Pen Test as a service
+
+An organisation proves it owns a web address, agrees the rules and dates, and an administrator authorises the test. It is then run by the organisation's own team, by the platform owner, or by a listed **security firm** (a new partner account type, `security_firm`). Open **Security tests** in the workspace; the platform owner has the same tab for oversight and for tests assigned to the platform team.
+
+**What it does, and does not do.** The built-in checks are a posture review of a handful of read-only GET requests each: certificate and TLS version, HTTP-to-HTTPS redirect, security headers, cookie flags, version disclosure, cross-origin settings, five well-known files that should not be public, and `security.txt`. Nothing is exploited, guessed, fuzzed or brute-forced, and the contents of an exposed file are never stored (only that it matched a known signature). Deeper work comes from an outside scanner the organisation connects, or a human tester who records findings by hand or imports them as JSON.
+
+**Guards that always apply**
+- The address must be proven by a text file at `/.well-known/dryrun-pentest.txt` or a DNS TXT record at `_dryrun-pentest.<host>`; proof lasts 30 days.
+- Private, loopback, link-local and cloud-metadata addresses are refused, the name is re-resolved and pinned on every request, ports are limited to 80, 443, 8080 and 8443, and redirects are never followed. Scanner addresses get the same treatment and must use https.
+- Every run needs an engagement that an administrator signed (full name and a declaration), inside its dates (up to 30 days), using only the checks agreed, on addresses in scope. At most 40 requests per run, paced.
+- A tester from outside the organisation must accept first. A firm sees only the engagements assigned to it.
+- An administrator can stop an engagement at any time; the platform owner can pause all testing at once. Authorisations, runs and findings go to the audit log.
+- Fees are a record only. Dry Run does not collect or pay money.
+
+**Findings** have a severity and a status (open, accepted risk, fixed, verified fixed, still present after fix). Running the checks again after a fix marks what has gone as verified fixed and flags anything that returns. Reports download as Markdown or CSV and state the method and its limits.
+
+Outside scanner contract: Dry Run `POST`s `{engagementId, target, scope[], window{startsAt,endsAt}, rules}` with `Authorization: Bearer <token>` and expects `{ "findings": [{ "id", "title", "severity", "description", "evidence", "remediation" }] }`. The token is encrypted at rest and never returned. Smoke: `npm run smoke:pentest`. `DRYRUN_PENTEST_ALLOW_PRIVATE=1` exists only so the automated tests can aim at a local server; never set it in production.

@@ -10,7 +10,7 @@ const orgs = require('./orgs');
 const live = require('./live');
 const { err, iso, id, round } = require('./util');
 
-const PARTNER_PACKS = { research_firm: 'researcher', operator: 'operator' };
+const PARTNER_PACKS = { research_firm: 'researcher', operator: 'operator', security_firm: 'tester' };
 const store = () => { const r = reg.load(); r.engagements = r.engagements || {}; return r.engagements; };
 const isPartner = (o) => !!PARTNER_PACKS[o.pack];
 const money = (x, lo, hi, name) => { const n = Number(x || 0); if (!(n >= lo && n <= hi)) throw err(422, `${name} must be between ${lo} and ${hi}.`); return n; };
@@ -19,12 +19,13 @@ function setPartnerProfile(orgId, { listed, description, services } = {}) {
   const o = orgs.raw(orgId); if (!isPartner(o)) throw err(422, 'Only research firm and operator organisations can be listed as partners.');
   o.partner = { ...(o.partner || {}), ...(listed !== undefined ? { listed: !!listed } : {}), ...(description !== undefined ? { description: String(description).slice(0, 500) } : {}), ...(services !== undefined ? { services: String(services).slice(0, 300) } : {}) }; reg.save(); return o.partner;
 }
-const partners = () => orgs.list().filter((o) => isPartner(o) && !o.suspended).map((o) => { const r = orgs.raw(o.id); return r.partner && r.partner.listed ? { id: o.id, name: o.name, kind: o.pack, role: PARTNER_PACKS[o.pack], description: r.partner.description || '', services: r.partner.services || '' } : null; }).filter(Boolean);
+const partners = () => orgs.list().filter((o) => isPartner(o) && o.pack !== 'security_firm' && !o.suspended).map((o) => { const r = orgs.raw(o.id); return r.partner && r.partner.listed ? { id: o.id, name: o.name, kind: o.pack, role: PARTNER_PACKS[o.pack], description: r.partner.description || '', services: r.partner.services || '' } : null; }).filter(Boolean);
 
 function create(clientId, actor, { partnerOrgId, scope = {}, fee = {}, note = '' } = {}) {
   const c = orgs.raw(clientId); if (isPartner(c)) throw err(422, 'Partner organisations cannot engage other partners.');
   const p = (() => { try { return orgs.raw(partnerOrgId); } catch { throw err(404, 'Unknown partner.'); } })();
   if (!isPartner(p) || !(p.partner && p.partner.listed) || p.suspended) throw err(422, 'That partner is not available.');
+  if (p.pack === 'security_firm') throw err(422, 'Security firms are engaged from Security tests, not from the partner network.');
   const role = PARTNER_PACKS[p.pack]; const key = role === 'researcher' ? 'surveyIds' : 'liveIds';
   const ids = scope[key] === 'all' ? 'all' : Array.isArray(scope[key]) ? scope[key].map(String) : []; if (ids !== 'all' && !ids.length) throw err(422, role === 'researcher' ? 'Choose which surveys the researcher can work on, or all.' : 'Choose which live programmes the operator can run, or all.');
   const e = { id: id('eng'), clientOrgId: clientId, partnerOrgId, role, scope: { [key]: ids }, fee: { oneOff: money(fee.oneOff, 0, 1e9, 'One-off fee'), fixedPerMonth: money(fee.fixedPerMonth, 0, 1e9, 'Monthly fee'), commissionPct: money(fee.commissionPct, 0, 50, 'Commission %') }, note: String(note).slice(0, 500),
