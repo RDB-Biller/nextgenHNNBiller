@@ -204,7 +204,7 @@ const need = (action) => (req, res, next) => { if (!orgs.can(req.role, action)) 
 const oid = (req) => req.org.id;
 
 O.post('/password', (req, res) => res.json(orgs.changePassword(oid(req), req.actor.id, req.body.current, req.body.next)));
-O.get('/', (req, res) => res.json({ demo: plans.isDemo(req.org), me: req.actor, org: orgs.get(oid(req)), pack: packs.detail(req.org.pack) }));
+O.get('/', (req, res) => res.json({ demo: plans.isDemo(req.org), me: { ...req.actor, hasPhone: !!(orgs.memberRaw(oid(req), req.actor.id).phone), needsPassword: !!orgs.memberRaw(oid(req), req.actor.id).passwordPending }, org: orgs.get(oid(req)), pack: packs.detail(req.org.pack) }));
 O.get('/team', need('read'), (req, res) => res.json(orgs.members(oid(req))));
 O.post('/team', need('team'), wrap(async (req, res) => {
   const m = orgs.addMember(oid(req), req.body, req.actor.name);
@@ -372,6 +372,17 @@ P.put('/apps', (req, res) => res.json({ apps: myapps.setApps(req.body.apps) }));
 P.post('/apps/preview', (req, res) => res.json(urlsFromBody(req.body)));
 P.post('/orgs/:id/apps/open', wrap(async (req, res) => { const { urls, rejected } = urlsFromBody(req.body); orgs.raw(req.params.id); const r = await myapps.openIn(req.params.id, PLATFORM_ACTOR, 'admin', urls, { read: req.body.read !== false }); res.json({ ...r, rejected }); }));
 O.post('/workroom/sites/bulk', need('write'), wrap(async (req, res) => { const { urls, rejected } = urlsFromBody({ ...req.body, all: false, appIds: undefined }); if (!urls.length) throw err(422, rejected.length ? `None of those look like web addresses: ${rejected.slice(0, 5).join(', ')}.` : 'Enter at least one address.'); const r = await myapps.openIn(oid(req), req.actor, req.role, urls, { read: req.body.read !== false }); res.json({ ...r, rejected }); }));
+
+// ---- invite by email link, and the mobile number prompt that follows ------------------------------------------------------------------
+const emailInvite = require('./emailinvite');
+app.get('/api/public/email-invite/:token', wrap(async (req, res) => res.json(emailInvite.info(req.params.token))));
+app.post('/api/public/email-invite/:token/accept', wrap(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(emailInvite.accept(req.params.token)); }));
+O.post('/team/email-invite', need('team'), wrap(async (req, res) => res.json(await emailInvite.invite(oid(req), req.actor, siteUrl(req), req.body))));
+P.post('/orgs/:id/email-invite', wrap(async (req, res) => { orgs.raw(req.params.id); res.json(await emailInvite.invite(req.params.id, PLATFORM_ACTOR, siteUrl(req), req.body)); }));
+O.patch('/me/phone', wrap(async (req, res) => { const ph = String((req.body || {}).phone || '').trim(); if (!messaging.validPhone(ph)) throw err(422, 'That phone number does not look right. Use 024… or +233….'); const m = orgs.memberRaw(oid(req), req.actor.id); m.phone = ph; require('./registry').save();
+  const d = await messaging.deliver({ phone: ph, channels: { sms: true }, text: `Dry Run: this number is now linked to your ${req.org.name} workspace. We will text you when teams respond and if you need sign-in help.`, orgId: oid(req), orgName: req.org.name, who: req.actor.name, purpose: 'phone added', toName: req.actor.name });
+  res.json({ ok: true, phone: messaging.mask(ph), texted: d.some((x) => x.ok) }); }));
+O.post('/me/new-password', wrap(async (req, res) => { const m = orgs.memberRaw(oid(req), req.actor.id); if (!m.passwordPending) throw err(403, 'Use Change password instead.'); const pw = String((req.body || {}).password || ''); if (pw.length < 8) throw err(422, 'Use at least 8 characters.'); m.passwordHash = require('./creds').hashPassword(pw); m.passwordPending = false; m.mustChange = false; require('./registry').save(); res.json({ ok: true, username: m.username }); }));
 
 // ---- Pen Test as a service ------------------------------------------------------------------------------------------------------
 const pt = require('./pentest');

@@ -221,3 +221,11 @@ Outside scanner contract: Dry Run `POST`s `{engagementId, target, scope[], windo
 The platform owner's **My apps** tab lists every app you run with its Railway address and its own subdomain (seeded with Dry Run, HNN Biller, the TrimesterSave app, ERHeat and the two SMS services). Choose a workspace and press **Open all my apps**, or open a few. Each address becomes a connected site: Dry Run reads its public pages and builds a working model the team can iterate on straight away, with nothing installed. An address it cannot read yet (a sign-in wall, a cold start) is still added and says why. Installing the Dry Run connector later upgrades a site to Dry Run signed.
 
 Type only the extension: a Railway name such as `erheat-app-production` becomes `erheat-app-production.up.railway.app`, and subdomains such as `dryrun` and `biller` are joined to your domain. Workspaces get the same box under Workroom, Connected sites ("Add several sites at once"). A workspace can hold 20 sites; the same site reached by two addresses on one host counts once. Edit the list from the tab, or `PUT /api/platform/apps`. Smoke: `npm run smoke:apps`.
+
+## Invite by email link
+
+On the Team tab, **Invite by email link** takes one or more email addresses and a role, and makes a personal link for each. Opening the link shows who it is for; one click on **Sign in and continue** signs them in with no username or password. They are then asked for their mobile number (confirmed with one text) and to choose a password for next time, and a reminder stays on screen until the number is added. A link works once and expires after 7 days; an administrator can make a fresh one at any time, and the platform owner can invite into any workspace (`POST /api/platform/orgs/:id/email-invite`).
+
+Links are shared by hand by default: each result has **Copy link** and **Email it** (opens your own mail app with the message ready). To have Dry Run send the email itself, set `RESEND_API_KEY` and `EMAIL_FROM` (a sender address verified with Resend). The message history records each email without the sign-in link. Smoke: `npm run smoke:invite`.
+
+**My apps** now starts with TrimesterSave BirthPrep (`tmsapp.trimestersave.com/birthprep` and its Railway address), with an **Open BirthPrep first** button.

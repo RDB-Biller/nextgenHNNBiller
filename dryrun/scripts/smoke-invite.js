@@ -1,0 +1,38 @@
+'use strict';
+// Invite by email link: personal links, one-time sign-in, then mobile number and password. Run: npm run smoke:invite
+process.env.DRYRUN_MEMORY = '1'; process.env.PLATFORM_ADMIN_KEY = 'test_platform_key'; process.env.DRYRUN_SECRET_KEY = 'smoke_test_secret_key_value_0123456789';
+const http = require('http'); const app = require('../src/server'); const orgs = require('../src/orgs');
+let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; console.log('  FAIL:', m); } };
+(async () => {
+  const srv = app.listen(0); await new Promise((r) => srv.on('listening', r)); const base = `http://127.0.0.1:${srv.address().port}`;
+  const call = async (m, u, k, b, h = 'x-api-key') => { const r = await fetch(base + u, { method: m, headers: { ...(b ? { 'Content-Type': 'application/json' } : {}), ...(k ? { [h]: k } : {}) }, body: b ? JSON.stringify(b) : undefined }); let j = null; try { j = await r.json(); } catch {} return { s: r.status, j }; };
+  let r = await call('POST', '/api/platform/orgs', 'test_platform_key', { name: 'TrimesterSave Team', sector: 'fintech', adminName: 'Ed', adminEmail: 'ed@tms.test' }, 'x-platform-key'); const OID = r.j.org.id, ADMIN = r.j.admin.apiKey;
+  r = await call('POST', '/api/org/team', ADMIN, { name: 'Vee', email: 'vee@tms.test', role: 'viewer' }); const VIEW = r.j.apiKey;
+  console.log('Admin shares links');
+  ok((await call('POST', '/api/org/team/email-invite', VIEW, { emails: 'x@y.test' })).s === 403, 'only admins invite');
+  ok((await call('POST', '/api/org/team/email-invite', ADMIN, { emails: '' })).s === 422, 'needs an address');
+  r = await call('POST', '/api/org/team/email-invite', ADMIN, { emails: 'ama.mensah@example.com, kofi@example.com\nbad-address, ama.mensah@example.com', role: 'builder', note: 'Welcome aboard' }); const res = r.j.results;
+  ok(r.s === 200 && res.length === 3 && res.filter((x) => x.ok).length === 2, 'two valid links, one rejected, duplicate collapsed'); ok(res[0].name === 'Ama Mensah' && res[0].role === 'builder', 'name made from the address');
+  ok(/\/app\?invite=/.test(res[0].link) && res[0].emailed === false && /^mailto:/.test(res[0].mailto) && decodeURIComponent(res[0].mailto).includes(res[0].link), 'link and ready-made mailto when email sending is off');
+  ok((await call('POST', '/api/org/team/email-invite', ADMIN, { emails: 'x@y.test', role: 'contributor' })).s === 422, 'platform seat cannot be invited');
+  const tokenOf = (l) => decodeURIComponent(new URL(l).searchParams.get('invite')); const T = tokenOf(res[0].link);
+  console.log('Opening and signing in');
+  r = await call('GET', `/api/public/email-invite/${encodeURIComponent(T)}`); ok(r.s === 200 && r.j.organisation === 'TrimesterSave Team' && r.j.email === 'ama.mensah@example.com', 'opening the link shows who it is for'); 
+  r = await call('GET', `/api/public/email-invite/${encodeURIComponent(T)}`); ok(r.s === 200, 'looking twice (a mail scanner) does not use it up');
+  ok((await call('GET', `/api/public/email-invite/${encodeURIComponent(T.slice(0, -2) + 'zz')}`)).s === 404, 'a wrong link is refused');
+  r = await call('POST', `/api/public/email-invite/${encodeURIComponent(T)}/accept`); ok(r.s === 200 && r.j.key && r.j.needsPhone === true, 'signing in gives a session and says a mobile number is needed'); const KEY = r.j.key;
+  ok((await call('POST', `/api/public/email-invite/${encodeURIComponent(T)}/accept`)).s === 410, 'a link works once');
+  r = await call('GET', '/api/org/', KEY); ok(r.s === 200 && r.j.me.hasPhone === false && r.j.me.needsPassword === true && r.j.me.mustChange === false && r.j.me.role === 'builder', 'new member is in, with no forced password change');
+  console.log('Mobile number and password');
+  ok((await call('PATCH', '/api/org/me/phone', KEY, { phone: '12345' })).s === 422, 'a bad number is refused'); r = await call('PATCH', '/api/org/me/phone', KEY, { phone: '0244123456' }); ok(r.s === 200 && r.j.ok && /•/.test(r.j.phone), 'number saved and masked');
+  ok((await call('GET', '/api/org/', KEY)).j.me.hasPhone === true, 'no more prompt once saved');
+  ok((await call('POST', '/api/org/me/new-password', KEY, { password: 'short' })).s === 422, 'short password refused'); r = await call('POST', '/api/org/me/new-password', KEY, { password: 'a-long-passphrase-9' }); ok(r.s === 200 && r.j.username, 'password chosen');
+  r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: r.j.username, password: 'a-long-passphrase-9' }) }); ok(r.status === 200, 'they can sign in with it next time');
+  ok((await call('POST', '/api/org/me/new-password', KEY, { password: 'another-passphrase-1' })).s === 403, 'the password step cannot be repeated without the link');
+  console.log('Re-issue, expiry, platform route');
+  r = await call('POST', '/api/org/team/email-invite', ADMIN, { emails: 'ama.mensah@example.com' }); ok(r.j.results[0].ok && r.j.results[0].link !== res[0].link, 'a fresh link for an existing member');
+  const m = Object.values(orgs.raw(OID).members).find((x) => x.email === 'kofi@example.com'); m.emailInvite.exp = Date.now() - 1000; ok((await call('GET', `/api/public/email-invite/${encodeURIComponent(tokenOf(res[1].link))}`)).s === 410, 'expired links are refused');
+  r = await call('POST', `/api/platform/orgs/${OID}/email-invite`, 'test_platform_key', { emails: 'new.person@example.com', role: 'viewer' }, 'x-platform-key'); ok(r.s === 200 && r.j.results[0].ok, 'platform owner can invite into any workspace');
+  ok(JSON.stringify((await call('GET', '/api/platform/messaging', 'test_platform_key', null, 'x-platform-key')).j).includes('sign-in link hidden') && !JSON.stringify((await call('GET', '/api/platform/messaging', 'test_platform_key', null, 'x-platform-key')).j).includes(T), 'the message log never keeps the sign-in link');
+  console.log(`\n${pass} passed, ${fail} failed`); srv.close(); process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });
