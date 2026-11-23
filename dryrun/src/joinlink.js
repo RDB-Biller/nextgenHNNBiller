@@ -17,7 +17,7 @@ const { err, iso, newKey } = require('./util');
 
 const hits = new Map(); // key -> [timestamps]
 function limit(key, max, ms) { const now = Date.now(); const h = (hits.get(key) || []).filter((t) => now - t < ms); if (h.length >= max) throw err(429, 'Too many tries. Please wait a little and try again.'); h.push(now); hits.set(key, h); }
-const url = (site, orgId, tok) => `${site}/app?join=${encodeURIComponent(`${orgId}.${tok}`)}`;
+const url = (site, orgId, tok) => `${site}/app?join=${`${orgId}.${tok}`.replace(/_/g, '-')}`; // hyphens, not underscores: some SMS apps cut a link at an underscore
 const cleanDomains = (d) => [...new Set((Array.isArray(d) ? d : String(d || '').split(/[\s,;]+/)).map((x) => String(x).trim().toLowerCase().replace(/^@/, '')).filter((x) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(x)))].slice(0, 20);
 const view = (o, site) => { const j = o.joinLink; return j && j.on ? { on: true, url: url(site, o.id, j.token), role: j.role, domains: j.domains || [], max: j.max || 0, joins: j.joins || 0, expiresAt: j.exp ? new Date(j.exp).toISOString() : null, expired: !!(j.exp && Date.now() > j.exp), emailReady: email.configured() } : { on: false, role: (j && j.role) || 'builder', domains: (j && j.domains) || [], max: (j && j.max) || 0, emailReady: email.configured() }; };
 
@@ -31,7 +31,7 @@ async function set(orgId, actor, site, b = {}) {
   reg.save(); await audit.log(orgId, actor, b.rotate ? 'team.join_link_rotate' : 'team.join_link', { role, max, days }); return view(o, site);
 }
 function find(token) {
-  const [orgId, tok] = String(token || '').split('.'); let o; try { o = orgs.raw(orgId); } catch { throw err(404, 'This join link is not valid. Ask for a new one.'); }
+  const [orgId, tok] = String(token || '').replace(/-/g, '_').split('.'); let o; try { o = orgs.raw(orgId); } catch { throw err(404, 'This join link is not valid. Ask for a new one.'); }
   const j = o.joinLink; if (!j || !j.on || !tok || tok !== j.token) throw err(404, 'This join link is not valid or has been switched off. Ask for a new one.');
   if (j.exp && Date.now() > j.exp) throw err(410, 'This join link has expired. Ask for a new one.');
   return { o, j };
@@ -63,7 +63,7 @@ async function request(token, { email: em, phone, name } = {}, site, ip = '') {
   const link = einv.issue(o.id, m, 'a join link', site); const first = m.name.split(' ')[0];
   const toPhone = existing ? m.phone : ph; // someone already in: only the contact we already hold
   const toEmail = existing ? (/@phone\.join$/.test(m.email) ? '' : m.email) : e;
-  const text = `Hello ${first}, here is your personal Dry Run link for ${o.name}: ${link}\nIt works once and expires in 7 days. Only you should use it.`;
+  const text = `Hello ${first}, your personal Dry Run link for ${o.name} works once and expires in 7 days. Only you should use it.\n\n${link}`;
   if (toPhone) await messaging.deliver({ phone: toPhone, channels: { sms: true }, text, orgId: o.id, orgName: o.name, who: 'join link', purpose: 'join link', toName: m.name });
   if (canEmail && toEmail) { const s = await email.send({ to: toEmail, subject: `Your personal link to ${o.name} on Dry Run`, text: `${text}\n` }); messaging.record({ ok: s.ok, channel: 'email', to: toEmail, toName: m.name, orgId: o.id, orgName: o.name, who: 'join link', purpose: 'join link', text, ...(s.ok ? {} : { error: s.error }) }); }
   reg.save(); await audit.log(o.id, { id: m.id, name: m.name }, existing ? 'team.join_link_resend' : 'team.join_link_used', { role: m.role }); return done;

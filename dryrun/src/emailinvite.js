@@ -17,9 +17,10 @@ const { err, iso, sha, newKey } = require('./util');
 const TTL = 7 * 86400000, MAX = 20;
 const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e) && e.length <= 160;
 const nameFrom = (e) => e.split('@')[0].replace(/[._+-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim().slice(0, 60) || 'Teammate';
-const link = (site, orgId, mid, tok) => `${site}/app?invite=${encodeURIComponent(`${orgId}.${mid}.${tok}`)}`;
+// Underscores are written as hyphens in links: some phones and SMS apps break a link at an underscore. parse() turns them back.
+const link = (site, orgId, mid, tok) => `${site}/app?invite=${`${orgId}.${mid}.${tok}`.replace(/_/g, '-')}`;
 function parse(token) {
-  const [orgId, mid, tok] = String(token || '').split('.'); let o; try { o = orgs.raw(orgId); } catch { throw err(404, 'This invite link is not valid. Ask for a new one.'); }
+  const [orgId, mid, tok] = String(token || '').replace(/-/g, '_').split('.'); let o; try { o = orgs.raw(orgId); } catch { throw err(404, 'This invite link is not valid. Ask for a new one.'); }
   const m = o.members[mid]; if (!m || !m.emailInvite || !tok || sha(tok) !== m.emailInvite.hash) throw err(404, 'This invite link is not valid. Ask for a new one.');
   return { o, m };
 }
