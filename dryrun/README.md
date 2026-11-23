@@ -215,3 +215,9 @@ An organisation proves it owns a web address, agrees the rules and dates, and an
 **Findings** have a severity and a status (open, accepted risk, fixed, verified fixed, still present after fix). Running the checks again after a fix marks what has gone as verified fixed and flags anything that returns. Reports download as Markdown or CSV and state the method and its limits.
 
 Outside scanner contract: Dry Run `POST`s `{engagementId, target, scope[], window{startsAt,endsAt}, rules}` with `Authorization: Bearer <token>` and expects `{ "findings": [{ "id", "title", "severity", "description", "evidence", "remediation" }] }`. The token is encrypted at rest and never returned. Smoke: `npm run smoke:pentest`. `DRYRUN_PENTEST_ALLOW_PRIVATE=1` exists only so the automated tests can aim at a local server; never set it in production.
+
+## My apps: open every app for iteration
+
+The platform owner's **My apps** tab lists every app you run with its Railway address and its own subdomain (seeded with Dry Run, HNN Biller, the TrimesterSave app, ERHeat and the two SMS services). Choose a workspace and press **Open all my apps**, or open a few. Each address becomes a connected site: Dry Run reads its public pages and builds a working model the team can iterate on straight away, with nothing installed. An address it cannot read yet (a sign-in wall, a cold start) is still added and says why. Installing the Dry Run connector later upgrades a site to Dry Run signed.
+
+Type only the extension: a Railway name such as `erheat-app-production` becomes `erheat-app-production.up.railway.app`, and subdomains such as `dryrun` and `biller` are joined to your domain. Workspaces get the same box under Workroom, Connected sites ("Add several sites at once"). A workspace can hold 20 sites; the same site reached by two addresses on one host counts once. Edit the list from the tab, or `PUT /api/platform/apps`. Smoke: `npm run smoke:apps`.

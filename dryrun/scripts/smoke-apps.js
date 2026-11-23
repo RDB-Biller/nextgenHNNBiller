@@ -1,0 +1,31 @@
+'use strict';
+// My apps: expand extensions, open many addresses for iteration. Run: npm run smoke:apps
+process.env.DRYRUN_MEMORY = '1'; process.env.PLATFORM_ADMIN_KEY = 'test_platform_key'; process.env.DRYRUN_SECRET_KEY = 'smoke_test_secret_key_value_0123456789'; process.env.DRYRUN_ALLOW_PRIVATE_TESTS = '1';
+const http = require('http'); const app = require('../src/server'); const my = require('../src/myapps');
+let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; console.log('  FAIL:', m); } };
+(async () => {
+  console.log('Extensions become addresses');
+  const e = my.expand({ railway: 'erheat-app-production\nsms-api-production-7342.up.railway.app', base: 'hnnworld.com', subs: 'dryrun, biller.hnnworld.com @', urls: 'app.example.com bad address' });
+  ok(e.urls.includes('https://erheat-app-production.up.railway.app') && e.urls.includes('https://sms-api-production-7342.up.railway.app'), 'railway names and addresses');
+  ok(e.urls.includes('https://dryrun.hnnworld.com') && e.urls.includes('https://biller.hnnworld.com') && e.urls.includes('https://hnnworld.com'), 'subdomains joined to the base domain');
+  ok(e.urls.includes('https://app.example.com') && e.rejected.length >= 1, 'full addresses used; nonsense reported'); ok(my.expand({ subs: 'x' }).rejected.length === 1, 'subdomain without a base is rejected');
+  ok(new Set(e.urls).size === e.urls.length, 'no duplicates'); ok(my.apps().length >= 5 && my.apps().some((a) => a.urls.includes('https://dryrun.hnnworld.com')), 'your apps are listed by default');
+  const site = http.createServer((q, r) => { if (q.url.startsWith('/missing')) { r.statusCode = 500; return r.end('x'); } r.setHeader('content-type', 'text/html'); r.end('<html><head><title>Stub app</title></head><body><nav><a href="/login">Login</a></nav><form action="/save"><input name="email"></form></body></html>'); });
+  await new Promise((r) => site.listen(0, '127.0.0.1', r)); const A = `http://127.0.0.1:${site.address().port}`;
+  const srv = app.listen(0); await new Promise((r) => srv.on('listening', r)); const base = `http://127.0.0.1:${srv.address().port}`;
+  const call = async (m, u, k, b, h = 'x-api-key') => { const r = await fetch(base + u, { method: m, headers: { ...(b ? { 'Content-Type': 'application/json' } : {}), [h]: k }, body: b ? JSON.stringify(b) : undefined }); let j = null; try { j = await r.json(); } catch {} return { s: r.status, j }; };
+  const plat = (m, u, b) => call(m, '/api/platform' + u, 'test_platform_key', b, 'x-platform-key');
+  let r = await plat('POST', '/orgs', { name: 'Own Workspace', sector: 'fintech', adminName: 'Ed', adminEmail: 'ed@own.test' }); const OID = r.j.org.id, K = r.j.admin.apiKey;
+  r = await call('POST', '/api/org/team', K, { name: 'View', email: 'v@own.test', role: 'viewer' }); const V = r.j.apiKey;
+  console.log('Open many for iteration');
+  r = await call('POST', '/api/org/workroom/sites/bulk', K, { urls: `${A} ${A}/missing` }); ok(r.s === 200 && r.j.results.length === 1 || r.j.results.length === 1, 'duplicate origins collapse'); ok(r.j.added === 1 && r.j.results[0].ok, 'site opened'); 
+  r = await call('GET', '/api/org/workroom/sites', K); ok(r.j.sites.length === 1 && ['inferred', 'pending'].includes(r.j.sites[0].level), 'listed as a connected site');
+  r = await call('POST', '/api/org/workroom/sites/bulk', K, { urls: 'http://127.0.0.1:1/x' }); ok(r.s === 200 && r.j.results[0].ok && /not read yet/.test(r.j.results[0].how), 'an unreadable address is still added, with the reason');
+  ok((await call('POST', '/api/org/workroom/sites/bulk', V, { urls: A })).s === 403, 'a viewer cannot add sites'); ok((await call('POST', '/api/org/workroom/sites/bulk', K, { subs: 'x' })).s === 422, 'nothing usable is refused');
+  console.log('Platform owner opens all my apps');
+  r = await plat('PUT', '/apps', { apps: [{ name: 'Stub', railway: [], urls: [A, `${A}/a`] }, { name: 'Other', urls: ['http://127.0.0.1:2'] }] }); ok(r.s === 200 && r.j.apps.length === 2 && r.j.apps[0].urls.length === 1, 'catalogue saved (same site counted once)');
+  r = await plat('POST', `/orgs/${OID}/apps/open`, { all: true, read: false }); ok(r.s === 200 && r.j.results.length >= 1, 'opens everything in the catalogue'); ok(r.j.results.every((x) => x.ok), 'all added');
+  ok((await plat('POST', '/orgs/nope/apps/open', { all: true })).s === 404, 'unknown workspace');
+  r = await plat('POST', '/apps/preview', { railway: 'a-b', base: 'x.io', subs: 'www' }); ok(r.j.urls.length === 2, 'preview expands without saving');
+  console.log(`\n${pass} passed, ${fail} failed`); srv.close(); site.close(); process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

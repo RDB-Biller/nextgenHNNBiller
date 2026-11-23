@@ -362,6 +362,17 @@ O.post('/engagements/:eid/work/live/:id/status', W('operator', true), wrap(async
 O.get('/engagements/:eid/work/rooms', need('read'), W(), wrap(async (req, res) => res.json(await wr.guestRooms(req.work.clientId, req.params.eid))));
 O.get('/engagements/:eid/work/rooms/:rid', need('read'), W(), wrap(async (req, res) => res.json(await wr.thread(req.work.clientId, req.work.actor, req.params.rid, { guestEid: req.params.eid }))));
 O.post('/engagements/:eid/work/rooms/:rid/messages', W(undefined, true), wrap(async (req, res) => { const r = await wr.post(req.work.clientId, req.work.actor, 'builder', req.params.rid, { text: (req.body || {}).text, guestEid: req.params.eid }); res.status(201).json(r.message); }));
+// ---- My apps: open any list of Railway and subdomain addresses for iteration -------------------------------------------------------
+const myapps = require('./myapps');
+const PLATFORM_ACTOR = { id: 'platform', name: 'Platform owner' };
+const urlsFromBody = (b) => { b = b || {}; const e = myapps.expand({ urls: b.urls, railway: b.railway, base: b.base, subs: b.subs }); const all = b.all ? myapps.apps().flatMap((a) => (b.primaryOnly ? a.urls.slice(0, 1) : a.urls)) : [];
+  const ids = Array.isArray(b.appIds) ? myapps.apps().filter((a) => b.appIds.includes(a.id)).flatMap((a) => (b.primaryOnly ? a.urls.slice(0, 1) : a.urls)) : []; return { urls: [...new Set([...e.urls, ...all, ...ids])], rejected: e.rejected }; };
+P.get('/apps', (req, res) => res.json({ apps: myapps.apps() }));
+P.put('/apps', (req, res) => res.json({ apps: myapps.setApps(req.body.apps) }));
+P.post('/apps/preview', (req, res) => res.json(urlsFromBody(req.body)));
+P.post('/orgs/:id/apps/open', wrap(async (req, res) => { const { urls, rejected } = urlsFromBody(req.body); orgs.raw(req.params.id); const r = await myapps.openIn(req.params.id, PLATFORM_ACTOR, 'admin', urls, { read: req.body.read !== false }); res.json({ ...r, rejected }); }));
+O.post('/workroom/sites/bulk', need('write'), wrap(async (req, res) => { const { urls, rejected } = urlsFromBody({ ...req.body, all: false, appIds: undefined }); if (!urls.length) throw err(422, rejected.length ? `None of those look like web addresses: ${rejected.slice(0, 5).join(', ')}.` : 'Enter at least one address.'); const r = await myapps.openIn(oid(req), req.actor, req.role, urls, { read: req.body.read !== false }); res.json({ ...r, rejected }); }));
+
 // ---- Pen Test as a service ------------------------------------------------------------------------------------------------------
 const pt = require('./pentest');
 const ptTeam = (req) => { if (!orgs.can(req.role, 'run')) throw err(403, `Your role (${req.role}) cannot run tests.`); };
