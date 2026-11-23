@@ -16,7 +16,7 @@ function inviteEmailCard() {
 function inviteLanding() {
   const v = S.invite; const box = (...k) => h('div', { class: 'login' }, h('h1', {}, 'Dry ', h('b', {}, 'Run')), ...k);
   if (v.error) return box(h('div', { class: 'err', role: 'alert' }, v.error), h('p', { class: 'sm' }, 'Ask the person who invited you for a new link, or sign in with your username and password.'), h('button', { class: 'ghost', onclick: () => { S.invite = null; render(); } }, 'Go to sign in'));
-  return box(msgs(), h('p', {}, v.info.invitedBy === 'a join link' ? 'You asked to join ' : `${v.info.invitedBy} invited you to join `, h('strong', {}, v.info.organisation), ` as ${v.info.role === 'admin' ? 'an admin' : 'a ' + v.info.role}.`), h('p', { class: 'sm' }, `Signing in as ${v.info.name} (${v.info.email}). No password needed.`),
+  return box(msgs(), h('p', {}, v.info.invitedBy === 'a join link' ? 'You have been invited to join ' : `${v.info.invitedBy} invited you to join `, h('strong', {}, v.info.organisation), ` as ${v.info.role === 'admin' ? 'an admin' : 'a ' + v.info.role}.`), h('p', { class: 'sm' }, `Signing in as ${v.info.name} (${v.info.email}). No password needed.`),
     h('button', { class: 'go', onclick: async () => { S.err = null; try { const r = await fetch(`/api/public/email-invite/${encodeURIComponent(v.token)}/accept`, { method: 'POST' }); const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); KEY = j.key; KIND = 'member'; sessionStorage.setItem('dr_key', KEY); sessionStorage.setItem('dr_kind', KIND); history.replaceState(null, '', location.pathname); S.invite = null; S.tab = 'overview'; S.welcome = true; await boot(); } catch (e) { fail(e); } render(); } }, 'Sign in and continue'));
 }
 async function inviteBoot() {
