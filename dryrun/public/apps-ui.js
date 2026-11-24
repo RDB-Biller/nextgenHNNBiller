@@ -34,3 +34,12 @@ function wrBulk() {
     h('p', {}, h('button', { onclick: () => act(async () => { A.res = await O('POST', '/workroom/sites/bulk', { railway: f.railway, base: f.base, subs: f.subs, urls: f.urls }); say(`Opened ${A.res.added} of ${A.res.results.length}.`); await wrLoadSites(); }) }, 'Open them for iteration')),
     A.res && A.res.results ? h('div', {}, A.res.results.map((x) => h('div', { class: 'sm' }, (x.ok ? 'OK ' : 'Problem ') + x.url + ': ' + (x.ok ? x.how : x.problem)))) : null);
 }
+
+/* Load a ready-made iteration (name, note and changes as JSON) into the preview, so it can be reviewed, shown on the page and then saved. */
+function pvLoadBox() {
+  let ta; const L = WR.ld = WR.ld || { open: false };
+  return h('details', { class: 'wr-det', open: L.open, ontoggle: (e) => { L.open = e.target.open; } }, h('summary', {}, 'Load a ready-made iteration'),
+    h('p', { class: 'sm' }, 'Paste an iteration someone prepared (JSON with a name, a note and its changes). It fills in the form below. Nothing is saved until you press "Save iteration".'),
+    ta = h('textarea', { rows: 5, placeholder: '{ "title": "…", "patches": [ … ] }', 'aria-label': 'Iteration JSON' }),
+    h('p', {}, h('button', { class: 'ghost', onclick: () => { try { const j = JSON.parse(ta.value); if (!j || !Array.isArray(j.patches) || !j.patches.length) throw new Error('x'); const pv = WR.pv; pv.patches = j.patches.slice(0, 100).map((p) => ({ ...p })); pv.title = String(j.title || '').slice(0, 80); pv.note = String(j.note || '').slice(0, 300); L.open = false; say(`Loaded ${pv.patches.length} change${pv.patches.length === 1 ? '' : 's'}. Press "Show on the page" to see them, then "Save iteration".`); } catch { fail(new Error('That is not a valid iteration. It needs a "patches" list.')); } render(); } }, 'Load it')));
+}
